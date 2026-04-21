@@ -1,0 +1,197 @@
+"""StateGraph wiring with SqliteSaver, interrupt() HITL gates, and Send fan-out.
+
+Topology (matches the plan):
+
+  ingest → outline_propose → [interrupt: structure]
+                              ↓
+                        outline → style → [interrupt: style]
+                                          ↓
+                                       layout → [interrupt: layout]
+                                                ↓
+                                           consolidate
+                                                ↓
+                                 Send(html_one, i) × N  (parallel fan-out)
+                                                ↓
+                                              ready
+                                                ⇄ edit_intent (loop)
+
+Regenerate-from-stage uses LangGraph's native `update_state(..., as_node=...)` +
+`invoke(None, config)` pattern; see api/history.py for the HTTP recipe.
+"""
+
+from __future__ import annotations
+
+import os
+import sqlite3
+from pathlib import Path
+from typing import Any
+
+from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.graph import END, START, StateGraph
+from langgraph.types import Send, interrupt
+
+from .nodes.consolidate import consolidate_node
+from .nodes.edit import edit_intent_node
+from .nodes.html_one import html_one_node
+from .nodes.ingest import ingest_node
+from .nodes.layout import layout_node
+from .nodes.outline import outline_node, propose_structures_node
+from .nodes.style import style_node
+from .state import SlideState
+
+DB_PATH = Path(os.getenv("OSZ_CHECKPOINT_DB", "./threads.sqlite"))
+
+
+# ---------------------------------------------------------------------------
+# HITL interrupt wrappers.
+#
+# Each returns a dict merged into state when the human responds.
+# `interrupt(payload)` pauses the graph; the resume value replaces the call's
+# return, which we then unpack.
+# ---------------------------------------------------------------------------
+
+def await_structure(state: SlideState) -> dict[str, Any]:
+    resume = interrupt({
+        "gate": "structure",
+        "scenario_id": state.get("scenario_id"),
+        "candidates": state.get("structure_candidates", []),
+        "hint": "Pick scenario_id + structure_id to proceed.",
+    })
+    # Expected shape: {"scenario_id": "...", "structure_id": "..."}
+    return {
+        "scenario_id": resume.get("scenario_id", state.get("scenario_id")),
+        "structure_id": resume["structure_id"],
+        "current_stage": "outline",
+    }
+
+
+def await_style_review(state: SlideState) -> dict[str, Any]:
+    resume = interrupt({
+        "gate": "style",
+        "visual_style_md": state.get("visual_style_md"),
+        "visual_style": state.get("visual_style"),
+        "hint": "Return {approved: true} to continue, or {revise: 'free-text feedback'} to rerun.",
+    })
+    if resume.get("approved"):
+        return {"current_stage": "layout"}
+    # User wants revisions → loop back to style via a feedback preference
+    feedback = resume.get("revise", "")
+    return {
+        "visual_style_preference": feedback,
+        "current_stage": "style",
+        "visual_style_md": "",
+        "visual_style": {},
+    }
+
+
+def await_layout_review(state: SlideState) -> dict[str, Any]:
+    resume = interrupt({
+        "gate": "layout",
+        "layouts": state.get("layouts"),
+        "hint": (
+            "Per-slide override map, e.g. {'overrides': {3: 'radial', 5: 'timeline_horizontal'}, "
+            "'approved': true}"
+        ),
+    })
+    overrides: dict[int, str] = resume.get("overrides", {}) or {}
+    layouts = list(state.get("layouts") or [])
+    if overrides:
+        from ..catalog import layouts as L
+        from ..catalog.scorer import SlideSignal, pick_pattern
+        for slide_idx_str, override in overrides.items():
+            i = int(slide_idx_str)
+            if i >= len(layouts):
+                continue
+            # Minimal signal — override wins via resolve_override regardless.
+            sig = SlideSignal()
+            decision = pick_pattern(sig, override=override)
+            pattern_id = decision["pattern"]
+            layouts[i] = {
+                **layouts[i],
+                "pattern": pattern_id,
+                "family": L.family_of(pattern_id),
+                "zones": L.get_pattern(pattern_id)["zones"],
+            }
+    if not resume.get("approved"):
+        return {"layouts": layouts}
+    return {"layouts": layouts, "current_stage": "consolidate"}
+
+
+# ---------------------------------------------------------------------------
+# Fan-out conditional edge: from consolidate we Send one task per slide.
+# ---------------------------------------------------------------------------
+
+def fan_out_html(state: SlideState) -> list[Send]:
+    brief = state.get("brief")
+    if not brief:
+        return []
+    slides = brief["slides"]
+    return [Send("html_one", {"slide_idx": s["slide_idx"], "brief": brief}) for s in slides]
+
+
+def post_html(state: SlideState) -> dict[str, Any]:
+    return {"current_stage": "ready"}
+
+
+# ---------------------------------------------------------------------------
+# Graph construction
+# ---------------------------------------------------------------------------
+
+def build_graph(checkpointer: SqliteSaver | None = None):
+    g: StateGraph[SlideState, SlideState, SlideState] = StateGraph(SlideState)
+
+    g.add_node("ingest", ingest_node)
+    g.add_node("propose_structure", propose_structures_node)
+    g.add_node("await_structure", await_structure)
+    g.add_node("outline", outline_node)
+    g.add_node("style", style_node)
+    g.add_node("await_style", await_style_review)
+    g.add_node("layout", layout_node)
+    g.add_node("await_layout", await_layout_review)
+    g.add_node("consolidate", consolidate_node)
+    g.add_node("html_one", html_one_node)
+    g.add_node("post_html", post_html)
+    g.add_node("edit_intent", edit_intent_node)
+
+    g.add_edge(START, "ingest")
+    g.add_edge("ingest", "propose_structure")
+    g.add_edge("propose_structure", "await_structure")
+    g.add_edge("await_structure", "outline")
+    g.add_edge("outline", "style")
+    g.add_edge("style", "await_style")
+
+    # Style gate loops back to style when user requests revisions.
+    def style_next(state: SlideState) -> str:
+        return "style" if state.get("current_stage") == "style" else "layout"
+    g.add_conditional_edges("await_style", style_next, {"style": "style", "layout": "layout"})
+
+    g.add_edge("layout", "await_layout")
+
+    # Layout gate loops back to layout when not approved.
+    def layout_next(state: SlideState) -> str:
+        return "consolidate" if state.get("current_stage") == "consolidate" else "layout"
+    g.add_conditional_edges(
+        "await_layout", layout_next, {"layout": "layout", "consolidate": "consolidate"}
+    )
+
+    g.add_conditional_edges("consolidate", fan_out_html, ["html_one"])
+    g.add_edge("html_one", "post_html")
+    g.add_edge("post_html", END)
+    g.add_edge("edit_intent", END)   # edit_intent merely populates pending_edit_ops
+
+    if checkpointer is None:
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        checkpointer = SqliteSaver(sqlite3.connect(str(DB_PATH), check_same_thread=False))
+
+    return g.compile(checkpointer=checkpointer)
+
+
+# Module-level singleton (lazy built to avoid DB connect at import).
+_compiled = None
+
+
+def get_graph():
+    global _compiled
+    if _compiled is None:
+        _compiled = build_graph()
+    return _compiled

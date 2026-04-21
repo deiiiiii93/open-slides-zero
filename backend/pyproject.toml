@@ -1,0 +1,39 @@
+[project]
+name = "open-slides-zero-backend"
+version = "0.1.0"
+description = "Slide-deck agent backend: LangGraph orchestrator + ZenMux LLM routing."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "langgraph>=0.2.60",
+    "langgraph-checkpoint-sqlite>=2.0.1",
+    "openai>=1.55",
+    "pydantic>=2.9",
+    "tenacity>=9.0",
+    "python-multipart>=0.0.12",
+    "httpx>=0.27",
+    "json-repair>=0.30",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.7",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

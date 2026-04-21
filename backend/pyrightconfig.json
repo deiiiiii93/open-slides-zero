@@ -1,0 +1,8 @@
+{
+  "include": ["app", "tests"],
+  "extraPaths": ["."],
+  "pythonVersion": "3.11",
+  "reportMissingImports": "warning",
+  "reportMissingTypeStubs": "none",
+  "reportAttributeAccessIssue": "warning"
+}
