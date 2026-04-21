@@ -114,7 +114,7 @@ export function App() {
         // Opportunistically merge patch into deck.values so markdown previews
         // appear as soon as each node commits.
         setDeck((prev) =>
-          prev ? { ...prev, values: { ...prev.values, ...sanitize(ev.patch) } } : prev,
+          prev ? { ...prev, values: mergeDeckValues(prev.values, ev.patch) } : prev,
         );
         break;
       }
@@ -177,6 +177,30 @@ export function App() {
     return out;
   }
 
+  function mergeDeckValues(
+    prevValues: Record<string, any>,
+    patch: Record<string, any>,
+  ): Record<string, any> {
+    const next = { ...prevValues, ...sanitize(patch) };
+    if ("html_slides" in patch) {
+      const incoming = patch.html_slides;
+      if (incoming && typeof incoming === "object" && !Array.isArray(incoming)) {
+        const htmlEntries = Object.entries(incoming).filter(
+          ([key, value]) => Number.isInteger(Number(key)) && typeof value === "string",
+        );
+        if (htmlEntries.length > 0) {
+          next.html_slides = {
+            ...(prevValues.html_slides ?? {}),
+            ...Object.fromEntries(htmlEntries),
+          };
+        } else {
+          next.html_slides = prevValues.html_slides ?? {};
+        }
+      }
+    }
+    return next;
+  }
+
   // --- Create / resume handlers ---
 
   async function onCreate(form: {
@@ -231,7 +255,22 @@ export function App() {
   const stage = (deck.values?.current_stage as string) ?? "";
   const hasInterrupt = (deck.interrupts?.length ?? 0) > 0;
   const slides = (deck.values?.html_slides as Record<number, string>) ?? {};
-  const hasSlides = Object.keys(slides).length > 0;
+  const renderedSlideIdx = Object.keys(slides)
+    .map((k) => Number(k))
+    .filter((k) => Number.isInteger(k))
+    .sort((a, b) => a - b);
+  const briefSlides = Array.isArray(deck.values?.brief?.slides)
+    ? (deck.values.brief.slides as Array<{ slide_idx: number }>)
+    : [];
+  const expectedSlideIdx = briefSlides.length
+    ? briefSlides
+        .map((slide) => Number(slide.slide_idx))
+        .filter((idx) => Number.isInteger(idx))
+        .sort((a, b) => a - b)
+    : renderedSlideIdx;
+  const hasSlides = expectedSlideIdx.length > 0;
+  const renderedCount = renderedSlideIdx.length;
+  const expectedCount = expectedSlideIdx.length;
   const outlineMd = deck.values?.outline_md as string | undefined;
   const briefMd = deck.values?.consolidated_brief_md as string | undefined;
 
@@ -263,6 +302,11 @@ export function App() {
           <span style={{ fontSize: 13, color: "#555" }}>
             stage: <code>{stage}</code>
           </span>
+          {stage === "html" && expectedCount > 0 && renderedCount < expectedCount && (
+            <span style={{ fontSize: 13, color: "#64748b" }}>
+              rendered {renderedCount}/{expectedCount}
+            </span>
+          )}
           {busy && (
             <span
               style={{
@@ -389,6 +433,7 @@ export function App() {
           {hasSlides && (
             <DeckCanvas
               slides={slides}
+              slideOrder={expectedSlideIdx}
               currentSlide={currentSlide}
               onSelectSlide={setCurrentSlide}
               aspectRatio={(deck.values?.aspect_ratio as any) ?? "16:9"}
