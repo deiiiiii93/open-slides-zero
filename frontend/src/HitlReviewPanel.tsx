@@ -109,6 +109,32 @@ function StructureGate({
 
 // ---------------- Style ----------------
 
+function hexSwatches(palette: Record<string, any> | undefined): { name: string; hex: string }[] {
+  if (!palette) return [];
+  const ordered = ["primary", "secondary", "accent", "neutral_dark", "neutral_light", "background"];
+  const out: { name: string; hex: string }[] = [];
+  for (const k of ordered) {
+    const v = palette[k];
+    if (v) out.push({ name: k, hex: v });
+  }
+  // Top-level extras (not ordered, not the nested 'roles' dict)
+  for (const [k, v] of Object.entries(palette)) {
+    if (!ordered.includes(k) && k !== "roles" && typeof v === "string" && v.startsWith("#")) {
+      out.push({ name: k, hex: v });
+    }
+  }
+  // Colors nested inside palette.roles
+  const roles = palette.roles;
+  if (roles && typeof roles === "object") {
+    for (const [k, v] of Object.entries(roles)) {
+      if (typeof v === "string" && v.startsWith("#")) {
+        out.push({ name: k, hex: v });
+      }
+    }
+  }
+  return out;
+}
+
 function StyleGate({
   payload,
   onResume,
@@ -117,9 +143,42 @@ function StyleGate({
   onResume: (p: Record<string, unknown>) => Promise<void>;
 }) {
   const [feedback, setFeedback] = useState("");
+  const palette = payload.visual_style?.palette;
+  const swatches = hexSwatches(palette);
+
   return (
     <div style={{ padding: 16, border: "1px solid #e5e5e5", borderRadius: 6 }}>
       <h3>② Review visual style</h3>
+
+      {swatches.length > 0 && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))",
+            gap: 8,
+            marginBottom: 12,
+          }}
+        >
+          {swatches.map(({ name, hex }) => (
+            <div
+              key={name}
+              style={{
+                border: "1px solid #e5e5e5",
+                borderRadius: 6,
+                overflow: "hidden",
+                background: "white",
+              }}
+            >
+              <div style={{ height: 48, background: hex }} />
+              <div style={{ padding: "6px 8px", fontSize: 11, lineHeight: 1.3 }}>
+                <div style={{ fontWeight: 600, textTransform: "capitalize" }}>{name}</div>
+                <code style={{ color: "#666", fontSize: 10 }}>{hex.toUpperCase()}</code>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div
         style={{
           background: "#fafafa",

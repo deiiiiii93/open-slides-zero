@@ -7,6 +7,15 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Auto-load .env from the backend root so ZENMUX_API_KEY etc are available
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+if _env_path.exists():
+    load_dotenv(dotenv_path=_env_path, override=False)
+
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

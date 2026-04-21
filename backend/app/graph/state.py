@@ -87,6 +87,7 @@ Stage = Literal[
 
 class SlideState(TypedDict, total=False):
     # ---- inputs ----
+    deck_name: str
     materials: list[dict[str, Any]]         # serialized Material list
     expected_pages: int
     language: str                           # primary language code (e.g. "zh", "en")

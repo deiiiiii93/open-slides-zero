@@ -8,6 +8,7 @@ type Props = {
   buffersByTag: Record<string, string>;
   activeNode: string | null;
   activeSlide: number | null;
+  elapsedByTag: Record<string, number>;
 };
 
 const NODE_LABELS: Record<string, string> = {
@@ -20,7 +21,16 @@ const NODE_LABELS: Record<string, string> = {
   post_html: "✓ Ready",
 };
 
-export function LiveStream({ buffersByTag, activeNode, activeSlide }: Props) {
+function fmtMs(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const s = Math.round(ms / 100) / 10;
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const rs = Math.round(s % 60);
+  return `${m}m ${rs}s`;
+}
+
+export function LiveStream({ buffersByTag, activeNode, activeSlide, elapsedByTag }: Props) {
   const tagsInOrder = ["propose_structure", "outline", "style", "layout"];
   const htmlTags = Object.keys(buffersByTag)
     .filter((t) => t.startsWith("html:"))
@@ -85,9 +95,17 @@ export function LiveStream({ buffersByTag, activeNode, activeSlide }: Props) {
                 cursor: "pointer",
                 color: "#374151",
                 padding: "2px 0",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
               }}
             >
-              {NODE_LABELS[tag] ?? tag}
+              <span>{NODE_LABELS[tag] ?? tag}</span>
+              {elapsedByTag[tag] && (
+                <span style={{ color: "#6b7280", fontSize: 10, marginLeft: 8 }}>
+                  {fmtMs(elapsedByTag[tag])}
+                </span>
+              )}
             </summary>
             <div
               style={{
@@ -124,6 +142,8 @@ export function LiveStream({ buffersByTag, activeNode, activeSlide }: Props) {
               const idx = Number(tag.split(":")[1]);
               const buf = buffersByTag[tag] ?? "";
               const isActive = activeSlide === idx && activeNode === "html_one";
+              const elapsed = elapsedByTag[tag];
+              const isDone = buf.includes("</html>");
               return (
                 <div
                   key={tag}
@@ -137,6 +157,7 @@ export function LiveStream({ buffersByTag, activeNode, activeSlide }: Props) {
                     style={{
                       display: "flex",
                       justifyContent: "space-between",
+                      alignItems: "center",
                       padding: "4px 8px",
                       background: isActive ? "#eff6ff" : "#f9fafb",
                       fontSize: 11,
@@ -144,7 +165,21 @@ export function LiveStream({ buffersByTag, activeNode, activeSlide }: Props) {
                     }}
                   >
                     <span>slide {idx + 1}</span>
-                    <span style={{ color: "#6b7280" }}>{buf.length.toLocaleString()} chars</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      {elapsed && (
+                        <span style={{ color: "#6b7280", fontSize: 10 }}>
+                          {fmtMs(elapsed)}
+                        </span>
+                      )}
+                      <span style={{ color: "#6b7280" }}>
+                        {buf.length.toLocaleString()} chars
+                      </span>
+                      {isDone && (
+                        <span style={{ color: "#16a34a", fontSize: 13, fontWeight: 700 }}>
+                          &#10003;
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <pre
                     style={{

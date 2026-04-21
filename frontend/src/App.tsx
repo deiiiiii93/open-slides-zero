@@ -31,11 +31,14 @@ export function App() {
   const [currentSlide, setCurrentSlide] = useState<number>(0);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
 
   // Streaming state
   const [buffersByTag, setBuffersByTag] = useState<Record<string, string>>({});
   const [activeNode, setActiveNode] = useState<string | null>(null);
   const [activeSlide, setActiveSlide] = useState<number | null>(null);
+  const [elapsedByTag, setElapsedByTag] = useState<Record<string, number>>({});
+  const tagStartRef = useRef<Record<string, number>>({});
   const abortRef = useRef<AbortController | null>(null);
 
   const refresh = useCallback(
@@ -60,6 +63,8 @@ export function App() {
     setBuffersByTag({});
     setActiveNode(null);
     setActiveSlide(null);
+    setElapsedByTag({});
+    tagStartRef.current = {};
     setErr(null);
     setBusy(true);
 
@@ -90,7 +95,19 @@ export function App() {
       }
       case "token": {
         const tag = ev.tag ?? "unknown";
-        setBuffersByTag((b) => ({ ...b, [tag]: (b[tag] ?? "") + ev.text }));
+        setBuffersByTag((b) => {
+          const next = { ...b, [tag]: (b[tag] ?? "") + ev.text };
+          // Record start time on first token for this tag
+          if (!tagStartRef.current[tag]) {
+            tagStartRef.current = { ...tagStartRef.current, [tag]: Date.now() };
+          }
+          // Finalize elapsed when a slide buffer completes with </html>
+          if (tag.startsWith("html:") && next[tag].includes("</html>") && !elapsedByTag[tag]) {
+            const elapsed = Date.now() - (tagStartRef.current[tag] ?? Date.now());
+            setElapsedByTag((prev) => ({ ...prev, [tag]: elapsed }));
+          }
+          return next;
+        });
         break;
       }
       case "update": {
@@ -109,6 +126,28 @@ export function App() {
       }
       case "done": {
         setDeck(ev.state);
+        // Finalize elapsed for any tags that didn't hit </html>
+        setElapsedByTag((prev) => {
+          const next = { ...prev };
+          for (const [tag, start] of Object.entries(tagStartRef.current)) {
+            if (!next[tag]) {
+              next[tag] = Date.now() - start;
+            }
+          }
+          return next;
+        });
+        const name = (ev.state.values?.deck_name as string) || ev.state.thread_id;
+        const histRaw = JSON.parse(localStorage.getItem("osz.history") || "[]") as (
+          | { id: string; name: string }
+          | string
+        )[];
+        const hist = histRaw.map((h) => (typeof h === "string" ? { id: h, name: h } : h));
+        if (!hist.some((h) => h.id === ev.state.thread_id)) {
+          localStorage.setItem(
+            "osz.history",
+            JSON.stringify([{ id: ev.state.thread_id, name }, ...hist].slice(0, 20)),
+          );
+        }
         break;
       }
       case "comment_saved": {
@@ -149,7 +188,9 @@ export function App() {
   }) {
     const mats: Material[] = [];
     if (form.text.trim()) mats.push({ kind: "text", uri: `text:${form.text}` });
+    const deckName = form.text.trim().split("\n")[0].slice(0, 60) || null;
     const body: CreateDeckBody = {
+      deck_name: deckName,
       expected_pages: form.pages,
       aspect_ratio: form.aspect,
       density_preference: form.density,
@@ -213,7 +254,11 @@ export function App() {
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <strong style={{ fontSize: 18 }}>Open Slides Zero</strong>
           <span style={{ color: "#ccc" }}>·</span>
-          <code style={{ color: "#666" }}>{deck.thread_id}</code>
+          <span style={{ fontSize: 15, color: "#333", maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {(deck.values?.deck_name as string) || deck.thread_id}
+          </span>
+          <span style={{ color: "#ccc" }}>·</span>
+          <code style={{ color: "#999", fontSize: 12 }}>{deck.thread_id}</code>
           <span style={{ color: "#ccc" }}>·</span>
           <span style={{ fontSize: 13, color: "#555" }}>
             stage: <code>{stage}</code>
@@ -234,7 +279,68 @@ export function App() {
             </span>
           )}
         </div>
-        <button onClick={onNewDeck}>New deck</button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, position: "relative" }}>
+          <button onClick={() => setShowHistory((s) => !s)}>History deck</button>
+          <button onClick={onNewDeck}>New deck</button>
+          {showHistory && (
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(100% + 4px)",
+                right: 0,
+                minWidth: 200,
+                background: "#fff",
+                border: "1px solid #e5e5e5",
+                borderRadius: 6,
+                boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+                zIndex: 100,
+                padding: "4px 0",
+              }}
+            >
+              {(() => {
+                const histRaw = JSON.parse(localStorage.getItem("osz.history") || "[]") as (
+                  | { id: string; name: string }
+                  | string
+                )[];
+                const hist = histRaw.map((h) => (typeof h === "string" ? { id: h, name: h } : h));
+                if (hist.length === 0) {
+                  return (
+                    <div style={{ padding: "8px 12px", color: "#999", fontSize: 13 }}>
+                      No history yet
+                    </div>
+                  );
+                }
+                return hist.map((h) => (
+                  <button
+                    key={h.id}
+                    onClick={() => {
+                      setShowHistory(false);
+                      void refresh(h.id).catch((e) => setErr(String(e)));
+                    }}
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "6px 12px",
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      fontSize: 13,
+                      fontFamily: "inherit",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f5f5f5")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                  >
+                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 260 }}>
+                      {h.name}
+                    </div>
+                    <code style={{ fontSize: 11, color: "#999" }}>{h.id}</code>
+                  </button>
+                ));
+              })()}
+            </div>
+          )}
+        </div>
       </header>
 
       {err && (
@@ -299,6 +405,7 @@ export function App() {
               buffersByTag={buffersByTag}
               activeNode={activeNode}
               activeSlide={activeSlide}
+              elapsedByTag={elapsedByTag}
             />
           </aside>
         )}

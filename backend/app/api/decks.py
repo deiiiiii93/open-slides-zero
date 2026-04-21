@@ -31,6 +31,7 @@ class Material(BaseModel):
 
 
 class CreateDeckBody(BaseModel):
+    deck_name: str | None = None
     expected_pages: int = 10
     aspect_ratio: str = "16:9"
     density_preference: str = "balanced"
@@ -40,12 +41,25 @@ class CreateDeckBody(BaseModel):
     materials: list[Material] = Field(default_factory=list)
 
 
+def _derive_deck_name(body: CreateDeckBody) -> str:
+    if body.deck_name:
+        return body.deck_name
+    for m in body.materials:
+        if m.kind == "text" and m.uri.startswith("text:"):
+            text = m.uri.removeprefix("text:")
+            first = text.strip().split("\n")[0]
+            name = first[:60] + ("…" if len(first) > 60 else "")
+            return name if name else "Untitled deck"
+    return "Untitled deck"
+
+
 @router.post("/decks")
 def create_deck(body: CreateDeckBody) -> dict[str, Any]:
     thread_id = uuid.uuid4().hex[:12]
     cfg = config_for(thread_id)
     initial: dict[str, Any] = {
         "thread_id": thread_id,
+        "deck_name": _derive_deck_name(body),
         "materials": [m.model_dump() for m in body.materials],
         "expected_pages": body.expected_pages,
         "aspect_ratio": body.aspect_ratio,

@@ -37,6 +37,7 @@ export type CatalogResponse = {
 // --- Endpoints ---
 
 export type CreateDeckBody = {
+  deck_name?: string | null;
   expected_pages: number;
   aspect_ratio?: string;
   density_preference?: string;
