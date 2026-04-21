@@ -254,6 +254,7 @@ export function App() {
 
   const stage = (deck.values?.current_stage as string) ?? "";
   const hasInterrupt = (deck.interrupts?.length ?? 0) > 0;
+  const hasPendingTasks = (deck.next?.length ?? 0) > 0;
   const slides = (deck.values?.html_slides as Record<number, string>) ?? {};
   const renderedSlideIdx = Object.keys(slides)
     .map((k) => Number(k))
@@ -404,6 +405,41 @@ export function App() {
         <main style={{ minWidth: 0 }}>
           {hasInterrupt && (
             <HitlReviewPanel deck={deck} catalog={catalog} onResume={onResume} />
+          )}
+
+          {hasPendingTasks && !hasInterrupt && !busy && (
+            <div
+              style={{
+                padding: 12,
+                marginBottom: 12,
+                border: "1px solid #fbbf24",
+                borderRadius: 6,
+                background: "#fffbeb",
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+              }}
+            >
+              <span style={{ fontSize: 13, color: "#92400e" }}>
+                {renderedCount < expectedCount
+                  ? `Rendering paused: ${renderedCount}/${expectedCount} slides complete.`
+                  : "Generation is paused — resume to continue."}
+              </span>
+              <button
+                style={{
+                  padding: "4px 12px",
+                  fontSize: 13,
+                  background: "#f59e0b",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 4,
+                  cursor: "pointer",
+                }}
+                onClick={() => onResume({})}
+              >
+                Resume generation
+              </button>
+            </div>
           )}
 
           {!hasInterrupt && !hasSlides && outlineMd && (

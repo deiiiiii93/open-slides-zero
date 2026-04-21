@@ -111,14 +111,21 @@ def html_one_node(state: dict[str, Any]) -> dict[str, Any]:
     messages = _slide_prompt(slide, brief, feedback=feedback)
     tag = f"html:{slide_idx}"
     push_event({"node": "html_one", "slide_idx": slide_idx, "state": "started"})
-    with tagged_stream(tag):
-        html = zenmux.chat(
-            get_model("html"),
-            messages,
-            temperature=0.4,
-            max_tokens=6000,
-            stream=True,
-        )
+    try:
+        with tagged_stream(tag):
+            html = zenmux.chat(
+                get_model("html"),
+                messages,
+                temperature=0.4,
+                max_tokens=6000,
+                stream=True,
+            )
+    except Exception as exc:
+        push_event({"node": "html_one", "slide_idx": slide_idx, "state": "error", "error": str(exc)})
+        return {
+            "errors": [f"html_one slide {slide_idx}: {exc}"],
+            "html_slides": {slide_idx: f"<!-- html generation failed: {exc} -->"},
+        }
     push_event({"node": "html_one", "slide_idx": slide_idx, "state": "finished"})
 
     # Strip any markdown code fences the model may add despite instructions.

@@ -108,7 +108,7 @@ def _is_retriable(exc: BaseException) -> bool:
 
 
 _retry = retry(
-    retry=retry_if_exception_type(Exception),  # narrowed below via `reraise` filter
+    retry=retry_if_exception_type(RetriableError),
     stop=stop_after_attempt(4),
     wait=wait_exponential(multiplier=1, min=1, max=20),
     reraise=True,
@@ -252,7 +252,7 @@ def _oneshot_completion(**kwargs: Any) -> str:
         resp = _client().chat.completions.create(**kwargs)
     except Exception as e:
         if _is_retriable(e):
-            raise
+            raise RetriableError from e
         raise
     return resp.choices[0].message.content or ""
 
@@ -272,6 +272,6 @@ def _stream_completion(**kwargs: Any) -> str:
                 push_token(piece)
     except Exception as e:
         if _is_retriable(e):
-            raise
+            raise RetriableError from e
         raise
     return "".join(chunks)
