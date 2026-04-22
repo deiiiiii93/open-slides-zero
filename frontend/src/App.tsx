@@ -21,6 +21,12 @@ import {
   type Material,
 } from "./api";
 import { streamSSE, type StreamEvent } from "./sse";
+import {
+  exportHtmlSingle,
+  exportHtmlZip,
+  exportPptx,
+  hasExportableSlides,
+} from "./exporter";
 
 const CANVAS_W = 960;
 const CANVAS_H = 540;
@@ -32,6 +38,8 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [showExport, setShowExport] = useState(false);
+  const [exporting, setExporting] = useState<string | null>(null);
 
   // Streaming state
   const [buffersByTag, setBuffersByTag] = useState<Record<string, string>>({});
@@ -248,6 +256,22 @@ export function App() {
     setBuffersByTag({});
   }
 
+  async function runExport(
+    label: string,
+    fn: (d: DeckState) => Promise<void>,
+  ) {
+    if (!deck) return;
+    setShowExport(false);
+    setExporting(label);
+    try {
+      await fn(deck);
+    } catch (e) {
+      setErr(`Export failed: ${String(e)}`);
+    } finally {
+      setExporting(null);
+    }
+  }
+
   // --- Render ---
 
   if (!deck) return <CreateForm onSubmit={onCreate} busy={busy} err={err} />;
@@ -325,7 +349,67 @@ export function App() {
           )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, position: "relative" }}>
-          <button onClick={() => setShowHistory((s) => !s)}>History deck</button>
+          <button
+            onClick={() => {
+              setShowExport(false);
+              setShowHistory((s) => !s);
+            }}
+          >
+            History deck
+          </button>
+          <div style={{ position: "relative" }}>
+            <button
+              disabled={!hasExportableSlides(deck) || exporting !== null}
+              onClick={() => {
+                setShowHistory(false);
+                setShowExport((s) => !s);
+              }}
+            >
+              {exporting ? `Exporting ${exporting}…` : "Export"}
+            </button>
+            {showExport && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 4px)",
+                  right: 0,
+                  minWidth: 200,
+                  background: "#fff",
+                  border: "1px solid #e5e5e5",
+                  borderRadius: 6,
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+                  zIndex: 100,
+                  padding: "4px 0",
+                }}
+              >
+                {[
+                  { key: "html", label: "HTML (single file)", fn: exportHtmlSingle },
+                  { key: "zip", label: "HTML (zip of slides)", fn: exportHtmlZip },
+                  { key: "pptx", label: "PPTX (editable)", fn: exportPptx },
+                ].map((opt) => (
+                  <button
+                    key={opt.key}
+                    onClick={() => void runExport(opt.key, opt.fn)}
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "6px 12px",
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      fontSize: 13,
+                      fontFamily: "inherit",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f5f5f5")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button onClick={onNewDeck}>New deck</button>
           {showHistory && (
             <div
