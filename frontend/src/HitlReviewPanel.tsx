@@ -1,15 +1,41 @@
-// Three HITL review panels — one per gate. The `gate` field on the interrupt
-// payload determines which UI to show.
+// Shared step panels for both live HITL interrupts and ready-time review.
 
-import { useState } from "react";
-import type { DeckState, CatalogResponse } from "./api";
+import { useMemo, useState } from "react";
+import type { CatalogResponse, DeckState } from "./api";
 import { LayoutWireframe } from "./LayoutWireframe";
 import { Markdown } from "./Markdown";
 
-type Props = {
-  deck: DeckState;
+type StructureSubmit = { scenario_id: string; structure_id: string };
+type StyleSubmit = { feedback: string };
+type LayoutSubmit = { overrides: Record<number, string> };
+
+type StructureStageProps = {
   catalog: CatalogResponse | null;
-  onResume: (payload: Record<string, unknown>) => Promise<void>;
+  scenarioId?: string;
+  structureId?: string;
+  candidates?: string[];
+  title: string;
+  submitLabel: string;
+  onSubmit: (payload: StructureSubmit) => Promise<void>;
+};
+
+type StyleStageProps = {
+  visualStyleMd?: string;
+  visualStyle?: Record<string, any>;
+  title: string;
+  submitLabel: string;
+  onSubmit: (payload: StyleSubmit) => Promise<void>;
+  approveLabel?: string;
+  onApprove?: () => Promise<void>;
+};
+
+type LayoutStageProps = {
+  catalog: CatalogResponse | null;
+  layouts?: Array<Record<string, any>>;
+  title: string;
+  submitLabel: string;
+  onSubmit: (payload: LayoutSubmit) => Promise<void>;
+  submitDisabledWhenUnchanged?: boolean;
 };
 
 function firstInterrupt(deck: DeckState): any {
@@ -18,51 +44,81 @@ function firstInterrupt(deck: DeckState): any {
   return typeof i === "object" && "value" in i ? (i as any).value : i;
 }
 
-export function HitlReviewPanel({ deck, catalog, onResume }: Props) {
+export function HitlReviewPanel({ deck, catalog, onResume }: {
+  deck: DeckState;
+  catalog: CatalogResponse | null;
+  onResume: (payload: Record<string, unknown>) => Promise<void>;
+}) {
   const payload = firstInterrupt(deck);
   if (!payload) return null;
 
   const gate = payload.gate as "structure" | "style" | "layout";
-
   if (gate === "structure") {
-    return <StructureGate payload={payload} catalog={catalog} onResume={onResume} />;
+    return (
+      <StructureStage
+        catalog={catalog}
+        scenarioId={payload.scenario_id}
+        structureId={payload.candidates?.[0]}
+        candidates={payload.candidates}
+        title="① Pick scenario + narrative structure"
+        submitLabel="Continue"
+        onSubmit={onResume}
+      />
+    );
   }
   if (gate === "style") {
-    return <StyleGate payload={payload} onResume={onResume} />;
+    return (
+      <StyleStage
+        title="② Review visual style"
+        submitLabel="Revise"
+        approveLabel="Approve & continue"
+        visualStyleMd={payload.visual_style_md}
+        visualStyle={payload.visual_style}
+        onSubmit={async ({ feedback }) => onResume({ revise: feedback })}
+        onApprove={async () => onResume({ approved: true })}
+      />
+    );
   }
   if (gate === "layout") {
-    return <LayoutGate payload={payload} catalog={catalog} onResume={onResume} />;
+    return (
+      <LayoutStage
+        catalog={catalog}
+        layouts={payload.layouts}
+        title="③ Review layouts (scores shown)"
+        submitLabel="Approve & render HTML"
+        onSubmit={async ({ overrides }) => onResume({ approved: true, overrides })}
+      />
+    );
   }
   return <pre>{JSON.stringify(payload, null, 2)}</pre>;
 }
 
-// ---------------- Structure ----------------
-
-function StructureGate({
-  payload,
+export function StructureStage({
   catalog,
-  onResume,
-}: {
-  payload: any;
-  catalog: CatalogResponse | null;
-  onResume: (p: Record<string, unknown>) => Promise<void>;
-}) {
-  const [scenarioId, setScenarioId] = useState<string>(payload.scenario_id ?? "");
-  const [structureId, setStructureId] = useState<string>(payload.candidates?.[0] ?? "");
+  scenarioId,
+  structureId,
+  candidates,
+  title,
+  submitLabel,
+  onSubmit,
+}: StructureStageProps) {
+  const [selectedScenarioId, setSelectedScenarioId] = useState<string>(scenarioId ?? "");
+  const [selectedStructureId, setSelectedStructureId] = useState<string>(structureId ?? "");
 
-  const structuresById = Object.fromEntries(
-    (catalog?.structures ?? []).map((s) => [s.id, s]),
+  const structuresById = useMemo(
+    () => Object.fromEntries((catalog?.structures ?? []).map((s) => [s.id, s])),
+    [catalog],
   );
 
   const allowedStructures =
-    catalog?.scenarios.find((s) => s.id === scenarioId)?.structures ?? payload.candidates ?? [];
+    catalog?.scenarios.find((s) => s.id === selectedScenarioId)?.structures ?? candidates ?? [];
 
   return (
     <div style={{ padding: 16, border: "1px solid #e5e5e5", borderRadius: 6 }}>
-      <h3>① Pick scenario + narrative structure</h3>
+      <h3>{title}</h3>
       <label>
         Scenario:{" "}
-        <select value={scenarioId} onChange={(e) => setScenarioId(e.target.value)}>
+        <select value={selectedScenarioId} onChange={(e) => setSelectedScenarioId(e.target.value)}>
           <option value="">—</option>
           {(catalog?.scenarios ?? []).map((s) => (
             <option key={s.id} value={s.id}>
@@ -79,9 +135,9 @@ function StructureGate({
             return (
               <button
                 key={sid}
-                onClick={() => setStructureId(sid)}
+                onClick={() => setSelectedStructureId(sid)}
                 style={{
-                  border: sid === structureId ? "2px solid #2563eb" : "1px solid #e5e5e5",
+                  border: sid === selectedStructureId ? "2px solid #2563eb" : "1px solid #e5e5e5",
                   padding: 10,
                   textAlign: "left",
                   background: "white",
@@ -97,17 +153,20 @@ function StructureGate({
       </div>
       <div style={{ marginTop: 16 }}>
         <button
-          disabled={!scenarioId || !structureId}
-          onClick={() => onResume({ scenario_id: scenarioId, structure_id: structureId })}
+          disabled={!selectedScenarioId || !selectedStructureId}
+          onClick={() =>
+            onSubmit({
+              scenario_id: selectedScenarioId,
+              structure_id: selectedStructureId,
+            })
+          }
         >
-          Continue
+          {submitLabel}
         </button>
       </div>
     </div>
   );
 }
-
-// ---------------- Style ----------------
 
 function hexSwatches(palette: Record<string, any> | undefined): { name: string; hex: string }[] {
   if (!palette) return [];
@@ -117,13 +176,11 @@ function hexSwatches(palette: Record<string, any> | undefined): { name: string; 
     const v = palette[k];
     if (v) out.push({ name: k, hex: v });
   }
-  // Top-level extras (not ordered, not the nested 'roles' dict)
   for (const [k, v] of Object.entries(palette)) {
     if (!ordered.includes(k) && k !== "roles" && typeof v === "string" && v.startsWith("#")) {
       out.push({ name: k, hex: v });
     }
   }
-  // Colors nested inside palette.roles
   const roles = palette.roles;
   if (roles && typeof roles === "object") {
     for (const [k, v] of Object.entries(roles)) {
@@ -135,21 +192,21 @@ function hexSwatches(palette: Record<string, any> | undefined): { name: string; 
   return out;
 }
 
-function StyleGate({
-  payload,
-  onResume,
-}: {
-  payload: any;
-  onResume: (p: Record<string, unknown>) => Promise<void>;
-}) {
+export function StyleStage({
+  visualStyleMd,
+  visualStyle,
+  title,
+  submitLabel,
+  onSubmit,
+  approveLabel,
+  onApprove,
+}: StyleStageProps) {
   const [feedback, setFeedback] = useState("");
-  const palette = payload.visual_style?.palette;
-  const swatches = hexSwatches(palette);
+  const swatches = hexSwatches(visualStyle?.palette);
 
   return (
     <div style={{ padding: 16, border: "1px solid #e5e5e5", borderRadius: 6 }}>
-      <h3>② Review visual style</h3>
-
+      <h3>{title}</h3>
       {swatches.length > 0 && (
         <div
           style={{
@@ -189,46 +246,47 @@ function StyleGate({
           borderRadius: 4,
         }}
       >
-        <Markdown>{payload.visual_style_md ?? ""}</Markdown>
+        <Markdown>{visualStyleMd ?? ""}</Markdown>
       </div>
+
       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-        <button onClick={() => onResume({ approved: true })}>Approve & continue</button>
+        {approveLabel && onApprove && (
+          <button onClick={() => void onApprove()}>{approveLabel}</button>
+        )}
         <input
           style={{ flex: 1 }}
-          placeholder="Revision feedback (e.g. ‘use a warmer palette, more editorial serifs’)"
+          placeholder="Revision feedback"
           value={feedback}
           onChange={(e) => setFeedback(e.target.value)}
         />
-        <button disabled={!feedback.trim()} onClick={() => onResume({ revise: feedback.trim() })}>
-          Revise
+        <button disabled={!feedback.trim()} onClick={() => onSubmit({ feedback: feedback.trim() })}>
+          {submitLabel}
         </button>
       </div>
     </div>
   );
 }
 
-// ---------------- Layout ----------------
-
-function LayoutGate({
-  payload,
+export function LayoutStage({
   catalog,
-  onResume,
-}: {
-  payload: any;
-  catalog: CatalogResponse | null;
-  onResume: (p: Record<string, unknown>) => Promise<void>;
-}) {
+  layouts,
+  title,
+  submitLabel,
+  onSubmit,
+  submitDisabledWhenUnchanged = false,
+}: LayoutStageProps) {
   const [overrides, setOverrides] = useState<Record<number, string>>({});
-  const layouts = payload.layouts ?? [];
+  const rows = layouts ?? [];
   const patternIds = Object.keys(catalog?.patterns ?? {});
+  const hasOverrides = Object.values(overrides).some(Boolean);
 
   return (
     <div style={{ padding: 16, border: "1px solid #e5e5e5", borderRadius: 6 }}>
-      <h3>③ Review layouts (scores shown)</h3>
+      <h3>{title}</h3>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
-        {layouts.map((l: any) => (
+        {rows.map((l) => (
           <div
-            key={l.slide_idx}
+            key={String(l.slide_idx)}
             style={{
               border: "1px solid #e5e5e5",
               padding: 12,
@@ -240,24 +298,24 @@ function LayoutGate({
             }}
           >
             <LayoutWireframe
-              pattern={l.pattern}
-              family={l.family}
-              zones={l.zones ?? []}
+              pattern={String(l.pattern)}
+              family={String(l.family)}
+              zones={(l.zones as string[]) ?? []}
               width={320}
               aspectRatio="16:9"
             />
             <div style={{ minWidth: 0 }}>
               <div style={{ fontWeight: 600, lineHeight: 1.3 }}>
-                {l.slide_idx + 1}. {l.title}
+                {Number(l.slide_idx) + 1}. {String(l.title)}
               </div>
               <div style={{ fontSize: 12, color: "#555", marginTop: 4 }}>
-                <code>{l.pattern}</code>
-                <span style={{ color: "#999" }}> · {l.family}</span>
+                <code>{String(l.pattern)}</code>
+                <span style={{ color: "#999" }}> · {String(l.family)}</span>
               </div>
               <details style={{ marginTop: 6 }}>
                 <summary style={{ fontSize: 12, cursor: "pointer" }}>scores</summary>
                 <ul style={{ fontSize: 11, margin: "4px 0 0 0", paddingLeft: 16 }}>
-                  {(l.ranking_top3 ?? []).map((r: any, i: number) => (
+                  {((l.ranking_top3 as Array<{ family: string; score: number }>) ?? []).map((r, i) => (
                     <li key={i}>
                       <code>{r.family}</code>: {Number(r.score).toFixed(2)}
                     </li>
@@ -267,9 +325,12 @@ function LayoutGate({
               <label style={{ display: "block", marginTop: 8, fontSize: 12 }}>
                 Override:{" "}
                 <select
-                  value={overrides[l.slide_idx] ?? ""}
+                  value={overrides[Number(l.slide_idx)] ?? ""}
                   onChange={(e) =>
-                    setOverrides({ ...overrides, [l.slide_idx]: e.target.value })
+                    setOverrides((prev) => ({
+                      ...prev,
+                      [Number(l.slide_idx)]: e.target.value,
+                    }))
                   }
                   style={{ maxWidth: "100%" }}
                 >
@@ -287,11 +348,35 @@ function LayoutGate({
       </div>
       <div style={{ marginTop: 12 }}>
         <button
-          onClick={() => onResume({ approved: true, overrides })}
+          disabled={submitDisabledWhenUnchanged && !hasOverrides}
+          onClick={() => onSubmit({ overrides })}
         >
-          Approve & render HTML
+          {submitLabel}
         </button>
       </div>
     </div>
+  );
+}
+
+export function BriefReview({ briefMd }: { briefMd?: string }) {
+  return (
+    <section style={{ padding: 16, border: "1px solid #e5e5e5", borderRadius: 6 }}>
+      <h3>④ Consolidated brief</h3>
+      <p style={{ marginTop: 0, color: "#555" }}>
+        This is the pre-render merged brief. To change it, go back to structure, style, or layout and create a fork from there.
+      </p>
+      <div
+        style={{
+          background: "#fafafa",
+          padding: 12,
+          border: "1px solid #e5e5e5",
+          borderRadius: 4,
+          maxHeight: 560,
+          overflow: "auto",
+        }}
+      >
+        <Markdown>{briefMd ?? ""}</Markdown>
+      </div>
+    </section>
   );
 }

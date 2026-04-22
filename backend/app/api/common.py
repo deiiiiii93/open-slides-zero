@@ -18,10 +18,10 @@ def graph() -> CompiledStateGraph:
     return get_graph()
 
 
-def current_state(thread_id: str) -> dict[str, Any]:
+def current_state(thread_id: str, *, source_thread_id: str | None = None) -> dict[str, Any]:
     g = graph()
     snap = g.get_state(config_for(thread_id))
-    return {
+    state = {
         "thread_id": thread_id,
         "checkpoint_id": snap.config["configurable"].get("checkpoint_id"),
         "values": snap.values,
@@ -29,6 +29,9 @@ def current_state(thread_id: str) -> dict[str, Any]:
         "interrupts": [i.value if hasattr(i, "value") else i for i in (snap.interrupts or [])],
         "created_at": getattr(snap, "created_at", None),
     }
+    if source_thread_id is not None:
+        state["source_thread_id"] = source_thread_id
+    return state
 
 
 def mirror_to_disk(thread_id: str) -> None:

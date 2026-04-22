@@ -30,6 +30,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send, interrupt
 
+from .layout_overrides import apply_layout_overrides
 from .nodes.consolidate import consolidate_node
 from .nodes.edit import edit_intent_node
 from .nodes.html_one import html_one_node
@@ -94,24 +95,7 @@ def await_layout_review(state: SlideState) -> dict[str, Any]:
         ),
     })
     overrides: dict[int, str] = resume.get("overrides", {}) or {}
-    layouts = list(state.get("layouts") or [])
-    if overrides:
-        from ..catalog import layouts as L
-        from ..catalog.scorer import SlideSignal, pick_pattern
-        for slide_idx_str, override in overrides.items():
-            i = int(slide_idx_str)
-            if i >= len(layouts):
-                continue
-            # Minimal signal — override wins via resolve_override regardless.
-            sig = SlideSignal()
-            decision = pick_pattern(sig, override=override)
-            pattern_id = decision["pattern"]
-            layouts[i] = {
-                **layouts[i],
-                "pattern": pattern_id,
-                "family": L.family_of(pattern_id),
-                "zones": L.get_pattern(pattern_id)["zones"],
-            }
+    layouts = apply_layout_overrides(state.get("layouts"), overrides)
     if not resume.get("approved"):
         return {"layouts": layouts}
     return {"layouts": layouts, "current_stage": "consolidate"}

@@ -11,12 +11,17 @@ Implements the exact recipe from the plan:
 
 from __future__ import annotations
 
+import sqlite3
+import uuid
 from typing import Any
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..artifacts import store
+from ..graph import graph as graph_module
+from ..graph.layout_overrides import apply_layout_overrides
 from .common import config_for, current_state, graph, mirror_to_disk
 
 router = APIRouter()
@@ -71,6 +76,81 @@ def _find_prestage_checkpoint(g: Any, cfg: dict[str, Any], stage: str) -> dict[s
         if target_node in (snap.next or ()):
             return snap.config
     return None
+
+
+def _default_fork_name(values: dict[str, Any], thread_id: str) -> str:
+    return f"{values.get('deck_name') or thread_id} (fork)"
+
+
+def _clone_checkpoint_lineage(
+    source_thread_id: str,
+    target_cfg: dict[str, Any],
+    new_thread_id: str,
+) -> dict[str, Any]:
+    checkpoint_ns = target_cfg["configurable"].get("checkpoint_ns", "")
+    checkpoint_id = target_cfg["configurable"].get("checkpoint_id")
+    if not checkpoint_id:
+        raise HTTPException(status_code=409, detail="Target checkpoint_id missing.")
+
+    lineage: list[tuple[str, str | None, str | None, bytes, bytes | None]] = []
+    conn = sqlite3.connect(str(graph_module.DB_PATH))
+    try:
+        current_id = checkpoint_id
+        while current_id:
+            row = conn.execute(
+                """
+                SELECT checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata
+                FROM checkpoints
+                WHERE thread_id = ? AND checkpoint_ns = ? AND checkpoint_id = ?
+                """,
+                (source_thread_id, checkpoint_ns, current_id),
+            ).fetchone()
+            if row is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Missing checkpoint lineage row for {current_id}.",
+                )
+            lineage.append(row)
+            current_id = row[1]
+
+        with conn:
+            for row_checkpoint_id, parent_checkpoint_id, row_type, checkpoint, metadata in reversed(lineage):
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO checkpoints
+                    (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        new_thread_id,
+                        checkpoint_ns,
+                        row_checkpoint_id,
+                        parent_checkpoint_id,
+                        row_type,
+                        checkpoint,
+                        metadata,
+                    ),
+                )
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO writes
+                    (thread_id, checkpoint_ns, checkpoint_id, task_id, idx, channel, type, value)
+                    SELECT ?, checkpoint_ns, checkpoint_id, task_id, idx, channel, type, value
+                    FROM writes
+                    WHERE thread_id = ? AND checkpoint_ns = ? AND checkpoint_id = ?
+                    """,
+                    (new_thread_id, source_thread_id, checkpoint_ns, row_checkpoint_id),
+                )
+    finally:
+        conn.close()
+
+    return {
+        "configurable": {
+            "thread_id": new_thread_id,
+            "checkpoint_ns": checkpoint_ns,
+            "checkpoint_id": checkpoint_id,
+        }
+    }
 
 
 def _regenerate_from(
@@ -132,6 +212,62 @@ def _regenerate_from(
     return {"ok": True, "from_stage": from_stage, "state": current_state(thread_id)}
 
 
+def _fork_from_review(
+    thread_id: str,
+    review_stage: Literal["structure", "style", "layout"],
+    *,
+    scenario_id: str | None = None,
+    structure_id: str | None = None,
+    feedback: str | None = None,
+    overrides: dict[int | str, str] | None = None,
+    deck_name: str | None = None,
+) -> dict[str, Any]:
+    g = graph()
+    cfg = config_for(thread_id)
+    snap = g.get_state(cfg)  # type: ignore[arg-type]
+    if not snap or not snap.values:
+        raise HTTPException(status_code=404, detail="Unknown deck")
+    if snap.values.get("current_stage") != "ready":
+        raise HTTPException(status_code=409, detail="Deck must be in ready state to fork from review.")
+
+    new_thread_id = uuid.uuid4().hex[:12]
+    fork_name = deck_name or _default_fork_name(snap.values, thread_id)
+    patch: dict[str, Any] = {
+        "thread_id": new_thread_id,
+        "deck_name": fork_name,
+    }
+
+    if review_stage == "structure":
+        if not scenario_id or not structure_id:
+            raise HTTPException(status_code=400, detail="scenario_id and structure_id are required.")
+        target_stage = "outline"
+        patch.update({
+            "scenario_id": scenario_id,
+            "structure_id": structure_id,
+        })
+    elif review_stage == "style":
+        if not feedback or not feedback.strip():
+            raise HTTPException(status_code=400, detail="feedback is required.")
+        target_stage = "style"
+        patch["visual_style_preference"] = feedback.strip()
+    else:
+        target_stage = "consolidate"
+        patch["layouts"] = apply_layout_overrides(snap.values.get("layouts"), overrides)
+
+    source_target_cfg = _find_prestage_checkpoint(g, cfg, target_stage)
+    if source_target_cfg is None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"No prior checkpoint found with node '{_STAGE_TO_NODE.get(target_stage)}' pending.",
+        )
+
+    new_target_cfg = _clone_checkpoint_lineage(thread_id, source_target_cfg, new_thread_id)
+    new_cfg = g.update_state(new_target_cfg, patch)  # type: ignore[arg-type]
+    g.invoke(None, new_cfg)  # type: ignore[arg-type]
+    mirror_to_disk(new_thread_id)
+    return current_state(new_thread_id, source_thread_id=thread_id)
+
+
 # ---------------------------------------------------------------------------
 # HTTP surface
 # ---------------------------------------------------------------------------
@@ -143,6 +279,31 @@ class RegenerateBody(BaseModel):
     affected_slides: list[int] | None = None
 
 
+class ForkFromStructureBody(BaseModel):
+    review_stage: Literal["structure"]
+    scenario_id: str
+    structure_id: str
+    deck_name: str | None = None
+
+
+class ForkFromStyleBody(BaseModel):
+    review_stage: Literal["style"]
+    feedback: str
+    deck_name: str | None = None
+
+
+class ForkFromLayoutBody(BaseModel):
+    review_stage: Literal["layout"]
+    overrides: dict[int | str, str] = Field(default_factory=dict)
+    deck_name: str | None = None
+
+
+ForkFromReviewBody = Annotated[
+    ForkFromStructureBody | ForkFromStyleBody | ForkFromLayoutBody,
+    Field(discriminator="review_stage"),
+]
+
+
 @router.post("/decks/{thread_id}/regenerate")
 def regenerate(thread_id: str, body: RegenerateBody) -> dict[str, Any]:
     return _regenerate_from(
@@ -150,6 +311,31 @@ def regenerate(thread_id: str, body: RegenerateBody) -> dict[str, Any]:
         body.from_stage,
         body.patch,
         affected_slides=body.affected_slides,
+    )
+
+
+@router.post("/decks/{thread_id}/fork_from_review")
+def fork_from_review(thread_id: str, body: ForkFromReviewBody) -> dict[str, Any]:
+    if body.review_stage == "structure":
+        return _fork_from_review(
+            thread_id,
+            "structure",
+            scenario_id=body.scenario_id,
+            structure_id=body.structure_id,
+            deck_name=body.deck_name,
+        )
+    if body.review_stage == "style":
+        return _fork_from_review(
+            thread_id,
+            "style",
+            feedback=body.feedback,
+            deck_name=body.deck_name,
+        )
+    return _fork_from_review(
+        thread_id,
+        "layout",
+        overrides=body.overrides,
+        deck_name=body.deck_name,
     )
 
 

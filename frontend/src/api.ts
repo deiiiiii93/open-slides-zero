@@ -23,6 +23,7 @@ export type Material = { kind: "text" | "file" | "image"; uri: string; note?: st
 export type DeckState = {
   thread_id: string;
   checkpoint_id?: string;
+  source_thread_id?: string;
   values: Record<string, any>;
   next: string[];
   interrupts: any[];
@@ -56,6 +57,30 @@ export type DeckListItem = {
   created_at: string | null;
 };
 
+export type ForkFromStructureBody = {
+  review_stage: "structure";
+  scenario_id: string;
+  structure_id: string;
+  deck_name?: string | null;
+};
+
+export type ForkFromStyleBody = {
+  review_stage: "style";
+  feedback: string;
+  deck_name?: string | null;
+};
+
+export type ForkFromLayoutBody = {
+  review_stage: "layout";
+  overrides: Record<number, string>;
+  deck_name?: string | null;
+};
+
+export type ForkFromReviewBody =
+  | ForkFromStructureBody
+  | ForkFromStyleBody
+  | ForkFromLayoutBody;
+
 export const api = {
   listDecks: () => http<{ decks: DeckListItem[] }>("GET", "/decks"),
 
@@ -81,6 +106,9 @@ export const api = {
 
   regenerate: (id: string, from_stage: string, patch?: Record<string, any>, affected_slides?: number[]) =>
     http<DeckState>("POST", `/decks/${id}/regenerate`, { from_stage, patch, affected_slides }),
+
+  forkFromReview: (id: string, body: ForkFromReviewBody) =>
+    http<DeckState>("POST", `/decks/${id}/fork_from_review`, body),
 
   history: (id: string) =>
     http<{ thread_id: string; history: Array<{ checkpoint_id: string; stage: string; created_at: string }> }>(

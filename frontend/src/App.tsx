@@ -9,7 +9,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DeckCanvas } from "./DeckCanvas";
 import { CommentLayer } from "./CommentLayer";
-import { HitlReviewPanel } from "./HitlReviewPanel";
+import {
+  BriefReview,
+  HitlReviewPanel,
+  LayoutStage,
+  StructureStage,
+  StyleStage,
+} from "./HitlReviewPanel";
 import { LiveStream } from "./LiveStream";
 import { Markdown } from "./Markdown";
 import {
@@ -19,6 +25,7 @@ import {
   type CreateDeckBody,
   type DeckListItem,
   type DeckState,
+  type ForkFromReviewBody,
   type Material,
 } from "./api";
 import { streamSSE, type StreamEvent } from "./sse";
@@ -31,6 +38,14 @@ import {
 
 const CANVAS_W = 960;
 const CANVAS_H = 540;
+type ReviewStage = "structure" | "style" | "layout" | "brief" | "ready";
+const REVIEW_STAGES: Array<{ id: ReviewStage; label: string }> = [
+  { id: "structure", label: "Structure" },
+  { id: "style", label: "Style" },
+  { id: "layout", label: "Layout" },
+  { id: "brief", label: "Brief" },
+  { id: "ready", label: "Final deck" },
+];
 
 export function App() {
   const [deck, setDeck] = useState<DeckState | null>(null);
@@ -42,6 +57,7 @@ export function App() {
   const [showExport, setShowExport] = useState(false);
   const [exporting, setExporting] = useState<string | null>(null);
   const [deckList, setDeckList] = useState<DeckListItem[] | null>(null);
+  const [selectedReviewStage, setSelectedReviewStage] = useState<ReviewStage>("ready");
 
   // Streaming state
   const [buffersByTag, setBuffersByTag] = useState<Record<string, string>>({});
@@ -73,6 +89,31 @@ export function App() {
     const saved = localStorage.getItem("osz.thread_id");
     if (saved) void refresh(saved).catch((e) => setErr(String(e)));
   }, [refresh]);
+
+  useEffect(() => {
+    setSelectedReviewStage("ready");
+    setCurrentSlide(0);
+  }, [deck?.thread_id]);
+
+  useEffect(() => {
+    if ((deck?.values?.current_stage as string | undefined) !== "ready" || (deck?.interrupts?.length ?? 0) > 0) {
+      setSelectedReviewStage("ready");
+    }
+  }, [deck?.values?.current_stage, deck?.interrupts?.length]);
+
+  const rememberDeck = useCallback((nextDeck: DeckState) => {
+    const name = (nextDeck.values?.deck_name as string) || nextDeck.thread_id;
+    const histRaw = JSON.parse(localStorage.getItem("osz.history") || "[]") as (
+      | { id: string; name: string }
+      | string
+    )[];
+    const hist = histRaw.map((h) => (typeof h === "string" ? { id: h, name: h } : h));
+    const filtered = hist.filter((h) => h.id !== nextDeck.thread_id);
+    localStorage.setItem(
+      "osz.history",
+      JSON.stringify([{ id: nextDeck.thread_id, name }, ...filtered].slice(0, 20)),
+    );
+  }, []);
 
   // Handle a single SSE event stream to completion.
   async function consumeStream(url: string, body: unknown): Promise<void> {
@@ -155,18 +196,7 @@ export function App() {
           }
           return next;
         });
-        const name = (ev.state.values?.deck_name as string) || ev.state.thread_id;
-        const histRaw = JSON.parse(localStorage.getItem("osz.history") || "[]") as (
-          | { id: string; name: string }
-          | string
-        )[];
-        const hist = histRaw.map((h) => (typeof h === "string" ? { id: h, name: h } : h));
-        if (!hist.some((h) => h.id === ev.state.thread_id)) {
-          localStorage.setItem(
-            "osz.history",
-            JSON.stringify([{ id: ev.state.thread_id, name }, ...hist].slice(0, 20)),
-          );
-        }
+        rememberDeck(ev.state);
         break;
       }
       case "comment_saved": {
@@ -260,6 +290,29 @@ export function App() {
     await consumeStream(api.commentStreamUrl(deck.thread_id, currentSlide), { text, box });
   }
 
+  async function onForkFromReview(body: ForkFromReviewBody) {
+    if (!deck) return;
+    abortRef.current?.abort();
+    setBuffersByTag({});
+    setActiveNode(null);
+    setActiveSlide(null);
+    setElapsedByTag({});
+    tagStartRef.current = {};
+    setErr(null);
+    setBusy(true);
+    try {
+      const nextDeck = await api.forkFromReview(deck.thread_id, body);
+      localStorage.setItem("osz.thread_id", nextDeck.thread_id);
+      rememberDeck(nextDeck);
+      setDeck(nextDeck);
+      void refreshDeckList();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onNewDeck() {
     abortRef.current?.abort();
     localStorage.removeItem("osz.thread_id");
@@ -312,6 +365,8 @@ export function App() {
   const briefMd = deck.values?.consolidated_brief_md as string | undefined;
 
   const showLive = busy || Object.keys(buffersByTag).length > 0;
+  const readyReviewEnabled = stage === "ready" && !hasInterrupt;
+  const reviewStepIndex = REVIEW_STAGES.findIndex((step) => step.id === selectedReviewStage);
 
   return (
     <div style={{ fontFamily: "Georgia, serif", padding: 16, maxWidth: 1520, margin: "0 auto" }}>
@@ -523,80 +578,173 @@ export function App() {
         }}
       >
         <main style={{ minWidth: 0 }}>
+          {readyReviewEnabled && (
+            <section
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                padding: 12,
+                marginBottom: 12,
+                border: "1px solid #e5e5e5",
+                borderRadius: 6,
+                background: "#fff",
+              }}
+            >
+              <button
+                disabled={reviewStepIndex <= 0}
+                onClick={() => setSelectedReviewStage(REVIEW_STAGES[reviewStepIndex - 1].id)}
+              >
+                Previous step
+              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+                {REVIEW_STAGES.map((step, idx) => (
+                  <button
+                    key={step.id}
+                    onClick={() => setSelectedReviewStage(step.id)}
+                    style={{
+                      border: step.id === selectedReviewStage ? "1px solid #2563eb" : "1px solid #e5e5e5",
+                      background: step.id === selectedReviewStage ? "#eff6ff" : "#fff",
+                      color: step.id === selectedReviewStage ? "#1d4ed8" : "#374151",
+                      padding: "4px 8px",
+                      borderRadius: 999,
+                      cursor: "pointer",
+                      fontSize: 12,
+                    }}
+                  >
+                    {idx + 1}. {step.label}
+                  </button>
+                ))}
+              </div>
+              <button
+                disabled={reviewStepIndex >= REVIEW_STAGES.length - 1}
+                onClick={() => setSelectedReviewStage(REVIEW_STAGES[reviewStepIndex + 1].id)}
+              >
+                Next step
+              </button>
+            </section>
+          )}
+
           {hasInterrupt && (
             <HitlReviewPanel deck={deck} catalog={catalog} onResume={onResume} />
           )}
 
-          {hasPendingTasks && !hasInterrupt && !busy && (
-            <div
-              style={{
-                padding: 12,
-                marginBottom: 12,
-                border: "1px solid #fbbf24",
-                borderRadius: 6,
-                background: "#fffbeb",
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-              }}
-            >
-              <span style={{ fontSize: 13, color: "#92400e" }}>
-                {renderedCount < expectedCount
-                  ? `Rendering paused: ${renderedCount}/${expectedCount} slides complete.`
-                  : "Generation is paused — resume to continue."}
-              </span>
-              <button
-                style={{
-                  padding: "4px 12px",
-                  fontSize: 13,
-                  background: "#f59e0b",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: 4,
-                  cursor: "pointer",
-                }}
-                onClick={() => onResume({})}
-              >
-                Resume generation
-              </button>
-            </div>
+          {readyReviewEnabled && selectedReviewStage === "structure" && (
+            <StructureStage
+              catalog={catalog}
+              scenarioId={deck.values?.scenario_id as string | undefined}
+              structureId={deck.values?.structure_id as string | undefined}
+              candidates={deck.values?.structure_candidates as string[] | undefined}
+              title="① Review structure choice"
+              submitLabel="Create fork from structure"
+              onSubmit={async (payload) => onForkFromReview({ review_stage: "structure", ...payload })}
+            />
           )}
 
-          {!hasInterrupt && !hasSlides && outlineMd && (
-            <section
-              style={{ padding: 12, border: "1px solid #e5e5e5", borderRadius: 6 }}
-            >
-              <Markdown>{outlineMd}</Markdown>
-            </section>
+          {readyReviewEnabled && selectedReviewStage === "style" && (
+            <StyleStage
+              title="② Review visual style"
+              submitLabel="Create fork from style"
+              visualStyleMd={deck.values?.visual_style_md as string | undefined}
+              visualStyle={deck.values?.visual_style as Record<string, any> | undefined}
+              onSubmit={async ({ feedback }) =>
+                onForkFromReview({ review_stage: "style", feedback })
+              }
+            />
           )}
 
-          {!hasInterrupt && !hasSlides && briefMd && (
-            <details style={{ marginTop: 8 }}>
-              <summary style={{ cursor: "pointer" }}>Consolidated brief</summary>
-              <section
-                style={{
-                  marginTop: 8,
-                  padding: 12,
-                  border: "1px solid #e5e5e5",
-                  borderRadius: 6,
-                }}
-              >
-                <Markdown>{briefMd}</Markdown>
-              </section>
-            </details>
+          {readyReviewEnabled && selectedReviewStage === "layout" && (
+            <LayoutStage
+              catalog={catalog}
+              layouts={deck.values?.layouts as Array<Record<string, any>> | undefined}
+              title="③ Review layouts"
+              submitLabel="Create fork from layout"
+              submitDisabledWhenUnchanged
+              onSubmit={async ({ overrides }) =>
+                onForkFromReview({ review_stage: "layout", overrides })
+              }
+            />
           )}
 
-          {hasSlides && (
-            <DeckCanvas
-              slides={slides}
-              slideOrder={expectedSlideIdx}
-              currentSlide={currentSlide}
-              onSelectSlide={setCurrentSlide}
-              aspectRatio={(deck.values?.aspect_ratio as any) ?? "16:9"}
-              width={CANVAS_W}
-            >
-              <CommentLayer width={CANVAS_W} height={CANVAS_H} onSubmit={onComment} />
-            </DeckCanvas>
+          {readyReviewEnabled && selectedReviewStage === "brief" && (
+            <BriefReview briefMd={briefMd} />
+          )}
+
+          {(!readyReviewEnabled || selectedReviewStage === "ready") && (
+            <>
+              {hasPendingTasks && !hasInterrupt && !busy && (
+                <div
+                  style={{
+                    padding: 12,
+                    marginBottom: 12,
+                    border: "1px solid #fbbf24",
+                    borderRadius: 6,
+                    background: "#fffbeb",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                  }}
+                >
+                  <span style={{ fontSize: 13, color: "#92400e" }}>
+                    {renderedCount < expectedCount
+                      ? `Rendering paused: ${renderedCount}/${expectedCount} slides complete.`
+                      : "Generation is paused — resume to continue."}
+                  </span>
+                  <button
+                    style={{
+                      padding: "4px 12px",
+                      fontSize: 13,
+                      background: "#f59e0b",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: 4,
+                      cursor: "pointer",
+                    }}
+                    onClick={() => onResume({})}
+                  >
+                    Resume generation
+                  </button>
+                </div>
+              )}
+
+              {!hasInterrupt && !hasSlides && outlineMd && (
+                <section
+                  style={{ padding: 12, border: "1px solid #e5e5e5", borderRadius: 6 }}
+                >
+                  <Markdown>{outlineMd}</Markdown>
+                </section>
+              )}
+
+              {!hasInterrupt && !hasSlides && briefMd && (
+                <details style={{ marginTop: 8 }}>
+                  <summary style={{ cursor: "pointer" }}>Consolidated brief</summary>
+                  <section
+                    style={{
+                      marginTop: 8,
+                      padding: 12,
+                      border: "1px solid #e5e5e5",
+                      borderRadius: 6,
+                    }}
+                  >
+                    <Markdown>{briefMd}</Markdown>
+                  </section>
+                </details>
+              )}
+
+              {hasSlides && (
+                <DeckCanvas
+                  slides={slides}
+                  slideOrder={expectedSlideIdx}
+                  currentSlide={currentSlide}
+                  onSelectSlide={setCurrentSlide}
+                  aspectRatio={(deck.values?.aspect_ratio as any) ?? "16:9"}
+                  width={CANVAS_W}
+                >
+                  <CommentLayer width={CANVAS_W} height={CANVAS_H} onSubmit={onComment} />
+                </DeckCanvas>
+              )}
+            </>
           )}
         </main>
 
