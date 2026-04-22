@@ -223,6 +223,7 @@ export function App() {
   // --- Create / resume handlers ---
 
   async function onCreate(form: {
+    deckName: string;
     text: string;
     pages: number;
     aspect: string;
@@ -231,9 +232,9 @@ export function App() {
   }) {
     const mats: Material[] = [];
     if (form.text.trim()) mats.push({ kind: "text", uri: `text:${form.text}` });
-    const deckName = form.text.trim().split("\n")[0].slice(0, 60) || null;
+    const derivedName = form.text.trim().split("\n")[0].slice(0, 60) || null;
     const body: CreateDeckBody = {
-      deck_name: deckName,
+      deck_name: form.deckName.trim() || derivedName,
       expected_pages: form.pages,
       aspect_ratio: form.aspect,
       density_preference: form.density,
@@ -622,6 +623,7 @@ function CreateForm({
   err,
 }: {
   onSubmit: (f: {
+    deckName: string;
     text: string;
     pages: number;
     aspect: string;
@@ -631,6 +633,7 @@ function CreateForm({
   busy: boolean;
   err: string | null;
 }) {
+  const [deckName, setDeckName] = useState("");
   const [text, setText] = useState("");
   const [pages, setPages] = useState(8);
   const [aspect, setAspect] = useState("16:9");
@@ -649,6 +652,16 @@ function CreateForm({
           {err}
         </div>
       )}
+      <label style={{ display: "block", marginTop: 12 }}>
+        Deck name (optional):
+        <input
+          type="text"
+          value={deckName}
+          onChange={(e) => setDeckName(e.target.value)}
+          placeholder="e.g. Q3 Earnings Review"
+          style={{ display: "block", width: "100%", fontFamily: "inherit", padding: 8 }}
+        />
+      </label>
       <label style={{ display: "block", marginTop: 12 }}>
         Material (text, bullets, or pasted notes):
         <textarea
@@ -704,7 +717,7 @@ function CreateForm({
       <button
         style={{ marginTop: 16 }}
         disabled={busy || !text.trim()}
-        onClick={() => onSubmit({ text, pages, aspect, density, styleHint })}
+        onClick={() => onSubmit({ deckName, text, pages, aspect, density, styleHint })}
       >
         {busy ? "Streaming…" : "Create deck"}
       </button>

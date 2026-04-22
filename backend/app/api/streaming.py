@@ -27,7 +27,7 @@ from langgraph.types import Command
 from pydantic import BaseModel, Field
 
 from .common import config_for, current_state, graph, mirror_to_disk
-from .decks import CreateDeckBody
+from .decks import CreateDeckBody, _derive_deck_name
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -123,6 +123,7 @@ def stream_create_deck(body: CreateDeckBody) -> StreamingResponse:
     cfg = config_for(thread_id)
     initial: dict[str, Any] = {
         "thread_id": thread_id,
+        "deck_name": _derive_deck_name(body),
         "materials": [m.model_dump() for m in body.materials],
         "expected_pages": body.expected_pages,
         "aspect_ratio": body.aspect_ratio,
