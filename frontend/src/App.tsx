@@ -91,6 +91,10 @@ export function App() {
   }, [refresh]);
 
   useEffect(() => {
+    if (!deck) void refreshDeckList();
+  }, [deck, refreshDeckList]);
+
+  useEffect(() => {
     setSelectedReviewStage("ready");
     setCurrentSlide(0);
   }, [deck?.thread_id]);
@@ -339,7 +343,17 @@ export function App() {
 
   // --- Render ---
 
-  if (!deck) return <CreateForm onSubmit={onCreate} busy={busy} err={err} />;
+  if (!deck) {
+    return (
+      <CreateForm
+        onSubmit={onCreate}
+        busy={busy}
+        err={err}
+        recentDecks={deckList}
+        onLoadDeck={(id) => void refresh(id).catch((e) => setErr(String(e)))}
+      />
+    );
+  }
 
   const stage = (deck.values?.current_stage as string) ?? "";
   const hasInterrupt = (deck.interrupts?.length ?? 0) > 0;
@@ -769,6 +783,8 @@ function CreateForm({
   onSubmit,
   busy,
   err,
+  recentDecks,
+  onLoadDeck,
 }: {
   onSubmit: (f: {
     deckName: string;
@@ -780,6 +796,8 @@ function CreateForm({
   }) => void;
   busy: boolean;
   err: string | null;
+  recentDecks: DeckListItem[] | null;
+  onLoadDeck: (id: string) => void;
 }) {
   const [deckName, setDeckName] = useState("");
   const [text, setText] = useState("");
@@ -869,6 +887,81 @@ function CreateForm({
       >
         {busy ? "Streaming…" : "Create deck"}
       </button>
+
+      {recentDecks && recentDecks.length > 0 && (
+        <div style={{ marginTop: 40 }}>
+          <h2 style={{ fontSize: 16, marginBottom: 12, color: "#333" }}>Recent decks</h2>
+          <div
+            style={{
+              border: "1px solid #e5e5e5",
+              borderRadius: 8,
+              overflow: "hidden",
+            }}
+          >
+            {recentDecks.map((d) => (
+              <button
+                key={d.thread_id}
+                disabled={busy}
+                onClick={() => onLoadDeck(d.thread_id)}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  textAlign: "left",
+                  padding: "10px 14px",
+                  background: "#fff",
+                  border: "none",
+                  borderBottom: "1px solid #f0f0f0",
+                  cursor: busy ? "default" : "pointer",
+                  fontFamily: "inherit",
+                  fontSize: 14,
+                  opacity: busy ? 0.6 : 1,
+                }}
+                onMouseEnter={(e) => {
+                  if (!busy) e.currentTarget.style.background = "#f5f5f5";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "#fff";
+                }}
+              >
+                <div
+                  style={{
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    fontWeight: 500,
+                  }}
+                >
+                  {d.deck_name || d.thread_id}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+                  <code style={{ fontSize: 11, color: "#999" }}>{d.thread_id}</code>
+                  {d.stage && (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        color: "#64748b",
+                        background: "#f1f5f9",
+                        padding: "1px 5px",
+                        borderRadius: 4,
+                      }}
+                    >
+                      {d.stage}
+                    </span>
+                  )}
+                  {d.created_at && (
+                    <span style={{ fontSize: 11, color: "#999" }}>
+                      {new Date(d.created_at).toLocaleDateString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                      })}
+                    </span>
+                  )}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
