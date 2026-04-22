@@ -1,5 +1,6 @@
 """Deck lifecycle endpoints.
 
+GET  /decks          — list all decks from the checkpointer DB.
 POST /decks          — create a new thread and kick off the pipeline (up to structure gate).
 GET  /decks/{id}     — return the current snapshot (state values + next + interrupt payload).
 GET  /decks/{id}/catalog — return structure/scenario/layout catalogs (for HITL UIs).
@@ -8,6 +9,7 @@ POST /decks/{id}/materials — upload a file to attach as material.
 
 from __future__ import annotations
 
+import sqlite3
 import uuid
 from pathlib import Path
 from typing import Any
@@ -19,6 +21,7 @@ from ..artifacts import store
 from ..catalog.layouts import PATTERNS
 from ..catalog.scenarios import SCENARIO_DEFINITIONS
 from ..catalog.structures import STRUCTURE_DEFINITIONS
+from ..graph.graph import DB_PATH
 from .common import config_for, current_state, graph, mirror_to_disk
 
 router = APIRouter()
@@ -39,6 +42,49 @@ class CreateDeckBody(BaseModel):
     visual_style_preference: str | None = None
     style_reference_image_uri: str | None = None
     materials: list[Material] = Field(default_factory=list)
+
+
+@router.get("/decks")
+def list_decks() -> dict[str, Any]:
+    """Return all thread IDs from the checkpointer DB with basic metadata."""
+    db = DB_PATH
+    if not db.exists():
+        return {"decks": []}
+    conn = sqlite3.connect(str(db))
+    try:
+        cursor = conn.execute(
+            "SELECT DISTINCT thread_id FROM checkpoints ORDER BY thread_id"
+        )
+        thread_ids = [row[0] for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+    decks = []
+    for tid in thread_ids:
+        try:
+            state = current_state(tid)
+            values = state.get("values") or {}
+            decks.append(
+                {
+                    "thread_id": tid,
+                    "deck_name": values.get("deck_name") or tid,
+                    "stage": values.get("current_stage") or "unknown",
+                    "created_at": state.get("created_at"),
+                }
+            )
+        except Exception:
+            # Skip threads whose state cannot be read
+            decks.append(
+                {
+                    "thread_id": tid,
+                    "deck_name": tid,
+                    "stage": "unknown",
+                    "created_at": None,
+                }
+            )
+    # Most recently active first (sort by created_at descending, None last)
+    decks.sort(key=lambda d: (d["created_at"] is None, d["created_at"] or ""), reverse=True)
+    return {"decks": decks}
 
 
 def _derive_deck_name(body: CreateDeckBody) -> str:

@@ -17,6 +17,7 @@ import {
   STREAM_BASE,
   type CatalogResponse,
   type CreateDeckBody,
+  type DeckListItem,
   type DeckState,
   type Material,
 } from "./api";
@@ -40,6 +41,7 @@ export function App() {
   const [showHistory, setShowHistory] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [exporting, setExporting] = useState<string | null>(null);
+  const [deckList, setDeckList] = useState<DeckListItem[] | null>(null);
 
   // Streaming state
   const [buffersByTag, setBuffersByTag] = useState<Record<string, string>>({});
@@ -57,6 +59,15 @@ export function App() {
     },
     [catalog],
   );
+
+  const refreshDeckList = useCallback(async () => {
+    try {
+      const { decks } = await api.listDecks();
+      setDeckList(decks);
+    } catch {
+      setDeckList([]);
+    }
+  }, []);
 
   useEffect(() => {
     const saved = localStorage.getItem("osz.thread_id");
@@ -352,7 +363,11 @@ export function App() {
           <button
             onClick={() => {
               setShowExport(false);
-              setShowHistory((s) => !s);
+              setShowHistory((s) => {
+                const next = !s;
+                if (next) void refreshDeckList();
+                return next;
+              });
             }}
           >
             History deck
@@ -427,24 +442,37 @@ export function App() {
               }}
             >
               {(() => {
+                // Merge backend list with localStorage history; backend is authoritative for names
+                const backendDecks = deckList ?? [];
                 const histRaw = JSON.parse(localStorage.getItem("osz.history") || "[]") as (
                   | { id: string; name: string }
                   | string
                 )[];
-                const hist = histRaw.map((h) => (typeof h === "string" ? { id: h, name: h } : h));
-                if (hist.length === 0) {
+                const localHist = histRaw.map((h) => (typeof h === "string" ? { id: h, name: h } : h));
+
+                const merged = new Map<string, { name: string; stage: string }>();
+                for (const d of backendDecks) {
+                  merged.set(d.thread_id, { name: d.deck_name || d.thread_id, stage: d.stage });
+                }
+                for (const h of localHist) {
+                  if (!merged.has(h.id)) {
+                    merged.set(h.id, { name: h.name, stage: "" });
+                  }
+                }
+
+                if (merged.size === 0) {
                   return (
                     <div style={{ padding: "8px 12px", color: "#999", fontSize: 13 }}>
                       No history yet
                     </div>
                   );
                 }
-                return hist.map((h) => (
+                return Array.from(merged.entries()).map(([id, info]) => (
                   <button
-                    key={h.id}
+                    key={id}
                     onClick={() => {
                       setShowHistory(false);
-                      void refresh(h.id).catch((e) => setErr(String(e)));
+                      void refresh(id).catch((e) => setErr(String(e)));
                     }}
                     style={{
                       display: "block",
@@ -461,9 +489,16 @@ export function App() {
                     onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
                   >
                     <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 260 }}>
-                      {h.name}
+                      {info.name}
                     </div>
-                    <code style={{ fontSize: 11, color: "#999" }}>{h.id}</code>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <code style={{ fontSize: 11, color: "#999" }}>{id}</code>
+                      {info.stage && (
+                        <span style={{ fontSize: 10, color: "#64748b", background: "#f1f5f9", padding: "1px 4px", borderRadius: 4 }}>
+                          {info.stage}
+                        </span>
+                      )}
+                    </div>
                   </button>
                 ));
               })()}

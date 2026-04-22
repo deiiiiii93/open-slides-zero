@@ -49,7 +49,16 @@ export type CreateDeckBody = {
 
 export const STREAM_BASE = API_BASE;
 
+export type DeckListItem = {
+  thread_id: string;
+  deck_name: string;
+  stage: string;
+  created_at: string | null;
+};
+
 export const api = {
+  listDecks: () => http<{ decks: DeckListItem[] }>("GET", "/decks"),
+
   createDeck: (body: CreateDeckBody) => http<DeckState>("POST", "/decks", body),
 
   getDeck: (id: string) => http<DeckState>("GET", `/decks/${id}`),
