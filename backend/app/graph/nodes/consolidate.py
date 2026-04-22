@@ -74,4 +74,6 @@ def consolidate_node(state: dict[str, Any]) -> dict[str, Any]:
         "consolidated_brief_md": "\n".join(md_parts),
         "current_stage": "html",
         "brief": brief,   # structured copy read by the Send fan-out in graph.py
+        "html_failures": [],
+        "pending_html_retry_slides": [],
     }

@@ -45,6 +45,18 @@ def _font_sizes_in_px(html: str) -> list[int]:
     return out
 
 
+def _has_balanced_braces(text: str) -> bool:
+    depth = 0
+    for ch in text:
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth < 0:
+                return False
+    return depth == 0
+
+
 def validate_slide_html(
     html: str,
     *,
@@ -56,16 +68,16 @@ def validate_slide_html(
 
     canvas = CANVAS_SIZES.get(aspect_ratio, CANVAS_SIZES["16:9"])
     width, height = canvas
-    head = html[:500]
+    normalized = html.replace(" ", "")
 
     # ---- §10.3 error rules ----
-    if f"width:{width}" not in head.replace(" ", "") and f"width: {width}" not in head:
+    if not re.search(rf"width\s*:\s*{width}px\b", html, flags=re.I):
         errors.append(Issue("canvas_width", "error",
-                            f"Root element must declare width {width}px in first 500 chars."))
-    if f"height:{height}" not in head.replace(" ", "") and f"height: {height}" not in head:
+                            f"Root element must declare width {width}px."))
+    if not re.search(rf"height\s*:\s*{height}px\b", html, flags=re.I):
         errors.append(Issue("canvas_height", "error",
-                            f"Root element must declare height {height}px in first 500 chars."))
-    if "overflow:hidden" not in html.replace(" ", ""):
+                            f"Root element must declare height {height}px."))
+    if "overflow:hidden" not in normalized:
         errors.append(Issue("overflow_hidden", "error",
                             "Root element must have overflow:hidden as a safety net."))
     if re.search(r"overflow\s*:\s*(auto|scroll)", html, flags=re.I):
@@ -77,9 +89,22 @@ def validate_slide_html(
     if re.search(r"pagination[-_ ]?dot", html, flags=re.I):
         errors.append(Issue("no_pagination_dots", "error",
                             "Remove pagination dot indicators."))
+    if "<style" in html.lower() and "</style>" not in html.lower():
+        errors.append(Issue("missing_style_close", "error",
+                            "HTML output is incomplete: missing </style>."))
+    if "<body" in html.lower() and "</body>" not in html.lower():
+        errors.append(Issue("missing_body_close", "error",
+                            "HTML output is incomplete: missing </body>."))
+    if "<html" in html.lower() and "</html>" not in html.lower():
+        errors.append(Issue("missing_html_close", "error",
+                            "HTML output is incomplete: missing </html>."))
+    style_blocks = re.findall(r"<style\b[^>]*>(.*?)</style>", html, flags=re.I | re.S)
+    if style_blocks and not _has_balanced_braces(style_blocks[-1]):
+        errors.append(Issue("unbalanced_css_braces", "error",
+                            "HTML output is incomplete: CSS braces are unbalanced."))
 
     # ---- §10.4 warnings ----
-    if "box-sizing:border-box" not in html.replace(" ", ""):
+    if "box-sizing:border-box" not in normalized:
         warnings.append(Issue("box_sizing", "warning",
                               "Prefer box-sizing:border-box globally."))
 

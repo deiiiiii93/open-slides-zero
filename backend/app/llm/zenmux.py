@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, TypeVar
@@ -42,6 +43,12 @@ ZENMUX_BASE_URL = os.getenv("ZENMUX_BASE_URL", "https://zenmux.ai/api/v1")
 ZENMUX_API_KEY_ENV = "ZENMUX_API_KEY"
 
 T = TypeVar("T", bound=BaseModel)
+
+
+@dataclass
+class CompletionResult:
+    text: str
+    finish_reason: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -138,10 +145,35 @@ def chat(
     images: list[str | Path] | None = None,
     temperature: float = 0.4,
     max_tokens: int | None = None,
+    timeout: float | None = None,
     stream: bool = False,
     json_object: bool = False,
 ) -> str:
     """Plain-text completion. Returns assistant message content as string."""
+    return chat_with_metadata(
+        model,
+        messages,
+        images=images,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        timeout=timeout,
+        stream=stream,
+        json_object=json_object,
+    ).text
+
+
+def chat_with_metadata(
+    model: str,
+    messages: list[dict[str, Any]],
+    *,
+    images: list[str | Path] | None = None,
+    temperature: float = 0.4,
+    max_tokens: int | None = None,
+    timeout: float | None = None,
+    stream: bool = False,
+    json_object: bool = False,
+) -> CompletionResult:
+    """Plain-text completion plus terminal metadata such as finish_reason."""
     msgs = [dict(m) for m in messages]
     if images:
         _attach_images(msgs, images)
@@ -154,12 +186,14 @@ def chat(
     }
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
+    if timeout is not None:
+        kwargs["timeout"] = timeout
     if json_object:
         kwargs["response_format"] = {"type": "json_object"}
 
     if stream:
-        return _stream_completion(**kwargs)
-    return _oneshot_completion(**kwargs)
+        return _stream_completion_with_metadata(**kwargs)
+    return _oneshot_completion_with_metadata(**kwargs)
 
 
 def chat_structured(
@@ -247,23 +281,32 @@ def chat_structured(
 # ---------------------------------------------------------------------------
 
 @_retry
-def _oneshot_completion(**kwargs: Any) -> str:
+def _oneshot_completion_with_metadata(**kwargs: Any) -> CompletionResult:
     try:
         resp = _client().chat.completions.create(**kwargs)
     except Exception as e:
         if _is_retriable(e):
             raise RetriableError from e
         raise
-    return resp.choices[0].message.content or ""
+    choice = resp.choices[0] if resp.choices else None
+    text = choice.message.content if choice and choice.message else ""
+    return CompletionResult(
+        text=text or "",
+        finish_reason=getattr(choice, "finish_reason", None),
+    )
 
 
 @_retry
-def _stream_completion(**kwargs: Any) -> str:
+def _stream_completion_with_metadata(**kwargs: Any) -> CompletionResult:
     kwargs["stream"] = True
     chunks: list[str] = []
+    finish_reason: str | None = None
     try:
         for event in _client().chat.completions.create(**kwargs):
-            delta = event.choices[0].delta if event.choices else None
+            choice = event.choices[0] if event.choices else None
+            if choice and getattr(choice, "finish_reason", None):
+                finish_reason = choice.finish_reason
+            delta = choice.delta if choice else None
             if not delta:
                 continue
             piece = getattr(delta, "content", None) or ""
@@ -274,4 +317,4 @@ def _stream_completion(**kwargs: Any) -> str:
         if _is_retriable(e):
             raise RetriableError from e
         raise
-    return "".join(chunks)
+    return CompletionResult(text="".join(chunks), finish_reason=finish_reason)

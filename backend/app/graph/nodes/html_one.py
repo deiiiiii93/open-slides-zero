@@ -9,6 +9,7 @@ The system prompt encodes the anti-slop rules verbatim.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from ...catalog import layouts as L
@@ -29,6 +30,8 @@ Avoid AI-slop tropes (these are non-negotiable):
   queries, :has()) where they actually help readability.
 - Commit to a single bold aesthetic direction — do not hedge.
 """
+
+_TRUNCATION_REASONS = {"length", "max_tokens"}
 
 
 def _canvas_css(aspect_ratio: str) -> tuple[int, int]:
@@ -92,43 +95,19 @@ Return ONLY the complete HTML document. Begin with <!DOCTYPE html>.
     ]
 
 
-def html_one_node(state: dict[str, Any]) -> dict[str, Any]:
-    """Invoked via Send({'slide_idx': i, 'brief': brief}).
+def _html_max_tokens() -> int:
+    return max(1, int(os.getenv("OSZ_HTML_MAX_TOKENS", "12000")))
 
-    LangGraph passes the Send payload as the state for this invocation.
-    """
-    brief = state.get("brief") or state.get("_brief")
-    if not brief:
-        return {"errors": [f"html_one: missing brief for slide {state.get('slide_idx')}"]}
-    slide_idx = int(state["slide_idx"])
 
-    slides = brief["slides"]
-    slide = next((s for s in slides if s["slide_idx"] == slide_idx), None)
-    if slide is None:
-        return {"errors": [f"html_one: slide index {slide_idx} not in brief"]}
+def _html_timeout_seconds() -> float:
+    return max(1.0, float(os.getenv("OSZ_HTML_TIMEOUT_SECONDS", "180")))
 
-    feedback = state.get("feedback")
-    messages = _slide_prompt(slide, brief, feedback=feedback)
-    tag = f"html:{slide_idx}"
-    push_event({"node": "html_one", "slide_idx": slide_idx, "state": "started"})
-    try:
-        with tagged_stream(tag):
-            html = zenmux.chat(
-                get_model("html"),
-                messages,
-                temperature=0.4,
-                max_tokens=6000,
-                stream=True,
-            )
-    except Exception as exc:
-        push_event({"node": "html_one", "slide_idx": slide_idx, "state": "error", "error": str(exc)})
-        return {
-            "errors": [f"html_one slide {slide_idx}: {exc}"],
-            "html_slides": {slide_idx: f"<!-- html generation failed: {exc} -->"},
-        }
-    push_event({"node": "html_one", "slide_idx": slide_idx, "state": "finished"})
 
-    # Strip any markdown code fences the model may add despite instructions.
+def _html_max_attempts() -> int:
+    return max(1, int(os.getenv("OSZ_HTML_MAX_ATTEMPTS", "2")))
+
+
+def _strip_code_fences(html: str) -> str:
     html = html.strip()
     if html.startswith("```"):
         first_nl = html.find("\n")
@@ -136,17 +115,157 @@ def html_one_node(state: dict[str, Any]) -> dict[str, Any]:
             html = html[first_nl + 1:]
         if html.endswith("```"):
             html = html[:-3]
-    html = html.strip()
+    return html.strip()
 
-    validation = validate_slide_html(
-        html,
-        aspect_ratio=brief["aspect_ratio"],
-        density=brief["density"],
+
+def _validation_errors(
+    validation: Any,
+    slide_idx: int,
+) -> list[str]:
+    return [
+        f"slide {slide_idx}: {issue.rule} — {issue.message}"
+        for issue in validation.errors
+    ]
+
+
+def _retry_prompt(
+    finish_reason: str | None,
+    validation_errors: list[str],
+) -> str:
+    reasons: list[str] = []
+    if finish_reason:
+        reasons.append(f"finish_reason={finish_reason}")
+    if validation_errors:
+        reasons.extend(validation_errors)
+    detail = "\n".join(f"- {reason}" for reason in reasons) if reasons else "- output was incomplete"
+    return (
+        "Your previous HTML was incomplete or invalid. Re-render the entire slide as one "
+        "fully closed HTML document, including a complete <style> block and closing "
+        "</body></html> tags. Return the full document only.\n"
+        f"Issues to fix:\n{detail}"
     )
 
-    update: dict[str, Any] = {"html_slides": {slide_idx: html}}
-    if validation.errors:
-        update["errors"] = [
-            f"slide {slide_idx}: {e.rule} — {e.message}" for e in validation.errors
-        ]
+
+def _failure_update(
+    *,
+    slide_idx: int,
+    attempt_count: int,
+    reason: str,
+    finish_reason: str | None = None,
+    errors: list[str] | None = None,
+) -> dict[str, Any]:
+    update: dict[str, Any] = {
+        "html_failures": [{
+            "slide_idx": slide_idx,
+            "attempt_count": attempt_count,
+            "reason": reason,
+            "finish_reason": finish_reason,
+        }]
+    }
+    if errors:
+        update["errors"] = errors
     return update
+
+
+def html_one_node(state: dict[str, Any]) -> dict[str, Any]:
+    """Invoked via Send({'slide_idx': i, 'brief': brief}).
+
+    LangGraph passes the Send payload as the state for this invocation.
+    """
+    brief = state.get("brief") or state.get("_brief")
+    slide_idx = int(state.get("slide_idx", -1))
+    if not brief:
+        reason = f"html_one: missing brief for slide {slide_idx}"
+        return _failure_update(
+            slide_idx=slide_idx,
+            attempt_count=1,
+            reason=reason,
+            errors=[reason],
+        )
+
+    slides = brief["slides"]
+    slide = next((s for s in slides if s["slide_idx"] == slide_idx), None)
+    if slide is None:
+        reason = f"html_one: slide index {slide_idx} not in brief"
+        return _failure_update(
+            slide_idx=slide_idx,
+            attempt_count=1,
+            reason=reason,
+            errors=[reason],
+        )
+
+    feedback = state.get("feedback")
+    base_messages = _slide_prompt(slide, brief, feedback=feedback)
+    tag = f"html:{slide_idx}"
+    push_event({"node": "html_one", "slide_idx": slide_idx, "state": "started"})
+    previous_html = ""
+    last_reason = f"slide {slide_idx}: unknown html generation failure"
+    last_finish_reason: str | None = None
+    last_errors: list[str] = []
+
+    for attempt in range(1, _html_max_attempts() + 1):
+        messages = list(base_messages)
+        if attempt > 1:
+            messages.extend([
+                {"role": "assistant", "content": previous_html},
+                {
+                    "role": "user",
+                    "content": _retry_prompt(last_finish_reason, last_errors),
+                },
+            ])
+        try:
+            with tagged_stream(tag):
+                result = zenmux.chat_with_metadata(
+                    get_model("html"),
+                    messages,
+                    temperature=0.4,
+                    max_tokens=_html_max_tokens(),
+                    timeout=_html_timeout_seconds(),
+                    stream=True,
+                )
+        except Exception as exc:
+            last_reason = str(exc)
+            last_finish_reason = None
+            last_errors = [f"html_one slide {slide_idx}: {exc}"]
+            push_event({"node": "html_one", "slide_idx": slide_idx, "state": "error", "error": str(exc)})
+            return _failure_update(
+                slide_idx=slide_idx,
+                attempt_count=attempt,
+                reason=last_reason,
+                finish_reason=last_finish_reason,
+                errors=last_errors,
+            )
+
+        html = _strip_code_fences(result.text)
+        validation = validate_slide_html(
+            html,
+            aspect_ratio=brief["aspect_ratio"],
+            density=brief["density"],
+        )
+        validation_errors = _validation_errors(validation, slide_idx)
+        if result.finish_reason in _TRUNCATION_REASONS:
+            validation_errors.append(
+                f"slide {slide_idx}: finish_reason — response ended with {result.finish_reason}"
+            )
+
+        if not validation_errors:
+            push_event({"node": "html_one", "slide_idx": slide_idx, "state": "finished"})
+            return {"html_slides": {slide_idx: html}}
+
+        previous_html = html
+        last_finish_reason = result.finish_reason
+        last_errors = validation_errors
+        last_reason = validation_errors[0] if validation_errors else (
+            f"slide {slide_idx}: html validation failed"
+        )
+        if attempt >= _html_max_attempts():
+            break
+
+    push_event({"node": "html_one", "slide_idx": slide_idx, "state": "error", "error": last_reason})
+    return _failure_update(
+        slide_idx=slide_idx,
+        attempt_count=_html_max_attempts(),
+        reason=last_reason,
+        finish_reason=last_finish_reason,
+        errors=last_errors or [last_reason],
+    )

@@ -73,6 +73,24 @@ def _merge_html(current: dict[int, str] | None, incoming: dict[int, str] | None)
     return out
 
 
+def _merge_html_failures(
+    current: list[dict[str, Any]] | None,
+    incoming: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """Merge per-slide html failures while allowing explicit clearing via []."""
+    if incoming is None:
+        return list(current or [])
+    if incoming == []:
+        return []
+    out = {
+        int(item["slide_idx"]): dict(item)
+        for item in (current or [])
+    }
+    for item in incoming:
+        out[int(item["slide_idx"])] = dict(item)
+    return [out[idx] for idx in sorted(out)]
+
+
 # ---------------------------------------------------------------------------
 # The graph state
 # ---------------------------------------------------------------------------
@@ -119,6 +137,8 @@ class SlideState(TypedDict, total=False):
 
     # ---- I — fan-out reducer merges per-slide results ----
     html_slides: Annotated[dict[int, str], _merge_html]
+    html_failures: Annotated[list[dict[str, Any]], _merge_html_failures]
+    pending_html_retry_slides: list[int]
 
     # ---- edits ----
     comments: Annotated[list[dict[str, Any]], operator.add]

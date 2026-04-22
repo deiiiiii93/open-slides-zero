@@ -26,6 +26,15 @@ def test_missing_canvas_width_errors():
     assert any(e.rule == "canvas_width" for e in r.errors)
 
 
+def test_valid_slide_with_large_head_still_passes():
+    padded = GOOD_SLIDE.replace(
+        "<head>",
+        "<head>" + ("<meta name=\"x\" content=\"padding\">" * 80),
+    )
+    r = validate_slide_html(padded)
+    assert r.ok, [e.message for e in r.errors]
+
+
 def test_overflow_scroll_blocked():
     bad = GOOD_SLIDE.replace(
         "overflow:hidden;position:relative",
@@ -39,6 +48,21 @@ def test_pagination_text_blocked():
     bad = GOOD_SLIDE.replace("Title", "Title — Slide 1 of 5")
     r = validate_slide_html(bad)
     assert any(e.rule == "no_pagination_text" for e in r.errors)
+
+
+def test_missing_closing_tags_fail():
+    bad = GOOD_SLIDE.replace("</body></html>", "")
+    r = validate_slide_html(bad)
+    assert any(e.rule == "missing_body_close" for e in r.errors)
+    assert any(e.rule == "missing_html_close" for e in r.errors)
+
+
+def test_unbalanced_css_braces_fail():
+    bad = GOOD_SLIDE.replace("</style>", "")
+    bad = bad.replace("box-sizing:border-box}", "box-sizing:border-box")
+    bad += "</style></head></body></html>"
+    r = validate_slide_html(bad)
+    assert any(e.rule == "unbalanced_css_braces" for e in r.errors)
 
 
 def test_banned_font_warning():

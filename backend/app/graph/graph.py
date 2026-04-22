@@ -110,11 +110,66 @@ def fan_out_html(state: SlideState) -> list[Send]:
     if not brief:
         return []
     slides = brief["slides"]
+    retry_only = {
+        int(idx) for idx in (state.get("pending_html_retry_slides") or [])
+    }
+    if retry_only:
+        slides = [slide for slide in slides if int(slide["slide_idx"]) in retry_only]
     return [Send("html_one", {"slide_idx": s["slide_idx"], "brief": brief}) for s in slides]
 
 
 def post_html(state: SlideState) -> dict[str, Any]:
-    return {"current_stage": "ready"}
+    brief = state.get("brief") or {}
+    expected_slide_ids = [
+        int(slide["slide_idx"]) for slide in (brief.get("slides") or [])
+    ]
+    rendered_slide_ids = {
+        int(idx) for idx in (state.get("html_slides") or {}).keys()
+    }
+    failures = {
+        int(item["slide_idx"]): dict(item)
+        for item in (state.get("html_failures") or [])
+    }
+
+    for slide_idx in expected_slide_ids:
+        if slide_idx not in rendered_slide_ids and slide_idx not in failures:
+            failures[slide_idx] = {
+                "slide_idx": slide_idx,
+                "attempt_count": 0,
+                "reason": "slide did not produce HTML",
+                "finish_reason": None,
+            }
+
+    if len(rendered_slide_ids) == len(expected_slide_ids) and not failures:
+        return {
+            "current_stage": "ready",
+            "html_failures": [],
+            "pending_html_retry_slides": [],
+        }
+
+    failed_slides = [failures[idx] for idx in sorted(failures)]
+    resume = interrupt({
+        "gate": "html",
+        "failed_slides": failed_slides,
+        "rendered_count": len(rendered_slide_ids),
+        "expected_count": len(expected_slide_ids),
+        "hint": "Retry failed slides.",
+    })
+    retry_slide_ids = [int(item["slide_idx"]) for item in failed_slides]
+    if resume.get("retry_failed"):
+        return {
+            "current_stage": "html",
+            "html_failures": [],
+            "pending_html_retry_slides": retry_slide_ids,
+        }
+    return {
+        "current_stage": "html",
+        "pending_html_retry_slides": retry_slide_ids,
+    }
+
+
+def retry_html_node(_state: SlideState) -> dict[str, Any]:
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +190,7 @@ def build_graph(checkpointer: SqliteSaver | None = None):
     g.add_node("consolidate", consolidate_node)
     g.add_node("html_one", html_one_node)
     g.add_node("post_html", post_html)
+    g.add_node("retry_html", retry_html_node)
     g.add_node("edit_intent", edit_intent_node)
 
     g.add_edge(START, "ingest")
@@ -160,7 +216,10 @@ def build_graph(checkpointer: SqliteSaver | None = None):
 
     g.add_conditional_edges("consolidate", fan_out_html, ["html_one"])
     g.add_edge("html_one", "post_html")
-    g.add_edge("post_html", END)
+    def html_next(state: SlideState) -> str:
+        return "ready" if state.get("current_stage") == "ready" else "retry_html"
+    g.add_conditional_edges("post_html", html_next, {"ready": END, "retry_html": "retry_html"})
+    g.add_conditional_edges("retry_html", fan_out_html, ["html_one"])
     g.add_edge("edit_intent", END)   # edit_intent merely populates pending_edit_ops
 
     if checkpointer is None:

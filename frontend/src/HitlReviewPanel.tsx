@@ -8,6 +8,7 @@ import { Markdown } from "./Markdown";
 type StructureSubmit = { scenario_id: string; structure_id: string };
 type StyleSubmit = { feedback: string };
 type LayoutSubmit = { overrides: Record<number, string> };
+type HtmlRetrySubmit = { retry_failed: true };
 
 type StructureStageProps = {
   catalog: CatalogResponse | null;
@@ -38,6 +39,15 @@ type LayoutStageProps = {
   submitDisabledWhenUnchanged?: boolean;
 };
 
+type HtmlStageProps = {
+  failedSlides?: Array<Record<string, any>>;
+  renderedCount?: number;
+  expectedCount?: number;
+  title: string;
+  submitLabel: string;
+  onSubmit: (payload: HtmlRetrySubmit) => Promise<void>;
+};
+
 function firstInterrupt(deck: DeckState): any {
   const i = deck.interrupts?.[0];
   if (!i) return null;
@@ -52,7 +62,7 @@ export function HitlReviewPanel({ deck, catalog, onResume }: {
   const payload = firstInterrupt(deck);
   if (!payload) return null;
 
-  const gate = payload.gate as "structure" | "style" | "layout";
+  const gate = payload.gate as "structure" | "style" | "layout" | "html";
   if (gate === "structure") {
     return (
       <StructureStage
@@ -87,6 +97,18 @@ export function HitlReviewPanel({ deck, catalog, onResume }: {
         title="③ Review layouts (scores shown)"
         submitLabel="Approve & render HTML"
         onSubmit={async ({ overrides }) => onResume({ approved: true, overrides })}
+      />
+    );
+  }
+  if (gate === "html") {
+    return (
+      <HtmlStage
+        title="④ Retry failed HTML slides"
+        submitLabel="Retry failed slides"
+        failedSlides={payload.failed_slides}
+        renderedCount={payload.rendered_count}
+        expectedCount={payload.expected_count}
+        onSubmit={async (_payload) => onResume({ retry_failed: true })}
       />
     );
   }
@@ -376,6 +398,54 @@ export function BriefReview({ briefMd }: { briefMd?: string }) {
         }}
       >
         <Markdown>{briefMd ?? ""}</Markdown>
+      </div>
+    </section>
+  );
+}
+
+export function HtmlStage({
+  failedSlides,
+  renderedCount,
+  expectedCount,
+  title,
+  submitLabel,
+  onSubmit,
+}: HtmlStageProps) {
+  const rows = failedSlides ?? [];
+
+  return (
+    <section style={{ padding: 16, border: "1px solid #e5e5e5", borderRadius: 6 }}>
+      <h3>{title}</h3>
+      <p style={{ marginTop: 0, color: "#555" }}>
+        Rendered {renderedCount ?? 0} of {expectedCount ?? 0} slides. The deck is paused until the failed slides are re-rendered successfully.
+      </p>
+      <div style={{ display: "grid", gap: 10 }}>
+        {rows.map((row) => (
+          <div
+            key={String(row.slide_idx)}
+            style={{
+              border: "1px solid #e5e5e5",
+              borderRadius: 6,
+              padding: 12,
+              background: "#fafafa",
+            }}
+          >
+            <div style={{ fontWeight: 600 }}>
+              Slide {Number(row.slide_idx) + 1}
+            </div>
+            <div style={{ fontSize: 12, color: "#555", marginTop: 4 }}>
+              {String(row.reason ?? "HTML generation failed")}
+            </div>
+            {row.finish_reason && (
+              <div style={{ fontSize: 11, color: "#777", marginTop: 4 }}>
+                finish_reason: <code>{String(row.finish_reason)}</code>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <button onClick={() => onSubmit({ retry_failed: true })}>{submitLabel}</button>
       </div>
     </section>
   );

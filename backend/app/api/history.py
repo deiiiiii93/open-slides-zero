@@ -31,12 +31,16 @@ router = APIRouter()
 # Order matters — keys appearing after from_stage get nulled.
 _DOWNSTREAM_FIELDS: dict[str, list[str]] = {
     "outline":      ["outline_md", "outline_slides", "visual_style_md", "visual_style",
-                     "layouts", "consolidated_brief_md", "html_slides"],
+                     "layouts", "consolidated_brief_md", "html_slides",
+                     "html_failures", "pending_html_retry_slides"],
     "style":        ["visual_style_md", "visual_style",
-                     "layouts", "consolidated_brief_md", "html_slides"],
-    "layout":       ["layouts", "consolidated_brief_md", "html_slides"],
-    "consolidate":  ["consolidated_brief_md", "html_slides"],
-    "html":         ["html_slides"],
+                     "layouts", "consolidated_brief_md", "html_slides",
+                     "html_failures", "pending_html_retry_slides"],
+    "layout":       ["layouts", "consolidated_brief_md", "html_slides",
+                     "html_failures", "pending_html_retry_slides"],
+    "consolidate":  ["consolidated_brief_md", "html_slides",
+                     "html_failures", "pending_html_retry_slides"],
+    "html":         ["html_slides", "html_failures", "pending_html_retry_slides"],
     "image_only":   [],  # no state invalidation; only prompt-hint change
 }
 
@@ -46,6 +50,8 @@ def _empty_for(field: str) -> Any:
         return ""
     if field == "html_slides":
         return {}
+    if field == "html_failures" or field == "pending_html_retry_slides":
+        return []
     if field.endswith("_slides") or field == "layouts":
         return []
     if field == "visual_style":
