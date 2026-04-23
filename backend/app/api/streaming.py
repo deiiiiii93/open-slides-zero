@@ -26,7 +26,7 @@ from fastapi.responses import StreamingResponse
 from langgraph.types import Command
 from pydantic import BaseModel, Field
 
-from .common import config_for, current_state, graph, mirror_to_disk
+from .common import config_for, current_state, delete_thread, graph, mirror_to_disk
 from .decks import (
     CreateDeckBody,
     _build_initial_state,
@@ -52,8 +52,16 @@ def _stream_graph(
     input_payload: Any,
     cfg: dict[str, Any],
     thread_id: str,
+    *,
+    cleanup_on_error: bool = False,
 ) -> Iterator[str]:
-    """Run graph.stream() and serialize chunks as SSE. Mirrors final state to disk."""
+    """Run graph.stream() and serialize chunks as SSE. Mirrors final state to disk.
+
+    When called from a create path (where a failure leaves a thread nobody can
+    resume), pass cleanup_on_error=True and we'll drop the thread's checkpoints
+    + artifacts after emitting the error frame. Resume paths leave it false
+    so users can retry a mid-pipeline failure.
+    """
     g = graph()
     try:
         for mode, chunk in g.stream(
@@ -90,6 +98,8 @@ def _stream_graph(
     except Exception as e:
         log.exception("stream failed for %s", thread_id)
         yield _sse({"type": "error", "message": str(e)})
+        if cleanup_on_error:
+            delete_thread(thread_id)
 
 
 def _safe_patch(patch: Any) -> dict[str, Any]:
@@ -126,21 +136,24 @@ def _safe_patch(patch: Any) -> dict[str, Any]:
 def stream_create_deck(body: CreateDeckBody) -> StreamingResponse:
     thread_id = uuid.uuid4().hex[:12]
     cfg = config_for(thread_id)
-    initial = _build_initial_state(
-        thread_id=thread_id,
-        deck_name=body.deck_name,
-        materials=body.materials,
-        expected_pages=body.expected_pages,
-        aspect_ratio=body.aspect_ratio,
-        density_preference=body.density_preference,
-        language=body.language,
-        visual_style_preference=body.visual_style_preference,
-        style_reference_image_uri=body.style_reference_image_uri,
-    )
+    try:
+        initial = _build_initial_state(
+            thread_id=thread_id,
+            deck_name=body.deck_name,
+            materials=body.materials,
+            expected_pages=body.expected_pages,
+            aspect_ratio=body.aspect_ratio,
+            density_preference=body.density_preference,
+            language=body.language,
+            visual_style_preference=body.visual_style_preference,
+            style_reference_image_uri=body.style_reference_image_uri,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     def gen() -> Iterable[str]:
         yield _sse({"type": "thread", "thread_id": thread_id})
-        yield from _stream_graph(initial, cfg, thread_id)
+        yield from _stream_graph(initial, cfg, thread_id, cleanup_on_error=True)
 
     return StreamingResponse(gen(), headers=SSE_HEADERS)
 
@@ -158,25 +171,32 @@ async def stream_create_deck_uploads(
 ) -> StreamingResponse:
     thread_id = uuid.uuid4().hex[:12]
     cfg = config_for(thread_id)
-    materials = []
-    if text.strip():
-        materials.append(_coerce_text_material(text))
-    materials.extend(await normalize_uploaded_materials(thread_id, files))
-    initial = _build_initial_state(
-        thread_id=thread_id,
-        deck_name=deck_name,
-        materials=materials,
-        expected_pages=expected_pages,
-        aspect_ratio=aspect_ratio,
-        density_preference=density_preference,
-        language=language,
-        visual_style_preference=visual_style_preference,
-        style_reference_image_uri=None,
-    )
+    try:
+        materials: list[Any] = []
+        if text.strip():
+            materials.append(_coerce_text_material(text))
+        materials.extend(await normalize_uploaded_materials(thread_id, files))
+        initial = _build_initial_state(
+            thread_id=thread_id,
+            deck_name=deck_name,
+            materials=materials,
+            expected_pages=expected_pages,
+            aspect_ratio=aspect_ratio,
+            density_preference=density_preference,
+            language=language,
+            visual_style_preference=visual_style_preference,
+            style_reference_image_uri=None,
+        )
+    except HTTPException:
+        delete_thread(thread_id)
+        raise
+    except ValueError as exc:
+        delete_thread(thread_id)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     def gen() -> Iterable[str]:
         yield _sse({"type": "thread", "thread_id": thread_id})
-        yield from _stream_graph(initial, cfg, thread_id)
+        yield from _stream_graph(initial, cfg, thread_id, cleanup_on_error=True)
 
     return StreamingResponse(gen(), headers=SSE_HEADERS)
 

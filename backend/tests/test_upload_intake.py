@@ -73,7 +73,10 @@ def _parse_sse_events(body: str) -> list[dict]:
 @pytest.fixture()
 def isolated_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     graph_module._compiled = None
-    monkeypatch.setattr(graph_module, "DB_PATH", tmp_path / "threads.sqlite")
+    db_path = tmp_path / "threads.sqlite"
+    monkeypatch.setattr(graph_module, "DB_PATH", db_path)
+    # decks.py imports DB_PATH by name, so its module-local ref needs patching too.
+    monkeypatch.setattr(decks, "DB_PATH", db_path)
     monkeypatch.setattr(store, "ROOT", tmp_path / "threads")
 
     def fake_chat_structured(_model, _messages, schema, **_kwargs):
@@ -168,14 +171,57 @@ def test_parse_xlsx_extracts_non_empty_range(tmp_path: Path):
     assert "| Revenue | 120 |" in parsed.text
 
 
-def test_parse_pdf_extracts_text_and_marks_image_only_pages(tmp_path: Path):
+def test_parse_pdf_extracts_text_and_marks_single_image_only_page(tmp_path: Path):
     path = tmp_path / "report.pdf"
     _write_pdf(path, ["Revenue increased 20%", None])
 
     parsed = ingest._parse_file_material(str(path))
 
     assert "Revenue increased 20%" in parsed.text
-    assert parsed.note == "Pages 2 had no extractable PDF text and were treated as image-only."
+    assert parsed.note == "Page 2 had no extractable PDF text and was treated as image-only."
+
+
+def test_parse_pdf_notes_multiple_image_only_pages(tmp_path: Path):
+    path = tmp_path / "report.pdf"
+    _write_pdf(path, ["Intro", None, "Conclusion", None])
+
+    parsed = ingest._parse_file_material(str(path))
+
+    assert "Intro" in parsed.text
+    assert "Conclusion" in parsed.text
+    assert parsed.note == "Pages 2, 4 had no extractable PDF text and were treated as image-only."
+
+
+def test_extract_notes_text_filters_housekeeping_placeholders():
+    from types import SimpleNamespace
+
+    def shape(text: str, *, has_text_frame: bool = True, placeholder_name: str | None = None):
+        placeholder_format = (
+            SimpleNamespace(type=SimpleNamespace(name=placeholder_name))
+            if placeholder_name is not None
+            else None
+        )
+        return SimpleNamespace(
+            has_text_frame=has_text_frame,
+            text=text,
+            placeholder_format=placeholder_format,
+        )
+
+    slide = SimpleNamespace(
+        notes_slide=SimpleNamespace(
+            shapes=[
+                shape("Real notes", placeholder_name="BODY"),
+                shape("7", placeholder_name="SLIDE_NUMBER"),
+                shape("2026-04-23", placeholder_name="DATE"),
+                shape("Confidential", placeholder_name="FOOTER"),
+                shape("Header line", placeholder_name="HEADER"),
+                shape("", has_text_frame=False),  # slide image (no text frame)
+                shape("Plain shape, no placeholder", placeholder_name=None),
+            ]
+        )
+    )
+
+    assert ingest._extract_notes_text(slide) == "Real notes\nPlain shape, no placeholder"
 
 
 def test_image_material_uses_zenmux_ocr_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -287,3 +333,85 @@ def test_upload_stream_returns_error_when_all_sources_are_empty(isolated_graph):
     events = _parse_sse_events(response.text)
     error = next(event for event in events if event["type"] == "error")
     assert "No usable content could be extracted" in error["message"]
+
+    # Cleanup invariant: the failed thread must not linger in /decks or on disk.
+    thread_event = next(event for event in events if event["type"] == "thread")
+    thread_id = thread_event["thread_id"]
+    decks_response = client.get("/decks")
+    thread_ids = [deck["thread_id"] for deck in decks_response.json()["decks"]]
+    assert thread_id not in thread_ids
+    assert not (store.ROOT / thread_id).exists()
+
+
+def test_create_deck_rejects_empty_materials(isolated_graph):
+    client = TestClient(app)
+
+    response = client.post("/decks", json={"materials": []})
+
+    assert response.status_code == 400
+    assert "at least one file or paste text" in response.json()["detail"]
+    assert client.get("/decks").json()["decks"] == []
+
+
+def test_stream_create_deck_rejects_empty_materials(isolated_graph):
+    client = TestClient(app)
+
+    response = client.post("/decks/stream", json={"materials": []})
+
+    assert response.status_code == 400
+    assert "at least one file or paste text" in response.json()["detail"]
+    assert client.get("/decks").json()["decks"] == []
+
+
+def test_upload_stream_unsupported_extension_leaves_no_zombie(isolated_graph):
+    client = TestClient(app)
+
+    response = client.post(
+        "/decks/upload/stream",
+        data={"expected_pages": "4", "aspect_ratio": "16:9", "density_preference": "balanced", "language": "en"},
+        files=[("files", ("payload.exe", b"bad", "application/octet-stream"))],
+    )
+
+    assert response.status_code == 400
+    assert "Unsupported file type" in response.json()["detail"]
+    assert client.get("/decks").json()["decks"] == []
+
+
+def test_upload_stream_rejects_oversize_single_file(isolated_graph, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(decks, "MAX_UPLOAD_BYTES", 1024)
+    client = TestClient(app)
+
+    oversize_payload = b"A" * (1024 + 1)
+    response = client.post(
+        "/decks/upload/stream",
+        data={"expected_pages": "4", "aspect_ratio": "16:9", "density_preference": "balanced", "language": "en"},
+        files=[("files", ("big.txt", oversize_payload, "text/plain"))],
+    )
+
+    assert response.status_code == 413
+    assert "per-file upload limit" in response.json()["detail"]
+    assert client.get("/decks").json()["decks"] == []
+    # Cleanup invariant: no orphaned bytes from the partially-streamed file.
+    materials_dirs = list((store.ROOT).glob("*/materials")) if store.ROOT.exists() else []
+    assert all(not any(p.is_file() for p in d.iterdir()) for d in materials_dirs)
+
+
+def test_upload_stream_rejects_oversize_request_total(isolated_graph, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(decks, "MAX_UPLOAD_BYTES", 10_000)
+    monkeypatch.setattr(decks, "MAX_REQUEST_BYTES", 1500)
+    client = TestClient(app)
+
+    response = client.post(
+        "/decks/upload/stream",
+        data={"expected_pages": "4", "aspect_ratio": "16:9", "density_preference": "balanced", "language": "en"},
+        files=[
+            ("files", ("one.txt", b"A" * 800, "text/plain")),
+            ("files", ("two.txt", b"B" * 800, "text/plain")),
+        ],
+    )
+
+    assert response.status_code == 413
+    assert "per-request limit" in response.json()["detail"]
+    assert client.get("/decks").json()["decks"] == []
+    # Any already-stored file from the first upload should have been swept.
+    assert not store.ROOT.exists() or not any(store.ROOT.iterdir())

@@ -9,10 +9,11 @@ POST /decks/{id}/materials — upload a file to attach as material.
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
@@ -22,7 +23,7 @@ from ..catalog.layouts import PATTERNS
 from ..catalog.scenarios import SCENARIO_DEFINITIONS
 from ..catalog.structures import STRUCTURE_DEFINITIONS
 from ..graph.graph import DB_PATH
-from .common import config_for, current_state, graph, mirror_to_disk
+from .common import config_for, current_state, delete_thread, graph, mirror_to_disk
 
 router = APIRouter()
 SUPPORTED_UPLOAD_EXTENSIONS = {
@@ -38,6 +39,9 @@ SUPPORTED_UPLOAD_EXTENSIONS = {
     ".xlsx",
 }
 IMAGE_UPLOAD_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+MAX_UPLOAD_BYTES = int(os.getenv("OSZ_MAX_UPLOAD_BYTES", str(25 * 1024 * 1024)))
+MAX_REQUEST_BYTES = int(os.getenv("OSZ_MAX_REQUEST_BYTES", str(100 * 1024 * 1024)))
+_UPLOAD_CHUNK = 1 << 20  # 1 MiB read chunk
 
 
 class Material(BaseModel):
@@ -79,7 +83,7 @@ def _coerce_text_material(text: str) -> Material:
 
 def _derive_deck_name_from_materials(
     deck_name: str | None,
-    materials: list[Material | dict[str, Any]],
+    materials: Sequence[Material | dict[str, Any]],
 ) -> str:
     if deck_name:
         return deck_name
@@ -101,7 +105,7 @@ def _build_initial_state(
     *,
     thread_id: str,
     deck_name: str | None,
-    materials: list[Material | dict[str, Any]],
+    materials: Sequence[Material | dict[str, Any]],
     expected_pages: int,
     aspect_ratio: str,
     density_preference: str,
@@ -109,6 +113,8 @@ def _build_initial_state(
     visual_style_preference: str | None,
     style_reference_image_uri: str | None,
 ) -> dict[str, Any]:
+    if not materials:
+        raise ValueError("Provide at least one file or paste text.")
     return {
         "thread_id": thread_id,
         "deck_name": _derive_deck_name_from_materials(deck_name, materials),
@@ -141,15 +147,51 @@ def _validate_upload_extension(filename: str) -> str:
     return ext
 
 
+def _reserve_material_path(thread_id: str, desired_name: str) -> Path:
+    """Pick a unique path under the thread's materials dir (dup.txt → dup-2.txt)."""
+    dest_dir = store.thread_dir(thread_id) / "materials"
+    candidate = dest_dir / desired_name
+    if not candidate.exists():
+        return candidate
+    stem, suffix = candidate.stem, candidate.suffix
+    counter = 2
+    while True:
+        candidate = dest_dir / f"{stem}-{counter}{suffix}"
+        if not candidate.exists():
+            return candidate
+        counter += 1
+
+
 async def _store_upload(thread_id: str, file: UploadFile) -> tuple[Material, int]:
     filename = _sanitize_upload_filename(file.filename)
     ext = _validate_upload_extension(filename)
-    contents = await file.read()
-    await file.close()
-    path = store.save_material(thread_id, filename, contents)
+    dest_dir = store.thread_dir(thread_id) / "materials"
+    tmp_path = dest_dir / f".tmp-{uuid.uuid4().hex[:12]}"
+    total = 0
+    final_path: Path | None = None
+    try:
+        with tmp_path.open("wb") as fh:
+            while chunk := await file.read(_UPLOAD_CHUNK):
+                total += len(chunk)
+                if total > MAX_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=(
+                            f"'{filename}' exceeds the "
+                            f"{MAX_UPLOAD_BYTES // (1024 * 1024)} MB per-file upload limit."
+                        ),
+                    )
+                fh.write(chunk)
+        final_path = _reserve_material_path(thread_id, filename)
+        tmp_path.replace(final_path)
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
+    finally:
+        await file.close()
     kind = "image" if ext in IMAGE_UPLOAD_EXTENSIONS else "file"
-    material = Material(kind=kind, uri=str(path), name=filename)
-    return material, len(contents)
+    material = Material(kind=kind, uri=str(final_path), name=filename)
+    return material, total
 
 
 async def normalize_uploaded_materials(
@@ -157,8 +199,18 @@ async def normalize_uploaded_materials(
     files: list[UploadFile],
 ) -> list[Material]:
     materials: list[Material] = []
+    total_bytes = 0
     for file in files:
-        material, _size = await _store_upload(thread_id, file)
+        material, size = await _store_upload(thread_id, file)
+        total_bytes += size
+        if total_bytes > MAX_REQUEST_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"Upload total exceeds the "
+                    f"{MAX_REQUEST_BYTES // (1024 * 1024)} MB per-request limit."
+                ),
+            )
         materials.append(material)
     return materials
 
@@ -206,29 +258,29 @@ def list_decks() -> dict[str, Any]:
     return {"decks": decks}
 
 
-def _derive_deck_name(body: CreateDeckBody) -> str:
-    return _derive_deck_name_from_materials(body.deck_name, body.materials)
-
-
 @router.post("/decks")
 def create_deck(body: CreateDeckBody) -> dict[str, Any]:
     thread_id = uuid.uuid4().hex[:12]
     cfg = config_for(thread_id)
-    initial = _build_initial_state(
-        thread_id=thread_id,
-        deck_name=body.deck_name,
-        materials=body.materials,
-        expected_pages=body.expected_pages,
-        aspect_ratio=body.aspect_ratio,
-        density_preference=body.density_preference,
-        language=body.language,
-        visual_style_preference=body.visual_style_preference,
-        style_reference_image_uri=body.style_reference_image_uri,
-    )
+    try:
+        initial = _build_initial_state(
+            thread_id=thread_id,
+            deck_name=body.deck_name,
+            materials=body.materials,
+            expected_pages=body.expected_pages,
+            aspect_ratio=body.aspect_ratio,
+            density_preference=body.density_preference,
+            language=body.language,
+            visual_style_preference=body.visual_style_preference,
+            style_reference_image_uri=body.style_reference_image_uri,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     # Invoke runs until the first interrupt (structure gate).
     try:
         graph().invoke(initial, cfg)  # type: ignore[arg-type]
     except ValueError as exc:
+        delete_thread(thread_id)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     mirror_to_disk(thread_id)
     return current_state(thread_id)

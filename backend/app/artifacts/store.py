@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import json
 import os
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -107,19 +106,3 @@ def append_comment(thread_id: str, comment: dict[str, Any]) -> None:
     )
 
 
-def save_material(thread_id: str, filename: str, data: bytes) -> Path:
-    d = thread_dir(thread_id) / "materials"
-    safe_name = Path(filename).name or f"upload-{uuid.uuid4().hex[:8]}"
-    candidate = d / safe_name
-    if candidate.exists():
-        stem = candidate.stem
-        suffix = candidate.suffix
-        counter = 2
-        while True:
-            candidate = d / f"{stem}-{counter}{suffix}"
-            if not candidate.exists():
-                break
-            counter += 1
-    p = candidate
-    p.write_bytes(data)
-    return p

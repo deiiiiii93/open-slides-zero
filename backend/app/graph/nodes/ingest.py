@@ -21,6 +21,7 @@ log = logging.getLogger(__name__)
 
 TEXT_SUFFIXES = {".txt", ".md", ".markdown"}
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
+_NOTES_SKIP_PLACEHOLDERS = frozenset({"SLIDE_NUMBER", "DATE", "FOOTER", "HEADER"})
 
 
 @dataclass
@@ -108,9 +109,17 @@ def _parse_pdf(uri: str) -> ParsedMaterial:
         else:
             image_only_pages.append(idx)
     note = None
-    if image_only_pages:
+    if len(image_only_pages) == 1:
+        note = (
+            f"Page {image_only_pages[0]} had no extractable PDF text "
+            "and was treated as image-only."
+        )
+    elif image_only_pages:
         pages = ", ".join(str(page) for page in image_only_pages)
-        note = f"Pages {pages} had no extractable PDF text and were treated as image-only."
+        note = (
+            f"Pages {pages} had no extractable PDF text "
+            "and were treated as image-only."
+        )
     return _finalize_text("\n\n".join(blocks), note=note)
 
 
@@ -137,15 +146,22 @@ def _parse_docx(uri: str) -> ParsedMaterial:
 
 
 def _extract_notes_text(slide: Any) -> str:
-    texts: list[str] = []
     try:
         notes_slide = slide.notes_slide
     except Exception:
         return ""
+    texts: list[str] = []
     for shape in getattr(notes_slide, "shapes", []):
-        text = getattr(shape, "text", "")
-        if text and text.strip():
-            texts.append(text.strip())
+        if not getattr(shape, "has_text_frame", False):
+            continue
+        ph = getattr(shape, "placeholder_format", None)
+        ph_type = getattr(ph, "type", None) if ph is not None else None
+        ph_name = getattr(ph_type, "name", None) if ph_type is not None else None
+        if ph_name in _NOTES_SKIP_PLACEHOLDERS:
+            continue
+        text = (getattr(shape, "text", "") or "").strip()
+        if text:
+            texts.append(text)
     return "\n".join(texts)
 
 

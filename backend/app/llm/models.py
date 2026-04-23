@@ -14,7 +14,6 @@ import os
 #   - vision / OCR                             → google/gemini-3.1-pro-preview
 #   - image generation                         → sapiens-ai/agnes-image-1.2
 _DEFAULTS: dict[str, str] = {
-    "ingest.vision":  "google/gemini-3.1-pro-preview",
     "ingest.ocr":     "google/gemini-3.1-pro-preview",
     "outline":        "anthropic/claude-sonnet-4.6",
     "style.text":     "anthropic/claude-sonnet-4.6",
