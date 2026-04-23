@@ -171,25 +171,123 @@ def test_parse_xlsx_extracts_non_empty_range(tmp_path: Path):
     assert "| Revenue | 120 |" in parsed.text
 
 
-def test_parse_pdf_extracts_text_and_marks_single_image_only_page(tmp_path: Path):
+def test_parse_pdf_extracts_text_and_ocrs_image_only_pages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     path = tmp_path / "report.pdf"
     _write_pdf(path, ["Revenue increased 20%", None])
+
+    ocr_calls: list[str] = []
+
+    def fake_chat(_model, _messages, **kwargs):
+        imgs = kwargs.get("images") or []
+        assert len(imgs) == 1 and str(imgs[0]).startswith("data:image/png;base64,")
+        ocr_calls.append(str(imgs[0])[:32])
+        return "Footnote: auditor letter on file."
+
+    monkeypatch.setattr(ingest.zenmux, "chat", fake_chat)
 
     parsed = ingest._parse_file_material(str(path))
 
     assert "Revenue increased 20%" in parsed.text
-    assert parsed.note == "Page 2 had no extractable PDF text and was treated as image-only."
+    assert "## Page 2 (OCR)" in parsed.text
+    assert "Footnote: auditor letter on file." in parsed.text
+    assert parsed.note == "Page 2 had no embedded PDF text; recovered via OCR."
+    assert len(ocr_calls) == 1
 
 
-def test_parse_pdf_notes_multiple_image_only_pages(tmp_path: Path):
+def test_parse_pdf_ocrs_every_image_only_page_independently(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     path = tmp_path / "report.pdf"
     _write_pdf(path, ["Intro", None, "Conclusion", None])
+
+    ocr_count = {"n": 0}
+
+    def fake_chat(_model, _messages, **kwargs):
+        ocr_count["n"] += 1
+        return f"OCR block {ocr_count['n']}"
+
+    monkeypatch.setattr(ingest.zenmux, "chat", fake_chat)
 
     parsed = ingest._parse_file_material(str(path))
 
     assert "Intro" in parsed.text
     assert "Conclusion" in parsed.text
-    assert parsed.note == "Pages 2, 4 had no extractable PDF text and were treated as image-only."
+    assert "## Page 2 (OCR)" in parsed.text
+    assert "## Page 4 (OCR)" in parsed.text
+    assert parsed.note == "Pages 2, 4 had no embedded PDF text; recovered via OCR."
+    assert ocr_count["n"] == 2
+
+
+def test_parse_pdf_reports_pages_where_ocr_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    path = tmp_path / "report.pdf"
+    _write_pdf(path, ["Intro", None])
+
+    def failing_chat(_model, _messages, **_kwargs):
+        raise RuntimeError("upstream OCR timeout")
+
+    monkeypatch.setattr(ingest.zenmux, "chat", failing_chat)
+
+    parsed = ingest._parse_file_material(str(path))
+
+    assert "Intro" in parsed.text
+    assert parsed.note is not None
+    assert "Page 2 had no extractable text; OCR could not recover content." in parsed.note
+
+
+def test_parse_pdf_retries_with_empty_password_when_initial_open_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Real-world case: owner-password-encrypted PDFs (KPMG, regulator exports)
+    fail on the first PdfDocument() call but open when retried with password=''.
+    """
+    import pypdfium2 as pdfium
+
+    path = tmp_path / "protected.pdf"
+    _write_pdf(path, ["Page one body", "Page two body"])
+
+    calls: list[dict] = []
+    real_ctor = pdfium.PdfDocument
+
+    def fake_ctor(*args, **kwargs):
+        calls.append({"password": kwargs.get("password")})
+        if len(calls) == 1:
+            raise pdfium.PdfiumError("encrypted: password required")
+        return real_ctor(*args, **kwargs)
+
+    monkeypatch.setattr(pdfium, "PdfDocument", fake_ctor)
+
+    parsed = ingest._parse_file_material(str(path))
+
+    assert "Page one body" in parsed.text
+    assert "Page two body" in parsed.text
+    assert len(calls) == 2
+    assert calls[0]["password"] is None
+    assert calls[1]["password"] == ""
+
+
+def test_parse_pdf_caps_ocr_pages_and_records_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    path = tmp_path / "scan.pdf"
+    _write_pdf(path, [None, None, None])
+
+    monkeypatch.setattr(ingest, "_PDF_OCR_MAX_PAGES", 2)
+
+    def fake_chat(_model, _messages, **_kwargs):
+        return "recovered"
+
+    monkeypatch.setattr(ingest.zenmux, "chat", fake_chat)
+
+    parsed = ingest._parse_file_material(str(path))
+
+    assert parsed.text.count("(OCR)") == 2
+    assert parsed.note is not None
+    assert "Pages 1, 2 had no embedded PDF text; recovered via OCR." in parsed.note
+    assert "Page 3 exceeded the OCR page cap (2) and were skipped." in parsed.note
 
 
 def test_extract_notes_text_filters_housekeeping_placeholders():
@@ -249,6 +347,88 @@ def test_ingest_node_raises_when_all_materials_are_empty(tmp_path: Path):
 
     with pytest.raises(ValueError, match="No usable content could be extracted"):
         ingest.ingest_node({"materials": [{"kind": "file", "uri": str(path), "name": "empty.txt"}]})
+
+
+def test_image_material_routes_to_glm_ocr_when_configured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    path = tmp_path / "chart.png"
+    path.write_bytes(b"\x89PNG\r\n\x1a\nfake-png-bytes")
+
+    monkeypatch.setenv("OSZ_MODEL_OCR", "glm-ocr")
+    monkeypatch.setenv("OSZ_MODEL_OCR_BASE_URL", "https://api.z.ai/api/paas/v4/layout_parsing")
+    monkeypatch.setenv("OSZ_MODEL_OCR_KEY", "test-key")
+
+    captured: dict[str, str] = {}
+
+    def fake_extract(file_input: str, **_kwargs) -> str:
+        captured["file"] = file_input
+        return "## Revenue chart\n| Region | Growth |\n| --- | --- |\n| APAC | 18% |"
+
+    monkeypatch.setattr(ingest.glm_ocr, "extract_markdown", fake_extract)
+
+    def zenmux_should_not_be_called(*_a, **_kw):
+        raise AssertionError("zenmux.chat must not be called when GLM-OCR is configured")
+
+    monkeypatch.setattr(ingest.zenmux, "chat", zenmux_should_not_be_called)
+
+    parsed = ingest._parse_file_material(str(path))
+
+    assert captured["file"].startswith("data:image/png;base64,")
+    assert "Revenue chart" in parsed.text
+    assert "| APAC | 18% |" in parsed.text
+
+
+def test_pdf_image_pages_route_to_glm_ocr_when_configured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    path = tmp_path / "scan.pdf"
+    _write_pdf(path, [None, None])
+
+    monkeypatch.setenv("OSZ_MODEL_OCR", "glm-ocr")
+    monkeypatch.setenv("OSZ_MODEL_OCR_BASE_URL", "https://api.z.ai/api/paas/v4/layout_parsing")
+    monkeypatch.setenv("OSZ_MODEL_OCR_KEY", "test-key")
+
+    calls: list[str] = []
+
+    def fake_extract(file_input: str, **_kwargs) -> str:
+        assert file_input.startswith("data:image/png;base64,")
+        calls.append(file_input[:48])
+        return f"Body text from page {len(calls)}"
+
+    monkeypatch.setattr(ingest.glm_ocr, "extract_markdown", fake_extract)
+
+    parsed = ingest._parse_file_material(str(path))
+
+    assert len(calls) == 2
+    assert "Body text from page 1" in parsed.text
+    assert "Body text from page 2" in parsed.text
+    assert parsed.note == "Pages 1, 2 had no embedded PDF text; recovered via OCR."
+
+
+def test_glm_ocr_partial_env_still_falls_back_to_zenmux(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """is_configured() requires all three env vars; any missing = zenmux path."""
+    path = tmp_path / "chart.png"
+    path.write_bytes(b"fake-image")
+
+    monkeypatch.setenv("OSZ_MODEL_OCR", "glm-ocr")
+    monkeypatch.setenv("OSZ_MODEL_OCR_BASE_URL", "https://api.z.ai/api/paas/v4/layout_parsing")
+    # OSZ_MODEL_OCR_KEY intentionally unset
+
+    def fake_chat(_model, _messages, **_kwargs):
+        return "fallback transcript"
+
+    def glm_should_not_be_called(*_a, **_kw):
+        raise AssertionError("glm_ocr must not be called without a key")
+
+    monkeypatch.setattr(ingest.zenmux, "chat", fake_chat)
+    monkeypatch.setattr(ingest.glm_ocr, "extract_markdown", glm_should_not_be_called)
+
+    parsed = ingest._parse_file_material(str(path))
+
+    assert "fallback transcript" in parsed.text
 
 
 @pytest.mark.asyncio

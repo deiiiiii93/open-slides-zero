@@ -3,18 +3,21 @@
 Supported inputs:
   - inline / local text: txt, md, markdown
   - office docs: docx, pptx, xlsx
-  - pdf: selectable text only, with image-only page warnings
-  - raster images: ZenMux OCR model
+  - pdf: selectable text when present; image-only pages fall back to OCR
+  - raster images: OCR (glm-ocr when OSZ_MODEL_OCR_* is set, else ZenMux)
 """
 
 from __future__ import annotations
 
+import base64
+import io
+import os
 from dataclasses import dataclass
 import logging
 from pathlib import Path
 from typing import Any
 
-from ...llm import zenmux
+from ...llm import glm_ocr, zenmux
 from ...llm.models import get_model
 
 log = logging.getLogger(__name__)
@@ -22,6 +25,13 @@ log = logging.getLogger(__name__)
 TEXT_SUFFIXES = {".txt", ".md", ".markdown"}
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 _NOTES_SKIP_PLACEHOLDERS = frozenset({"SLIDE_NUMBER", "DATE", "FOOTER", "HEADER"})
+
+# Defensive cap on OCR calls for a single PDF. A 25MB scan can hold hundreds of
+# pages; without this cap a single upload could spray the OCR model. Pages past
+# the cap are listed in the note so the user knows what we skipped.
+_PDF_OCR_MAX_PAGES = int(os.getenv("OSZ_PDF_OCR_MAX_PAGES", "40"))
+# 2x scale ≈ 144 DPI — legible OCR input without bloating the base64 payload.
+_PDF_OCR_RENDER_SCALE = float(os.getenv("OSZ_PDF_OCR_RENDER_SCALE", "2.0"))
 
 
 @dataclass
@@ -68,23 +78,54 @@ def _finalize_text(text: str, note: str | None = None) -> ParsedMaterial:
     return ParsedMaterial(text="", note=note or "No extractable content found.")
 
 
-def _parse_image_ocr(uri: str) -> ParsedMaterial:
-    prompt = (
-        "Extract slide-source material from this image using OCR.\n"
-        "1. Transcribe visible text faithfully, preserving the original language.\n"
-        "2. Reconstruct tables as Markdown when possible.\n"
-        "3. Include chart titles, axes labels, legends, units, and notable values.\n"
-        "4. If the image is mostly non-text, append a short 'Visual summary' section "
-        "covering the key visual evidence.\n"
-        "Return plain text only."
-    )
-    text = zenmux.chat(
+_OCR_PROMPT = (
+    "Extract slide-source material from this image using OCR.\n"
+    "1. Transcribe visible text faithfully, preserving the original language.\n"
+    "2. Reconstruct tables as Markdown when possible.\n"
+    "3. Include chart titles, axes labels, legends, units, and notable values.\n"
+    "4. If the image is mostly non-text, append a short 'Visual summary' section "
+    "covering the key visual evidence.\n"
+    "Return plain text only."
+)
+
+_IMAGE_MIME_BY_SUFFIX = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
+
+
+def _to_image_data_uri(uri: str) -> str:
+    """Normalize an image reference into something glm-ocr accepts: an
+    http(s) URL, or an image data URI built from a local path.
+    Pass-through if already a URL or data URI."""
+    if uri.startswith(("http://", "https://", "data:")):
+        return uri
+    path = Path(uri)
+    mime = _IMAGE_MIME_BY_SUFFIX.get(path.suffix.lower(), "image/png")
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:{mime};base64,{encoded}"
+
+
+def _ocr_via_zenmux(image_uri: str) -> str:
+    raw = zenmux.chat(
         get_model("ingest.ocr"),
-        [{"role": "user", "content": prompt}],
-        images=[uri],
+        [{"role": "user", "content": _OCR_PROMPT}],
+        images=[image_uri],
         temperature=0.1,
     )
-    return _finalize_text(text)
+    return (raw or "").strip()
+
+
+def _ocr_image_source(image_uri: str) -> str:
+    """Run OCR on a local path, data URI, or http(s) URL. Returns stripped text.
+
+    Routes to the standalone GLM-OCR endpoint when the OSZ_MODEL_OCR_* env
+    vars are set; falls back to the ZenMux vision path otherwise.
+    """
+    if glm_ocr.is_configured():
+        return glm_ocr.extract_markdown(_to_image_data_uri(image_uri))
+    return _ocr_via_zenmux(image_uri)
+
+
+def _parse_image_ocr(uri: str) -> ParsedMaterial:
+    return _finalize_text(_ocr_image_source(uri))
 
 
 def _read_text_file(uri: str) -> ParsedMaterial:
@@ -96,31 +137,101 @@ def _read_text_file(uri: str) -> ParsedMaterial:
     return _finalize_text(path.read_text(encoding="utf-8", errors="replace"))
 
 
-def _parse_pdf(uri: str) -> ParsedMaterial:
-    from pypdf import PdfReader
+def _pages_phrase(pages: list[int]) -> str:
+    if len(pages) == 1:
+        return f"Page {pages[0]}"
+    return "Pages " + ", ".join(str(p) for p in pages)
 
-    reader = PdfReader(uri)
-    blocks: list[str] = []
+
+def _open_pdf(uri: str):
+    """Open a PDF via pypdfium2, retrying with an empty password on failure.
+
+    pypdfium2 wraps PDFium, which handles AES/RC4 encryption natively — unlike
+    pypdf, which needs the `cryptography` dependency for AES. Many "protected"
+    PDFs from firms (KPMG, E&Y, government portals) use owner-password
+    encryption with an empty user password; retrying with password="" unlocks
+    those without prompting.
+    """
+    import pypdfium2 as pdfium
+
+    try:
+        return pdfium.PdfDocument(uri)
+    except pdfium.PdfiumError:
+        return pdfium.PdfDocument(uri, password="")
+
+
+def _extract_page_text(page) -> str:
+    try:
+        return (page.get_textpage().get_text_range() or "").strip()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _render_page_to_data_uri(page) -> str:
+    """Rasterize a pypdfium2 page to a PNG data URI."""
+    bitmap = page.render(scale=_PDF_OCR_RENDER_SCALE)
+    image = bitmap.to_pil()
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
+def _parse_pdf(uri: str) -> ParsedMaterial:
+    document = _open_pdf(uri)
+    page_blocks: dict[int, str] = {}
     image_only_pages: list[int] = []
-    for idx, page in enumerate(reader.pages, start=1):
-        text = (page.extract_text() or "").strip()
-        if text:
-            blocks.append(f"## Page {idx}\n{text}")
-        else:
-            image_only_pages.append(idx)
-    note = None
-    if len(image_only_pages) == 1:
-        note = (
-            f"Page {image_only_pages[0]} had no extractable PDF text "
-            "and was treated as image-only."
-        )
-    elif image_only_pages:
-        pages = ", ".join(str(page) for page in image_only_pages)
-        note = (
-            f"Pages {pages} had no extractable PDF text "
-            "and were treated as image-only."
-        )
-    return _finalize_text("\n\n".join(blocks), note=note)
+    pages_by_number: dict[int, Any] = {}
+    try:
+        for idx, page in enumerate(document, start=1):
+            pages_by_number[idx] = page
+            text = _extract_page_text(page)
+            if text:
+                page_blocks[idx] = f"## Page {idx}\n{text}"
+            else:
+                image_only_pages.append(idx)
+
+        note_fragments: list[str] = []
+        if image_only_pages:
+            ocr_pages = image_only_pages[:_PDF_OCR_MAX_PAGES]
+            skipped_pages = image_only_pages[_PDF_OCR_MAX_PAGES:]
+            ocr_recovered: list[int] = []
+            ocr_failed: list[int] = []
+            for page_number in ocr_pages:
+                try:
+                    data_uri = _render_page_to_data_uri(pages_by_number[page_number])
+                    ocr_text = _ocr_image_source(data_uri)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("OCR failed for PDF page %d: %s", page_number, exc)
+                    ocr_failed.append(page_number)
+                    continue
+                if ocr_text:
+                    page_blocks[page_number] = f"## Page {page_number} (OCR)\n{ocr_text}"
+                    ocr_recovered.append(page_number)
+                else:
+                    ocr_failed.append(page_number)
+
+            if ocr_recovered:
+                note_fragments.append(
+                    f"{_pages_phrase(ocr_recovered)} had no embedded PDF text; "
+                    "recovered via OCR."
+                )
+            if ocr_failed:
+                note_fragments.append(
+                    f"{_pages_phrase(ocr_failed)} had no extractable text; "
+                    "OCR could not recover content."
+                )
+            if skipped_pages:
+                note_fragments.append(
+                    f"{_pages_phrase(skipped_pages)} exceeded the OCR page cap "
+                    f"({_PDF_OCR_MAX_PAGES}) and were skipped."
+                )
+    finally:
+        document.close()
+
+    ordered = [page_blocks[i] for i in sorted(page_blocks)]
+    note = "\n".join(note_fragments) if note_fragments else None
+    return _finalize_text("\n\n".join(ordered), note=note)
 
 
 def _parse_docx(uri: str) -> ParsedMaterial:
