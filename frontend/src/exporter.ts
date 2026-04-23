@@ -362,8 +362,10 @@ function renderPseudoElement(
       topPx = parseFloat(s.top) || 0;
     }
 
-    const x = pxToIn(parentRect.left - ctx.rootRect.left + leftPx);
-    const y = pxToIn(parentRect.top - ctx.rootRect.top + topPx);
+    const xPx = parentRect.left - ctx.rootRect.left + leftPx;
+    const yPx = parentRect.top - ctx.rootRect.top + topPx;
+    const x = pxToIn(xPx);
+    const y = pxToIn(yPx);
     const w = pxToIn(wPx);
     const h = pxToIn(hPx);
     if (w <= 0 || h <= 0) return;
@@ -379,8 +381,43 @@ function renderPseudoElement(
       const dash = s.borderStyle === "dashed" ? "dash" : s.borderStyle === "dotted" ? "dot" : "solid";
       opts.line = { width: borderW * 0.75, color: borderColor.hex, dashType: dash };
     }
-    if (rectRadius !== undefined) opts.rectRadius = rectRadius;
-    ctx.slide.addShape(shapeType as PptxGenJS.ShapeType, opts);
+    const clipPoints = parseClipPathPolygon(s.clipPath, wPx, hPx);
+    const matrix = parseTransformMatrix(s.transform);
+    const hasSkew = matrix !== null && !isPureRotationMatrix(matrix);
+    if (clipPoints) {
+      const custOpts: Record<string, unknown> = { ...opts };
+      const pts = clipPoints.map((p) => ({ x: pxToIn(p.x), y: pxToIn(p.y) }));
+      custOpts.points = [
+        { x: pts[0].x, y: pts[0].y, moveTo: true },
+        ...pts.slice(1).map((p) => ({ x: p.x, y: p.y })),
+        { close: true },
+      ];
+      ctx.slide.addShape("custGeom" as PptxGenJS.ShapeType, custOpts);
+    } else if (hasSkew && matrix) {
+      const { vertices, aabbW, aabbH, minX, minY } = transformedRectVertices(matrix, wPx, hPx);
+      const skewOpts: Record<string, unknown> = {
+        x: pxToIn(xPx + minX),
+        y: pxToIn(yPx + minY),
+        w: pxToIn(aabbW),
+        h: pxToIn(aabbH),
+      };
+      if (bg) skewOpts.fill = { color: bg.hex, transparency: bg.transparency };
+      if (borderW > 0 && borderColor) {
+        const dash = s.borderStyle === "dashed" ? "dash" : s.borderStyle === "dotted" ? "dot" : "solid";
+        skewOpts.line = { width: borderW * 0.75, color: borderColor.hex, dashType: dash };
+      }
+      skewOpts.points = [
+        { x: pxToIn(vertices[0].x), y: pxToIn(vertices[0].y), moveTo: true },
+        ...vertices.slice(1).map((v) => ({ x: pxToIn(v.x), y: pxToIn(v.y) })),
+        { close: true },
+      ];
+      ctx.slide.addShape("custGeom" as PptxGenJS.ShapeType, skewOpts);
+    } else {
+      if (rectRadius !== undefined) opts.rectRadius = rectRadius;
+      const pseudoRot = getRotation(s.transform);
+      if (pseudoRot !== undefined) opts.rotate = pseudoRot;
+      ctx.slide.addShape(shapeType as PptxGenJS.ShapeType, opts);
+    }
   } catch {
     // Ignore pseudo-element access errors
   }
@@ -392,6 +429,11 @@ interface PptxContext {
   slide: PptxGenJS.Slide;
   rootRect: DOMRect;
   pptx: PptxGenJS;
+}
+
+function hasHtmlBoxMetrics(node: Element): node is Element & { offsetWidth: number; offsetHeight: number } {
+  return typeof (node as { offsetWidth?: unknown }).offsetWidth === "number" &&
+    typeof (node as { offsetHeight?: unknown }).offsetHeight === "number";
 }
 
 /** Convert px to inches at 96 PPI. */
@@ -420,6 +462,14 @@ function getRotation(transform: string): number | undefined {
       return angle !== 0 ? angle : undefined;
     }
   }
+  const m3d = transform.match(/matrix3d\(([^)]+)\)/);
+  if (m3d) {
+    const vals = m3d[1].split(",").map((v) => parseFloat(v.trim()));
+    if (vals.length >= 16) {
+      const angle = Math.round(Math.atan2(vals[1], vals[0]) * (180 / Math.PI));
+      return angle !== 0 ? angle : undefined;
+    }
+  }
   const rotateMatch = transform.match(/rotate\(([-\d.]+)(deg|rad)?\)/);
   if (rotateMatch) {
     let angle = parseFloat(rotateMatch[1]);
@@ -427,6 +477,181 @@ function getRotation(transform: string): number | undefined {
     return angle !== 0 ? angle : undefined;
   }
   return undefined;
+}
+
+/**
+ * Detect transforms that make `getBoundingClientRect()` return a larger AABB
+ * than the element's unrotated box (rotation, skew). Pure translate or pure
+ * axis-aligned scale leaves the AABB equal to the rendered box, so we keep
+ * using the rect in those cases.
+ */
+function transformInflatesBoundingBox(transform: string): boolean {
+  if (!transform || transform === "none") return false;
+  const match = transform.match(/matrix\(([^)]+)\)/);
+  if (match) {
+    const v = match[1].split(",").map((s) => parseFloat(s.trim()));
+    if (v.length >= 4) {
+      return Math.abs(v[1]) > 0.001 || Math.abs(v[2]) > 0.001;
+    }
+  }
+  const m3d = transform.match(/matrix3d\(([^)]+)\)/);
+  if (m3d) {
+    const v = m3d[1].split(",").map((s) => parseFloat(s.trim()));
+    if (v.length >= 16) {
+      // 2D rotation/skew components within the 4x4 matrix are at indices 1 and 4.
+      return Math.abs(v[1]) > 0.001 || Math.abs(v[4]) > 0.001;
+    }
+  }
+  return false;
+}
+
+/**
+ * 2D affine matrix extracted from a CSS `transform` computed value
+ * (`matrix(a, b, c, d, e, f)` or the 2D subset of `matrix3d(...)`).
+ */
+interface AffineMatrix { a: number; b: number; c: number; d: number; e: number; f: number }
+
+function parseTransformMatrix(transform: string): AffineMatrix | null {
+  if (!transform || transform === "none") return null;
+  const m = transform.match(/matrix\(([^)]+)\)/);
+  if (m) {
+    const v = m[1].split(",").map((s) => parseFloat(s.trim()));
+    if (v.length >= 6 && v.every(Number.isFinite)) {
+      return { a: v[0], b: v[1], c: v[2], d: v[3], e: v[4], f: v[5] };
+    }
+  }
+  const m3d = transform.match(/matrix3d\(([^)]+)\)/);
+  if (m3d) {
+    const v = m3d[1].split(",").map((s) => parseFloat(s.trim()));
+    // matrix3d is column-major; the 2D subset is at indices 0,1 (col 1), 4,5 (col 2), 12,13 (col 4 translate).
+    if (v.length >= 16 && v.every(Number.isFinite)) {
+      return { a: v[0], b: v[1], c: v[4], d: v[5], e: v[12], f: v[13] };
+    }
+  }
+  return null;
+}
+
+/**
+ * True when the matrix is a rotation (optionally with uniform scale) — i.e. it
+ * preserves angles. A pure rotation has `c === -b` and `a === d`. Anything
+ * else (skew, non-uniform scale + rotation) distorts the rectangle into a
+ * non-rectangular quadrilateral.
+ */
+function isPureRotationMatrix(m: AffineMatrix): boolean {
+  return Math.abs(m.c + m.b) < 0.001 && Math.abs(m.a - m.d) < 0.001;
+}
+
+interface PolygonPoint { x: number; y: number }
+
+/**
+ * Apply a CSS transform matrix (origin = element center) to the four corners
+ * of a `widthPx × heightPx` rectangle, then shift the result so the AABB's
+ * top-left is at (0, 0). Returns the four local-space vertices and the AABB
+ * dimensions — exactly what pptxgenjs needs for a `custGeom` parallelogram.
+ */
+function transformedRectVertices(
+  m: AffineMatrix,
+  widthPx: number,
+  heightPx: number,
+): { vertices: PolygonPoint[]; aabbW: number; aabbH: number; minX: number; minY: number } {
+  const cx = widthPx / 2;
+  const cy = heightPx / 2;
+  const corners = [
+    { x: 0, y: 0 },
+    { x: widthPx, y: 0 },
+    { x: widthPx, y: heightPx },
+    { x: 0, y: heightPx },
+  ];
+  const moved = corners.map((p) => ({
+    x: m.a * (p.x - cx) + m.c * (p.y - cy) + cx + m.e,
+    y: m.b * (p.x - cx) + m.d * (p.y - cy) + cy + m.f,
+  }));
+  const minX = Math.min(...moved.map((p) => p.x));
+  const minY = Math.min(...moved.map((p) => p.y));
+  const maxX = Math.max(...moved.map((p) => p.x));
+  const maxY = Math.max(...moved.map((p) => p.y));
+  return {
+    vertices: moved.map((p) => ({ x: p.x - minX, y: p.y - minY })),
+    aabbW: maxX - minX,
+    aabbH: maxY - minY,
+    minX,
+    minY,
+  };
+}
+
+/**
+ * Parse `clip-path: polygon(x y, x y, ...)` into shape-local pixel points.
+ * Accepts percentages (`50%`) and pixel lengths (`12px` / bare numbers).
+ * Returns null if the element has no clip-path polygon or fewer than 3 points.
+ */
+
+function parseClipPathPolygon(
+  clipPath: string,
+  widthPx: number,
+  heightPx: number,
+): PolygonPoint[] | null {
+  if (!clipPath || clipPath === "none") return null;
+  const match = clipPath.match(/polygon\(\s*([^)]+)\s*\)/);
+  if (!match) return null;
+  const pairs = match[1].split(",").map((s) => s.trim()).filter(Boolean);
+  const points: PolygonPoint[] = [];
+  for (const pair of pairs) {
+    const tokens = pair.split(/\s+/).filter(Boolean);
+    if (tokens.length < 2) return null;
+    const x = resolveClipCoord(tokens[0], widthPx);
+    const y = resolveClipCoord(tokens[1], heightPx);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    points.push({ x, y });
+  }
+  return points.length >= 3 ? points : null;
+}
+
+function resolveClipCoord(token: string, refPx: number): number {
+  const t = token.trim();
+  if (t.endsWith("%")) return (parseFloat(t) / 100) * refPx;
+  if (t.endsWith("px")) return parseFloat(t);
+  return parseFloat(t);
+}
+
+/**
+ * Compute the shape box (in inches) to pass to PPTX. For rotated / skewed
+ * elements we substitute the element's intrinsic (offset) box centered on
+ * the AABB center, so PPTX draws the real shape and then rotates it — rather
+ * than inheriting the inflated AABB as the shape size.
+ */
+function getShapeBox(
+  node: Element,
+  rect: DOMRect,
+  rootRect: DOMRect,
+  transform: string,
+): { x: number; y: number; w: number; h: number; widthPx: number; heightPx: number } {
+  if (
+    transformInflatesBoundingBox(transform) &&
+    hasHtmlBoxMetrics(node) &&
+    node.offsetWidth > 0 &&
+    node.offsetHeight > 0
+  ) {
+    const wPx = node.offsetWidth;
+    const hPx = node.offsetHeight;
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    return {
+      x: pxToIn(centerX - wPx / 2 - rootRect.left),
+      y: pxToIn(centerY - hPx / 2 - rootRect.top),
+      w: pxToIn(wPx),
+      h: pxToIn(hPx),
+      widthPx: wPx,
+      heightPx: hPx,
+    };
+  }
+  return {
+    x: pxToIn(rect.left - rootRect.left),
+    y: pxToIn(rect.top - rootRect.top),
+    w: pxToIn(rect.width),
+    h: pxToIn(rect.height),
+    widthPx: rect.width,
+    heightPx: rect.height,
+  };
 }
 
 /** Check if element is effectively invisible. */
@@ -560,8 +785,14 @@ function processElement(node: Element, ctx: PptxContext, depth = 0): void {
   if (rect.width < 0.5 || rect.height < 0.5) return;
 
   const tag = node.tagName;
-  const pos = getInches(rect, ctx.rootRect);
+  const box = getShapeBox(node, rect, ctx.rootRect, style.transform);
+  const pos = { x: box.x, y: box.y, w: box.w, h: box.h };
   const rotation = getRotation(style.transform);
+  const matrix = parseTransformMatrix(style.transform);
+  // Non-rotation transforms (skew, or rotation combined with skew / non-uniform
+  // scale) distort the rectangle into a parallelogram. PPTX has no skew, so we
+  // bake the geometry into a `custGeom` polygon rather than drawing a rect.
+  const hasSkew = matrix !== null && !isPureRotationMatrix(matrix);
 
   // Skip script/style tags
   if (tag === "SCRIPT" || tag === "STYLE" || tag === "NOSCRIPT") return;
@@ -668,10 +899,11 @@ function processElement(node: Element, ctx: PptxContext, depth = 0): void {
     return;
   }
 
-  // Build shape options
-  const shapeType = getShapeType(rect.width, rect.height, style.borderRadius);
+  // Build shape options. Use the intrinsic box size so rotated elements don't
+  // pick up the inflated AABB dimensions.
+  const shapeType = getShapeType(box.widthPx, box.heightPx, style.borderRadius);
   const rectRadius = shapeType === "roundRect"
-    ? getRectRadius(rect.width, rect.height, style.borderRadius)
+    ? getRectRadius(box.widthPx, box.heightPx, style.borderRadius)
     : undefined;
 
   const bgColor = parseColor(style.backgroundColor, style.opacity);
@@ -767,8 +999,52 @@ function processElement(node: Element, ctx: PptxContext, depth = 0): void {
       });
     }
   } else if (bgColor || borderColor || hasBg) {
-    // Shape with no text (keep shape even for image/gradient backgrounds we can't fill)
-    ctx.slide.addShape(shapeType as PptxGenJS.ShapeType, shapeOpts);
+    // If the element uses `clip-path: polygon(...)` (trapezoids, triangles,
+    // arrow-ish panels), emit a custom-geometry shape so the sloped / angled
+    // edges survive. Otherwise fall back to the rect / roundRect path.
+    const clipPoints = parseClipPathPolygon(style.clipPath, box.widthPx, box.heightPx);
+    if (clipPoints) {
+      const custOpts: Record<string, unknown> = { ...shapeOpts };
+      delete custOpts.rectRadius;
+      const pts = clipPoints.map((p) => ({ x: pxToIn(p.x), y: pxToIn(p.y) }));
+      custOpts.points = [
+        { x: pts[0].x, y: pts[0].y, moveTo: true },
+        ...pts.slice(1).map((p) => ({ x: p.x, y: p.y })),
+        { close: true },
+      ];
+      ctx.slide.addShape("custGeom" as PptxGenJS.ShapeType, custOpts);
+    } else if (
+      hasSkew &&
+      hasHtmlBoxMetrics(node) &&
+      node.offsetWidth > 0 &&
+      node.offsetHeight > 0 &&
+      matrix
+    ) {
+      // Skewed (or skew+rotated) shape: emit a parallelogram whose vertices
+      // are the transformed corners of the untransformed box, sitting inside
+      // the browser's AABB. `rotate` is NOT applied — the rotation, if any,
+      // is already baked into the vertex positions.
+      const { vertices } = transformedRectVertices(matrix, node.offsetWidth, node.offsetHeight);
+      const skewOpts: Record<string, unknown> = {
+        x: pxToIn(rect.left - ctx.rootRect.left),
+        y: pxToIn(rect.top - ctx.rootRect.top),
+        w: pxToIn(rect.width),
+        h: pxToIn(rect.height),
+      };
+      if (bgColor) skewOpts.fill = { color: bgColor.hex, transparency: bgColor.transparency };
+      if (isUniformBorder && borderColor) {
+        skewOpts.line = { width: maxBorderWidth * 0.75, color: borderColor.hex, dashType: dash };
+      }
+      skewOpts.points = [
+        { x: pxToIn(vertices[0].x), y: pxToIn(vertices[0].y), moveTo: true },
+        ...vertices.slice(1).map((v) => ({ x: pxToIn(v.x), y: pxToIn(v.y) })),
+        { close: true },
+      ];
+      ctx.slide.addShape("custGeom" as PptxGenJS.ShapeType, skewOpts);
+    } else {
+      // Shape with no text (keep shape even for image/gradient backgrounds we can't fill)
+      ctx.slide.addShape(shapeType as PptxGenJS.ShapeType, shapeOpts);
+    }
   }
 
   // Render individual border lines for non-uniform borders.
@@ -861,7 +1137,15 @@ function processList(
     ];
 
     const runs = collectTextRuns(li, liStyle);
-    if (runs.length === 0) return;
+    if (runs.length === 0) {
+      // No direct text runs — children are likely blockified (grid/flex items,
+      // or nested structured markup). Fall back to processing each child as an
+      // independent element so the LI's content isn't silently dropped.
+      Array.from(li.children).forEach((child) => {
+        processElement(child, ctx, 0);
+      });
+      return;
+    }
 
     // Add bullet metadata to the first text run.
     const listStyleType = liStyle.listStyleType || (isOrdered ? "decimal" : "disc");
