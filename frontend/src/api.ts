@@ -18,7 +18,13 @@ async function http<T>(method: string, path: string, body?: unknown): Promise<T>
 
 // --- Types ---
 
-export type Material = { kind: "text" | "file" | "image"; uri: string; note?: string };
+export type Material = {
+  kind: "text" | "file" | "image";
+  uri: string;
+  name?: string;
+  parsed?: string | null;
+  note?: string;
+};
 
 export type DeckState = {
   thread_id: string;

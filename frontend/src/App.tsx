@@ -46,6 +46,28 @@ const REVIEW_STAGES: Array<{ id: ReviewStage; label: string }> = [
   { id: "brief", label: "Brief" },
   { id: "ready", label: "Final deck" },
 ];
+const SUPPORTED_UPLOAD_ACCEPT = ".txt,.md,.markdown,.pdf,.pptx,.jpg,.jpeg,.png,.docx,.xlsx";
+const SUPPORTED_UPLOAD_EXTENSIONS = new Set(
+  SUPPORTED_UPLOAD_ACCEPT.split(",").map((ext) => ext.toLowerCase()),
+);
+
+function isSupportedUpload(file: File): boolean {
+  const dot = file.name.lastIndexOf(".");
+  if (dot === -1) return false;
+  return SUPPORTED_UPLOAD_EXTENSIONS.has(file.name.slice(dot).toLowerCase());
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function materialLabel(material: Material): string {
+  if (material.name) return material.name;
+  if (material.kind === "text") return "Pasted text";
+  return material.uri;
+}
 
 export function App() {
   const [deck, setDeck] = useState<DeckState | null>(null);
@@ -120,7 +142,7 @@ export function App() {
   }, []);
 
   // Handle a single SSE event stream to completion.
-  async function consumeStream(url: string, body: unknown): Promise<void> {
+  async function consumeStream(url: string, body: unknown | FormData): Promise<void> {
     abortRef.current?.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -263,7 +285,25 @@ export function App() {
     aspect: string;
     density: string;
     styleHint: string;
+    files: File[];
   }) {
+    if (form.files.length > 0) {
+      const body = new FormData();
+      if (form.deckName.trim()) body.append("deck_name", form.deckName.trim());
+      if (form.text.trim()) body.append("text", form.text);
+      body.append("expected_pages", String(form.pages));
+      body.append("aspect_ratio", form.aspect);
+      body.append("density_preference", form.density);
+      body.append("language", "en");
+      if (form.styleHint.trim()) {
+        body.append("visual_style_preference", form.styleHint.trim());
+      }
+      for (const file of form.files) {
+        body.append("files", file);
+      }
+      await consumeStream(`${STREAM_BASE}/decks/upload/stream`, body);
+      return;
+    }
     const mats: Material[] = [];
     if (form.text.trim()) mats.push({ kind: "text", uri: `text:${form.text}` });
     const derivedName = form.text.trim().split("\n")[0].slice(0, 60) || null;
@@ -358,6 +398,9 @@ export function App() {
   const stage = (deck.values?.current_stage as string) ?? "";
   const hasInterrupt = (deck.interrupts?.length ?? 0) > 0;
   const hasPendingTasks = (deck.next?.length ?? 0) > 0;
+  const materialWarnings = Array.isArray(deck.values?.materials)
+    ? (deck.values.materials as Material[]).filter((material) => Boolean(material.note))
+    : [];
   const slides = (deck.values?.html_slides as Record<number, string>) ?? {};
   const renderedSlideIdx = Object.keys(slides)
     .map((k) => Number(k))
@@ -582,6 +625,25 @@ export function App() {
           {err}
         </div>
       )}
+      {materialWarnings.length > 0 && (
+        <div
+          style={{
+            color: "#92400e",
+            background: "#fffbeb",
+            border: "1px solid #fcd34d",
+            borderRadius: 6,
+            padding: 10,
+            marginBottom: 12,
+          }}
+        >
+          <strong style={{ display: "block", marginBottom: 6 }}>Material warnings</strong>
+          {materialWarnings.map((material, idx) => (
+            <div key={`${material.uri}-${idx}`} style={{ fontSize: 13, lineHeight: 1.45 }}>
+              <span style={{ fontWeight: 600 }}>{materialLabel(material)}:</span> {material.note}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div
         style={{
@@ -793,6 +855,7 @@ function CreateForm({
     aspect: string;
     density: string;
     styleHint: string;
+    files: File[];
   }) => void;
   busy: boolean;
   err: string | null;
@@ -805,6 +868,28 @@ function CreateForm({
   const [aspect, setAspect] = useState("16:9");
   const [density, setDensity] = useState("balanced");
   const [styleHint, setStyleHint] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const [fileError, setFileError] = useState<string | null>(null);
+
+  function addFiles(nextFiles: File[]) {
+    const accepted: File[] = [];
+    const rejected: string[] = [];
+    for (const file of nextFiles) {
+      if (isSupportedUpload(file)) {
+        accepted.push(file);
+      } else {
+        rejected.push(file.name);
+      }
+    }
+    if (accepted.length > 0) {
+      setFiles((prev) => [...prev, ...accepted]);
+    }
+    setFileError(
+      rejected.length > 0
+        ? `Unsupported file type: ${rejected.join(", ")}`
+        : null,
+    );
+  }
 
   return (
     <div style={{ maxWidth: 720, margin: "60px auto", fontFamily: "Georgia, serif" }}>
@@ -837,6 +922,82 @@ function CreateForm({
           style={{ display: "block", width: "100%", fontFamily: "inherit", padding: 8 }}
         />
       </label>
+      <label style={{ display: "block", marginTop: 12 }}>
+        Upload source files:
+        <input
+          type="file"
+          multiple
+          accept={SUPPORTED_UPLOAD_ACCEPT}
+          onChange={(e) => {
+            addFiles(Array.from(e.target.files ?? []));
+            e.currentTarget.value = "";
+          }}
+          style={{ display: "block", width: "100%", marginTop: 6 }}
+        />
+      </label>
+      <p style={{ color: "#555", fontSize: 13, marginTop: 6 }}>
+        Supported: TXT, Markdown, PDF, PPTX, JPG, PNG, DOCX, XLSX.
+      </p>
+      {fileError && (
+        <div
+          style={{
+            color: "#92400e",
+            background: "#fffbeb",
+            border: "1px solid #fcd34d",
+            borderRadius: 6,
+            padding: 8,
+            marginTop: 8,
+          }}
+        >
+          {fileError}
+        </div>
+      )}
+      {files.length > 0 && (
+        <div
+          style={{
+            marginTop: 10,
+            border: "1px solid #e5e5e5",
+            borderRadius: 8,
+            overflow: "hidden",
+          }}
+        >
+          {files.map((file, idx) => (
+            <div
+              key={`${file.name}-${file.size}-${idx}`}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                padding: "8px 10px",
+                borderBottom: idx === files.length - 1 ? "none" : "1px solid #f0f0f0",
+                background: "#fff",
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <div
+                  style={{
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    fontSize: 14,
+                  }}
+                >
+                  {file.name}
+                </div>
+                <div style={{ fontSize: 12, color: "#666" }}>{formatFileSize(file.size)}</div>
+              </div>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setFiles((prev) => prev.filter((_, fileIdx) => fileIdx !== idx))}
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginTop: 12 }}>
         <label>
           Pages
@@ -882,8 +1043,8 @@ function CreateForm({
       </div>
       <button
         style={{ marginTop: 16 }}
-        disabled={busy || !text.trim()}
-        onClick={() => onSubmit({ deckName, text, pages, aspect, density, styleHint })}
+        disabled={busy || (!text.trim() && files.length === 0)}
+        onClick={() => onSubmit({ deckName, text, pages, aspect, density, styleHint, files })}
       >
         {busy ? "Streaming…" : "Create deck"}
       </button>

@@ -13,13 +13,16 @@ export type StreamEvent =
 
 export async function* streamSSE(
   url: string,
-  body: unknown,
+  body: unknown | FormData,
   signal?: AbortSignal,
 ): AsyncGenerator<StreamEvent> {
+  const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-    body: JSON.stringify(body),
+    headers: isFormData
+      ? { Accept: "text/event-stream" }
+      : { "Content-Type": "application/json", Accept: "text/event-stream" },
+    body: isFormData ? body : JSON.stringify(body),
     signal,
   });
   if (!res.ok || !res.body) {

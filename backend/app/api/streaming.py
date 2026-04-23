@@ -21,13 +21,18 @@ import logging
 import uuid
 from typing import Any, Iterable, Iterator
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from langgraph.types import Command
 from pydantic import BaseModel, Field
 
 from .common import config_for, current_state, graph, mirror_to_disk
-from .decks import CreateDeckBody, _derive_deck_name
+from .decks import (
+    CreateDeckBody,
+    _build_initial_state,
+    _coerce_text_material,
+    normalize_uploaded_materials,
+)
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -121,18 +126,53 @@ def _safe_patch(patch: Any) -> dict[str, Any]:
 def stream_create_deck(body: CreateDeckBody) -> StreamingResponse:
     thread_id = uuid.uuid4().hex[:12]
     cfg = config_for(thread_id)
-    initial: dict[str, Any] = {
-        "thread_id": thread_id,
-        "deck_name": _derive_deck_name(body),
-        "materials": [m.model_dump() for m in body.materials],
-        "expected_pages": body.expected_pages,
-        "aspect_ratio": body.aspect_ratio,
-        "density_preference": body.density_preference,
-        "language": body.language,
-        "visual_style_preference": body.visual_style_preference,
-        "style_reference_image_uri": body.style_reference_image_uri,
-        "current_stage": "ingest",
-    }
+    initial = _build_initial_state(
+        thread_id=thread_id,
+        deck_name=body.deck_name,
+        materials=body.materials,
+        expected_pages=body.expected_pages,
+        aspect_ratio=body.aspect_ratio,
+        density_preference=body.density_preference,
+        language=body.language,
+        visual_style_preference=body.visual_style_preference,
+        style_reference_image_uri=body.style_reference_image_uri,
+    )
+
+    def gen() -> Iterable[str]:
+        yield _sse({"type": "thread", "thread_id": thread_id})
+        yield from _stream_graph(initial, cfg, thread_id)
+
+    return StreamingResponse(gen(), headers=SSE_HEADERS)
+
+
+@router.post("/decks/upload/stream")
+async def stream_create_deck_uploads(
+    deck_name: str | None = Form(default=None),
+    text: str = Form(default=""),
+    expected_pages: int = Form(default=10),
+    aspect_ratio: str = Form(default="16:9"),
+    density_preference: str = Form(default="balanced"),
+    language: str = Form(default="en"),
+    visual_style_preference: str | None = Form(default=None),
+    files: list[UploadFile] = File(...),
+) -> StreamingResponse:
+    thread_id = uuid.uuid4().hex[:12]
+    cfg = config_for(thread_id)
+    materials = []
+    if text.strip():
+        materials.append(_coerce_text_material(text))
+    materials.extend(await normalize_uploaded_materials(thread_id, files))
+    initial = _build_initial_state(
+        thread_id=thread_id,
+        deck_name=deck_name,
+        materials=materials,
+        expected_pages=expected_pages,
+        aspect_ratio=aspect_ratio,
+        density_preference=density_preference,
+        language=language,
+        visual_style_preference=visual_style_preference,
+        style_reference_image_uri=None,
+    )
 
     def gen() -> Iterable[str]:
         yield _sse({"type": "thread", "thread_id": thread_id})

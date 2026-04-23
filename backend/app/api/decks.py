@@ -25,11 +25,25 @@ from ..graph.graph import DB_PATH
 from .common import config_for, current_state, graph, mirror_to_disk
 
 router = APIRouter()
+SUPPORTED_UPLOAD_EXTENSIONS = {
+    ".txt",
+    ".md",
+    ".markdown",
+    ".pdf",
+    ".pptx",
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".docx",
+    ".xlsx",
+}
+IMAGE_UPLOAD_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 
 
 class Material(BaseModel):
     kind: str = Field(description="text | file | image")
     uri: str
+    name: str | None = None
     note: str | None = None
 
 
@@ -42,6 +56,111 @@ class CreateDeckBody(BaseModel):
     visual_style_preference: str | None = None
     style_reference_image_uri: str | None = None
     materials: list[Material] = Field(default_factory=list)
+
+
+def _serialize_material(material: Material | dict[str, Any]) -> dict[str, Any]:
+    return material.model_dump() if isinstance(material, Material) else dict(material)
+
+
+def _material_name(material: Material | dict[str, Any]) -> str | None:
+    data = _serialize_material(material)
+    if data.get("name"):
+        return str(data["name"])
+    uri = str(data.get("uri") or "")
+    if uri.startswith("text:"):
+        return None
+    name = Path(uri).name
+    return name or None
+
+
+def _coerce_text_material(text: str) -> Material:
+    return Material(kind="text", uri=f"text:{text}")
+
+
+def _derive_deck_name_from_materials(
+    deck_name: str | None,
+    materials: list[Material | dict[str, Any]],
+) -> str:
+    if deck_name:
+        return deck_name
+    for material in materials:
+        data = _serialize_material(material)
+        if data.get("kind") == "text" and str(data.get("uri") or "").startswith("text:"):
+            text = str(data["uri"]).removeprefix("text:")
+            first = text.strip().split("\n")[0]
+            name = first[:60] + ("…" if len(first) > 60 else "")
+            if name:
+                return name
+    for material in materials:
+        if name := _material_name(material):
+            return Path(name).stem or "Untitled deck"
+    return "Untitled deck"
+
+
+def _build_initial_state(
+    *,
+    thread_id: str,
+    deck_name: str | None,
+    materials: list[Material | dict[str, Any]],
+    expected_pages: int,
+    aspect_ratio: str,
+    density_preference: str,
+    language: str,
+    visual_style_preference: str | None,
+    style_reference_image_uri: str | None,
+) -> dict[str, Any]:
+    return {
+        "thread_id": thread_id,
+        "deck_name": _derive_deck_name_from_materials(deck_name, materials),
+        "materials": [_serialize_material(material) for material in materials],
+        "expected_pages": expected_pages,
+        "aspect_ratio": aspect_ratio,
+        "density_preference": density_preference,
+        "language": language,
+        "visual_style_preference": visual_style_preference,
+        "style_reference_image_uri": style_reference_image_uri,
+        "current_stage": "ingest",
+    }
+
+
+def _sanitize_upload_filename(filename: str | None) -> str:
+    candidate = Path(filename or f"upload-{uuid.uuid4().hex[:8]}").name
+    if not candidate or candidate in {".", ".."}:
+        return f"upload-{uuid.uuid4().hex[:8]}"
+    return candidate
+
+
+def _validate_upload_extension(filename: str) -> str:
+    ext = Path(filename).suffix.lower()
+    if ext not in SUPPORTED_UPLOAD_EXTENSIONS:
+        supported = ", ".join(sorted(SUPPORTED_UPLOAD_EXTENSIONS))
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type for '{filename}'. Supported types: {supported}",
+        )
+    return ext
+
+
+async def _store_upload(thread_id: str, file: UploadFile) -> tuple[Material, int]:
+    filename = _sanitize_upload_filename(file.filename)
+    ext = _validate_upload_extension(filename)
+    contents = await file.read()
+    await file.close()
+    path = store.save_material(thread_id, filename, contents)
+    kind = "image" if ext in IMAGE_UPLOAD_EXTENSIONS else "file"
+    material = Material(kind=kind, uri=str(path), name=filename)
+    return material, len(contents)
+
+
+async def normalize_uploaded_materials(
+    thread_id: str,
+    files: list[UploadFile],
+) -> list[Material]:
+    materials: list[Material] = []
+    for file in files:
+        material, _size = await _store_upload(thread_id, file)
+        materials.append(material)
+    return materials
 
 
 @router.get("/decks")
@@ -88,35 +207,29 @@ def list_decks() -> dict[str, Any]:
 
 
 def _derive_deck_name(body: CreateDeckBody) -> str:
-    if body.deck_name:
-        return body.deck_name
-    for m in body.materials:
-        if m.kind == "text" and m.uri.startswith("text:"):
-            text = m.uri.removeprefix("text:")
-            first = text.strip().split("\n")[0]
-            name = first[:60] + ("…" if len(first) > 60 else "")
-            return name if name else "Untitled deck"
-    return "Untitled deck"
+    return _derive_deck_name_from_materials(body.deck_name, body.materials)
 
 
 @router.post("/decks")
 def create_deck(body: CreateDeckBody) -> dict[str, Any]:
     thread_id = uuid.uuid4().hex[:12]
     cfg = config_for(thread_id)
-    initial: dict[str, Any] = {
-        "thread_id": thread_id,
-        "deck_name": _derive_deck_name(body),
-        "materials": [m.model_dump() for m in body.materials],
-        "expected_pages": body.expected_pages,
-        "aspect_ratio": body.aspect_ratio,
-        "density_preference": body.density_preference,
-        "language": body.language,
-        "visual_style_preference": body.visual_style_preference,
-        "style_reference_image_uri": body.style_reference_image_uri,
-        "current_stage": "ingest",
-    }
+    initial = _build_initial_state(
+        thread_id=thread_id,
+        deck_name=body.deck_name,
+        materials=body.materials,
+        expected_pages=body.expected_pages,
+        aspect_ratio=body.aspect_ratio,
+        density_preference=body.density_preference,
+        language=body.language,
+        visual_style_preference=body.visual_style_preference,
+        style_reference_image_uri=body.style_reference_image_uri,
+    )
     # Invoke runs until the first interrupt (structure gate).
-    graph().invoke(initial, cfg)  # type: ignore[arg-type]
+    try:
+        graph().invoke(initial, cfg)  # type: ignore[arg-type]
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     mirror_to_disk(thread_id)
     return current_state(thread_id)
 
@@ -145,12 +258,8 @@ def get_catalog(thread_id: str) -> dict[str, Any]:
 
 @router.post("/decks/{thread_id}/materials")
 async def upload_material(thread_id: str, file: UploadFile = File(...)) -> dict[str, Any]:
-    contents = await file.read()
-    filename = file.filename or f"upload-{uuid.uuid4().hex[:8]}"
-    path = store.save_material(thread_id, filename, contents)
-    ext = Path(filename).suffix.lower()
-    kind = "image" if ext in (".png", ".jpg", ".jpeg", ".webp", ".gif") else "file"
-    return {"kind": kind, "uri": str(path), "name": filename, "bytes": len(contents)}
+    material, size = await _store_upload(thread_id, file)
+    return {**material.model_dump(), "bytes": size}
 
 
 @router.get("/decks/{thread_id}/slides/{slide_idx}")

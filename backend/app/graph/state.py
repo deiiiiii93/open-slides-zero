@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 class Material(BaseModel):
     kind: Literal["text", "file", "image"]
     uri: str                                # "text:..." | local path | "image:path"
+    name: str | None = None                 # original upload filename, if any
     parsed: str | None = None               # extracted text (filled by ingest)
     note: str | None = None
 
