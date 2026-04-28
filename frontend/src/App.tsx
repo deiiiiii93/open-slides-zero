@@ -88,6 +88,7 @@ export function App() {
   const [buffersByTag, setBuffersByTag] = useState<Record<string, string>>({});
   const [activeNode, setActiveNode] = useState<string | null>(null);
   const [activeSlide, setActiveSlide] = useState<number | null>(null);
+  const [activeModel, setActiveModel] = useState<string | null>(null);
   const [elapsedByTag, setElapsedByTag] = useState<Record<string, number>>({});
   const tagStartRef = useRef<Record<string, number>>({});
   const abortRef = useRef<AbortController | null>(null);
@@ -156,6 +157,7 @@ export function App() {
     setBuffersByTag({});
     setActiveNode(null);
     setActiveSlide(null);
+    setActiveModel(null);
     setElapsedByTag({});
     tagStartRef.current = {};
     setErr(null);
@@ -171,6 +173,7 @@ export function App() {
       setBusy(false);
       setActiveNode(null);
       setActiveSlide(null);
+      setActiveModel(null);
     }
   }
 
@@ -184,6 +187,7 @@ export function App() {
       case "event": {
         setActiveNode(ev.node);
         setActiveSlide(ev.slide_idx ?? null);
+        if (ev.model) setActiveModel(ev.model);
         break;
       }
       case "token": {
@@ -468,6 +472,11 @@ export function App() {
           {stage === "html" && expectedCount > 0 && renderedCount < expectedCount && (
             <span style={{ fontSize: 13, color: "#64748b" }}>
               rendered {renderedCount}/{expectedCount}
+            </span>
+          )}
+          {busy && activeModel && (
+            <span style={{ fontSize: 12, color: "#64748b" }}>
+              model: <code>{activeModel}</code>
             </span>
           )}
           {busy && (

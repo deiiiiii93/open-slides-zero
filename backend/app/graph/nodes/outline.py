@@ -58,12 +58,13 @@ def propose_structures_node(state: dict[str, Any]) -> dict[str, Any]:
             ),
         },
     ]
-    push_event({"node": "propose_structure", "state": "started"})
+    model = get_model("outline")
+    push_event({"node": "propose_structure", "state": "started", "model": model})
     with tagged_stream("propose_structure"):
         picked = zenmux.chat_structured(
-            get_model("outline"), messages, _ProposedChoices, temperature=0.2, stream=True
+            model, messages, _ProposedChoices, temperature=0.2, stream=True
         )
-    push_event({"node": "propose_structure", "state": "finished"})
+    push_event({"node": "propose_structure", "state": "finished", "model": model})
     return {
         "scenario_id": picked.recommended_scenario_id,
         "structure_candidates": picked.candidate_structure_ids,
@@ -123,12 +124,13 @@ def outline_node(state: dict[str, Any]) -> dict[str, Any]:
     # No max_tokens cap: outlines in dense languages (zh/ja) plus schema overhead
     # regularly exceeded 4000 tokens and truncated mid-JSON, causing the
     # chat_structured retry to fail both attempts on the same truncation.
-    push_event({"node": "outline", "state": "started"})
+    model = get_model("outline")
+    push_event({"node": "outline", "state": "started", "model": model})
     with tagged_stream("outline"):
         outline = zenmux.chat_structured(
-            get_model("outline"), messages, _Outline, temperature=0.3, stream=True
+            model, messages, _Outline, temperature=0.3, stream=True
         )
-    push_event({"node": "outline", "state": "finished"})
+    push_event({"node": "outline", "state": "finished", "model": model})
 
     md_lines = [
         f"# Outline ({structure['name_en']} / {scenario['name_en']})",

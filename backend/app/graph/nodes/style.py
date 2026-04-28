@@ -112,7 +112,7 @@ def style_node(state: dict[str, Any]) -> dict[str, Any]:
         })
 
     model = get_model("style.vision") if ref else get_model("style.text")
-    push_event({"node": "style", "state": "started"})
+    push_event({"node": "style", "state": "started", "model": model})
     with tagged_stream("style"):
         result = zenmux.chat_structured(
             model,
@@ -122,7 +122,7 @@ def style_node(state: dict[str, Any]) -> dict[str, Any]:
             temperature=0.4,
             stream=True,
         )
-    push_event({"node": "style", "state": "finished"})
+    push_event({"node": "style", "state": "finished", "model": model})
 
     pal = result.palette
     md = "\n".join([

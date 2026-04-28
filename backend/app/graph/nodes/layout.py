@@ -198,12 +198,13 @@ def layout_node(state: dict[str, Any]) -> dict[str, Any]:
                 "Treat these as direct user instructions for this lane."
             ),
         })
-    push_event({"node": "layout", "state": "started"})
+    model = get_model("layout")
+    push_event({"node": "layout", "state": "started", "model": model})
     with tagged_stream("layout"):
         enriched = zenmux.chat_structured(
-            get_model("layout"), messages, _BulkSignals, temperature=0.2, stream=True
+            model, messages, _BulkSignals, temperature=0.2, stream=True
         )
-    push_event({"node": "layout", "state": "finished"})
+    push_event({"node": "layout", "state": "finished", "model": model})
     signal_by_idx = {s.slide_idx: s for s in enriched.slides}
 
     out: list[dict[str, Any]] = []

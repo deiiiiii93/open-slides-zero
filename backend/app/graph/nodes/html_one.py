@@ -239,7 +239,13 @@ def html_one_node(state: dict[str, Any]) -> dict[str, Any]:
     creator_prompt = brief.get("creator_prompt") or state.get("creator_prompt")
     base_messages = _slide_prompt(slide, brief, feedback=feedback, creator_prompt=creator_prompt)
     tag = f"html:{slide_idx}"
-    push_event({"node": "html_one", "slide_idx": slide_idx, "state": "started"})
+    model = get_model("html")
+    push_event({
+        "node": "html_one",
+        "slide_idx": slide_idx,
+        "state": "started",
+        "model": model,
+    })
     previous_html = ""
     last_reason = f"slide {slide_idx}: unknown html generation failure"
     last_finish_reason: str | None = None
@@ -258,7 +264,7 @@ def html_one_node(state: dict[str, Any]) -> dict[str, Any]:
         try:
             with tagged_stream(tag):
                 result = zenmux.chat_with_metadata(
-                    get_model("html"),
+                    model,
                     messages,
                     temperature=0.4,
                     max_tokens=_html_max_tokens(),
@@ -269,7 +275,13 @@ def html_one_node(state: dict[str, Any]) -> dict[str, Any]:
             last_reason = str(exc)
             last_finish_reason = None
             last_errors = [f"html_one slide {slide_idx}: {exc}"]
-            push_event({"node": "html_one", "slide_idx": slide_idx, "state": "error", "error": str(exc)})
+            push_event({
+                "node": "html_one",
+                "slide_idx": slide_idx,
+                "state": "error",
+                "error": str(exc),
+                "model": model,
+            })
             return _failure_update(
                 slide_idx=slide_idx,
                 attempt_count=attempt,
@@ -291,7 +303,12 @@ def html_one_node(state: dict[str, Any]) -> dict[str, Any]:
             )
 
         if not validation_errors:
-            push_event({"node": "html_one", "slide_idx": slide_idx, "state": "finished"})
+            push_event({
+                "node": "html_one",
+                "slide_idx": slide_idx,
+                "state": "finished",
+                "model": model,
+            })
             return {"html_slides": {slide_idx: html}}
 
         previous_html = html
@@ -303,7 +320,13 @@ def html_one_node(state: dict[str, Any]) -> dict[str, Any]:
         if attempt >= _html_max_attempts():
             break
 
-    push_event({"node": "html_one", "slide_idx": slide_idx, "state": "error", "error": last_reason})
+    push_event({
+        "node": "html_one",
+        "slide_idx": slide_idx,
+        "state": "error",
+        "error": last_reason,
+        "model": model,
+    })
     return _failure_update(
         slide_idx=slide_idx,
         attempt_count=_html_max_attempts(),

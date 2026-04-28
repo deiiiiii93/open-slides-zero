@@ -5,7 +5,14 @@ export type StreamEvent =
   | { type: "thread"; thread_id: string; parent_thread_id?: string; lane_id?: string }
   | { type: "lane"; lane: any }
   | { type: "token"; tag: string | null; text: string }
-  | { type: "event"; node: string; state: "started" | "finished" | "error"; slide_idx?: number; error?: string }
+  | {
+      type: "event";
+      node: string;
+      state: "started" | "finished" | "error";
+      slide_idx?: number;
+      error?: string;
+      model?: string;
+    }
   | { type: "update"; node: string; patch: Record<string, any> }
   | { type: "interrupt"; payload: any }
   | { type: "done"; state: any; result?: any }
