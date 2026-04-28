@@ -3,6 +3,7 @@
 // prevent the slide's CSS from leaking into the app chrome.
 
 import { useMemo } from "react";
+import { normalizeImagePlaceholders } from "./imagePlaceholders";
 
 type Props = {
   slides: Record<number, string>;
@@ -38,7 +39,7 @@ export function DeckCanvas({
     [slideOrder, slides],
   );
 
-  const html = slides[currentSlide] ?? pendingSlideHtml(baseW, baseH, currentSlide);
+  const html = normalizeImagePlaceholders(slides[currentSlide] ?? pendingSlideHtml(baseW, baseH, currentSlide));
 
   return (
     <div style={{ display: "flex", gap: 16 }}>

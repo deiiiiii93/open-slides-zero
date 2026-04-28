@@ -30,3 +30,7 @@ def test_html_prompt_includes_no_filler_rule():
     assert "Every element should" in system_prompt
     assert "earn its place." in system_prompt
     assert "One thousand no's for every yes." in system_prompt
+    assert 'data-image-placeholder="true"' in system_prompt
+    assert "Add image here" in system_prompt
+    assert "DO NOT emit <img>" in system_prompt
+    assert "Use <img> only for real, non-empty src values" in system_prompt

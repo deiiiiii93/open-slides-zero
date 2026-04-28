@@ -59,8 +59,9 @@ def style_node(state: dict[str, Any]) -> dict[str, Any]:
         "- Choose editorially strong typefaces (e.g. serif display + humanist sans, "
         "slab headline + geometric body, or similar considered pairings).\n"
         "- All colors must be explicit hex values.\n"
-        "- Imagery policy describes how images/placeholders are used (no SVG illustrations "
-        "of people/things; always placeholders with prompt hints).\n"
+        "- Imagery policy describes how images/image slots are used (no SVG illustrations "
+        "of people/things; empty image positions must be visible "
+        "data-image-placeholder=\"true\" slots with prompt hints, not empty <img> tags).\n"
         "- Density must be chosen from {minimal, balanced, dense, very_dense} "
         "consistent with Layout Catalog font limits."
     )

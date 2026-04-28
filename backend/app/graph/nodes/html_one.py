@@ -22,13 +22,15 @@ from ...llm.stream import push_event, tagged_stream
 ANTI_SLOP_RULES = """\
 Avoid AI-slop tropes (these are non-negotiable):
 - NO aggressive gradient backgrounds.
-- NO emoji unless explicitly part of the brand; prefer text placeholders.
+- NO emoji unless explicitly part of the brand.
 - NO containers using rounded corners with a left-border accent color.
-- NO imagery drawn inline via SVG; use <img data-prompt-hint="..."> placeholders.
+- NO imagery drawn inline via SVG. For empty image positions, use explicit
+  image-slot divs, not empty/broken <img> tags.
 - NO overused font families (Inter, Roboto, Arial, Fraunces, system-ui, -apple-system).
 - Do not add filler content. Never pad a design with placeholder text, dummy
   sections, or informational material just to fill space. Every element should
-  earn its place.
+  earn its place. The only permitted placeholder copy is the required image-slot
+  affordance ("Add image here" plus a short "Suggested: ..." hint).
 - One thousand no's for every yes.
 - DO use `text-wrap: pretty`, CSS grid, modern advanced CSS (subgrid, container
   queries, :has()) where they actually help readability.
@@ -63,9 +65,16 @@ document for a single slide. Hard constraints:
   with overflow:hidden, box-sizing:border-box, position:relative.
 - No pagination text ("Slide X of Y") or pagination dots.
 - No overflow:auto or overflow:scroll anywhere.
-- All <img> placeholders must have explicit width/height attributes AND
-  a data-prompt-hint="..." attribute describing what image to generate later,
-  AND object-fit:cover.
+- For image positions without a real image source, DO NOT emit <img>. Emit a
+  visible image slot:
+  <div data-image-placeholder="true" data-prompt-hint="..." style="width:...px;height:...px;...">
+    <span>Add image here</span>
+    <span>Suggested: concise image description</span>
+  </div>
+  The placeholder div itself must include inline width and height, centered text,
+  subtle fill, dashed/bordered treatment, and box-sizing:border-box.
+- Use <img> only for real, non-empty src values; real images must have explicit
+  width/height attributes or inline width/height styles, and object-fit:cover.
 - Use inline <style> — no external stylesheet or JS frameworks.
 - Use the `{pattern}` layout pattern with zones: {zones}.
 

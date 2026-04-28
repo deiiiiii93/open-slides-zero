@@ -10,6 +10,7 @@
 import JSZip from "jszip";
 import PptxGenJS from "pptxgenjs";
 import type { DeckState } from "./api";
+import { normalizeImagePlaceholders } from "./imagePlaceholders";
 
 // Keep in sync with DeckCanvas.tsx:17-21. Duplicated rather than shared because
 // it's four lines and importing DeckCanvas just for a constant is overkill.
@@ -41,7 +42,7 @@ function getDeckName(deck: DeckState): string {
 function getSlideEntries(deck: DeckState): Array<[number, string]> {
   const slides = (deck.values?.html_slides ?? {}) as Record<string | number, string>;
   return Object.entries(slides)
-    .map(([k, v]) => [Number(k), v] as [number, string])
+    .map(([k, v]) => [Number(k), typeof v === "string" ? normalizeImagePlaceholders(v) : v] as [number, string])
     .filter(([k, v]) => Number.isInteger(k) && typeof v === "string" && v.length > 0)
     .sort((a, b) => a[0] - b[0]);
 }

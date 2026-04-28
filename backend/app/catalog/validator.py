@@ -47,6 +47,59 @@ FILLER_TEXT_PATTERNS = [
     r"\byour\s+text\s+here\b",
 ]
 
+IMAGE_SLOT_LABEL_RE = re.compile(
+    r"\b(add\s+image\s+here|replace\s+with\s+image)\b",
+    flags=re.I,
+)
+
+START_TAG_RE = re.compile(r"<[a-z][\w:-]*\b[^>]*>", flags=re.I)
+
+
+def _attr_value(tag: str, name: str) -> str | None:
+    pattern = (
+        rf"\b{re.escape(name)}\s*=\s*"
+        r"(?:\"([^\"]*)\"|'([^']*)'|([^\s\"'=<>`]+))"
+    )
+    m = re.search(pattern, tag, flags=re.I)
+    if not m:
+        return None
+    for group in m.groups():
+        if group is not None:
+            return unescape(group)
+    return ""
+
+
+def _style_has_dimension(style: str, prop: str) -> bool:
+    return bool(re.search(rf"(?:^|;)\s*{prop}\s*:\s*[^;]+", style, flags=re.I))
+
+
+def _img_has_explicit_dimensions(tag: str) -> bool:
+    style = _attr_value(tag, "style") or ""
+    has_width = _attr_value(tag, "width") is not None or _style_has_dimension(style, "width")
+    has_height = _attr_value(tag, "height") is not None or _style_has_dimension(style, "height")
+    return has_width and has_height
+
+
+def _slot_has_inline_dimensions(tag: str) -> bool:
+    style = _attr_value(tag, "style") or ""
+    return _style_has_dimension(style, "width") and _style_has_dimension(style, "height")
+
+
+def _tag_name(tag: str) -> str:
+    m = re.match(r"<\s*([a-z][\w:-]*)", tag, flags=re.I)
+    return m.group(1).lower() if m else ""
+
+
+def _inner_html_for_start_tag(html: str, start_match: re.Match[str]) -> str:
+    tag = start_match.group(0)
+    name = _tag_name(tag)
+    if not name:
+        return ""
+    close = re.search(rf"</\s*{re.escape(name)}\s*>", html[start_match.end():], flags=re.I)
+    if not close:
+        return ""
+    return html[start_match.end():start_match.end() + close.start()]
+
 
 def _font_sizes_in_px(html: str) -> list[int]:
     out: list[int] = []
@@ -138,16 +191,33 @@ def validate_slide_html(
 
     for m in re.finditer(r"<img\b[^>]*>", html, flags=re.I):
         tag = m.group(0)
-        if "width=" not in tag or "height=" not in tag:
-            if "width:" not in tag and "height:" not in tag:
-                warnings.append(Issue("image_dimensions", "warning",
-                                      "Image placeholder missing explicit width/height."))
-        if "data-prompt-hint" not in tag:
-            warnings.append(Issue("image_prompt_hint", "warning",
-                                  "Image placeholder missing data-prompt-hint."))
+        src = _attr_value(tag, "src")
+        if src is None or not src.strip():
+            errors.append(Issue("image_src_required", "error",
+                                "Do not emit empty <img> placeholders; use a visible data-image-placeholder slot."))
+            continue
+        if not _img_has_explicit_dimensions(tag):
+            warnings.append(Issue("image_dimensions", "warning",
+                                  "Image missing explicit width/height."))
         if "object-fit" not in tag:
             warnings.append(Issue("image_object_fit", "warning",
-                                  "Image placeholder should have object-fit:cover."))
+                                  "Image should have object-fit:cover."))
+
+    for m in START_TAG_RE.finditer(html):
+        tag = m.group(0)
+        if (_attr_value(tag, "data-image-placeholder") or "").lower() != "true":
+            continue
+        if not (_attr_value(tag, "data-prompt-hint") or "").strip():
+            errors.append(Issue("image_placeholder_hint", "error",
+                                "Image placeholder slot missing data-prompt-hint."))
+        if not _slot_has_inline_dimensions(tag):
+            errors.append(Issue("image_placeholder_dimensions", "error",
+                                "Image placeholder slot must declare inline width and height."))
+        body = _inner_html_for_start_tag(html, m)
+        visible = _visible_text(body)
+        if not IMAGE_SLOT_LABEL_RE.search(visible):
+            errors.append(Issue("image_placeholder_label", "error",
+                                "Image placeholder slot must visibly say 'Add image here' or 'Replace with image'."))
 
     if re.search(r"text-overflow\s*:\s*ellipsis", html, flags=re.I):
         warnings.append(Issue("no_text_truncation", "warning",

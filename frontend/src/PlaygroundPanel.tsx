@@ -14,6 +14,7 @@ import {
   type DeckState,
   type PlaygroundLane,
 } from "./api";
+import { normalizeImagePlaceholders } from "./imagePlaceholders";
 import { streamSSE, type StreamEvent } from "./sse";
 
 type Props = {
@@ -833,7 +834,7 @@ function ArenaView({
 function ArenaLane({ lane, slideIdx }: { lane: PlaygroundLane; slideIdx: number }) {
   const state = lane.state;
   const slides = (state?.values?.html_slides as Record<number, string>) ?? {};
-  const html = slides[slideIdx];
+  const html = slides[slideIdx] ? normalizeImagePlaceholders(slides[slideIdx]) : undefined;
   const aspect = (state?.values?.aspect_ratio as string | undefined) ?? "16:9";
   const [baseW, baseH] = CANVAS[aspect] ?? CANVAS["16:9"];
   const scale = ARENA_WIDTH / baseW;
