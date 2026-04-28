@@ -1,87 +1,142 @@
 # Open Slides Zero
 
-End-to-end slide-deck agent: materials → outline → visual style → layout → HTML,
-with three human review gates and a comment-driven edit loop. LLM calls go
-through **ZenMux** (OpenAI-compatible gateway). State + history + HITL are
-managed by **LangGraph**; each subagent makes direct OpenAI-SDK calls so per-node
-model routing stays explicit.
+Open Slides Zero is an end-to-end slide-deck agent. It turns source materials
+into an outline, visual direction, layout plan, and HTML slide deck, with human
+review gates and a comment-driven edit loop.
 
-## Architecture (at a glance)
+The backend uses FastAPI, LangGraph, and the OpenAI SDK pointed at ZenMux for
+model routing. The frontend is a Vite + React app.
 
-```
-Frontend (Vite + React, :5173)
-    │   fetch → /api/*  (proxied)
-    ▼
-FastAPI (:8000) ── app/api/{decks,hitl,comments,history}
-    │
-    ▼
+## Examples
+
+Open Slides Zero can produce dense analytical decks and more visual,
+design-led decks from plain source material.
+
+### Snowball Risk Profile
+
+![Snowball Risk Profile cover](docs/images/snowball-risk-profile-cover.png)
+
+![Snowball Risk Profile pricing and loss probability slide](docs/images/snowball-risk-profile-pricing.png)
+
+### How to make your coffee bar attractive?
+
+![Coffee bar design cover](docs/images/coffee-bar-cover.png)
+
+![Coffee bar six-principle framework slide](docs/images/coffee-bar-framework.png)
+
+## Architecture
+
+```text
+Frontend (Vite + React, :5174)
+    | fetch -> /api/* (proxied)
+    v
+FastAPI (:8765) -> app/api/{decks,hitl,comments,history,playground}
+    |
+    v
 LangGraph StateGraph
-    ingest → propose_structure → [interrupt: structure]
-             → outline → [interrupt: outline]
-                    ├─ normal → style → [interrupt: style]
-                    └─ playground → lane threads from shared outline
-             → layout  → [interrupt: layout]
-             → consolidate → Send(html_one, i) × N → ready
-             (⇄ edit_intent on comments)
-    │
-    ▼
-SqliteSaver checkpointer  (authoritative state)
-    │
-    ▼
-./threads/{thread_id}/*.md, slides/*.html  (derived mirror)
+    ingest -> propose_structure -> [review: structure]
+           -> outline -> [review: outline]
+           -> style -> [review: style]
+           -> layout -> [review: layout]
+           -> consolidate -> Send(html_one, i) x N -> ready
+           <-> edit_intent on comments
+    |
+    v
+SqliteSaver checkpointer (authoritative state)
+    |
+    v
+./threads/{thread_id}/*.md and slides/*.html (derived mirror)
 ```
 
-**Harness choice.** LangGraph does the state machine / checkpointing / HITL /
-Send-fan-out. LLM calls are direct `OpenAI(base_url=ZENMUX_BASE_URL).chat…`
-so we can route to any provider behind ZenMux (OpenAI, Anthropic, Gemini,
-Qwen, Sapiens) without fighting a ChatModel wrapper. See the plan at
-`/Users/fuxinyao/.claude/plans/we-re-building-an-agent-calm-puzzle.md`.
+LangGraph owns the state machine, checkpointing, review interrupts, and
+parallel `Send` fan-out. LLM calls are direct OpenAI SDK calls against the
+ZenMux OpenAI-compatible gateway, so per-node model routing stays explicit in
+`backend/app/llm/models.py`.
 
-## Backend setup
+## Quickstart
+
+### Backend
+
+Requires Python 3.11.
 
 ```bash
 cd backend
-python -m venv .venv && source .venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate
 pip install -e ".[dev]"
-cp .env.example .env          # fill in ZENMUX_API_KEY
-export $(cat .env | xargs)    # or use direnv / dotenv-cli
-uvicorn app.main:app --reload --port 8000
+cp .env.example .env
+# Edit .env and set ZENMUX_API_KEY.
+set -a && source .env && set +a
+uvicorn app.main:app --host 127.0.0.1 --port 8765 --reload
 ```
 
-Tests (no network required — validator + scorer + edit-collapse):
+### Frontend
 
-```bash
-pytest
-```
-
-## Frontend setup
+Requires Node.js 20 or newer.
 
 ```bash
 cd frontend
 npm install
-npm run dev          # opens :5173, proxies /api → :8000
+npm run dev
 ```
 
-## Usage (manual demo)
+The frontend dev server binds to `http://localhost:5174` and proxies `/api/*`
+to `http://localhost:8765`.
 
-1. Paste source material into the form; pick pages/aspect/density; Create.
-2. Gate ① — pick scenario + narrative structure from the shortlist.
-3. Gate ② — review the generated outline; continue normally or open Creator Playground.
-4. Gate ③ — review the generated palette/typography/density; approve or revise.
-5. Gate ④ — inspect per-slide layout + scorer rankings; override patterns if needed.
-6. Deck renders slide-by-slide as iframes at 960×540 (scaled to fit).
-7. Draw a box on any slide, leave a comment. The agent classifies the intent
-   into one or more edit-ops, collapses to the earliest affected stage, and
-   regenerates downstream.
+## Secrets
 
-Creator Playground keeps the outline shared and creates up to five lane threads.
-Each lane has its own creator prompt, style/layout/html checkpoints, cut-off
-status, and slide-by-slide arena comparison. Saved masterpiece prompts are stored
-in the checkpoint SQLite DB.
+Do not commit real secrets. Copy `backend/.env.example` to `backend/.env` for
+local development and keep real API keys in that ignored file. The repository
+tracks only placeholder environment examples.
 
-## Per-subagent model routing
+Before publishing or opening a PR, verify that only the example env file is
+tracked:
 
-Defaults live in `backend/app/llm/models.py`. Override any node via env:
+```bash
+git ls-files | rg '(^|/)\.env($|\.)|\.env'
+git check-ignore -v .env backend/.env frontend/.env backend/.env.local frontend/.env.local
+```
+
+## Verification
+
+Backend tests:
+
+```bash
+cd backend
+.venv/bin/pytest
+```
+
+Frontend build:
+
+```bash
+cd frontend
+npm run build
+```
+
+Graph import sanity check:
+
+```bash
+backend/.venv/bin/python -c "import os; os.environ['ZENMUX_API_KEY']='probe'; from app.graph.graph import get_graph; print('nodes:', list(get_graph().nodes.keys()))"
+```
+
+## Usage
+
+1. Paste source material or upload supported files.
+2. Pick page count, aspect ratio, density, language, and optional visual style.
+3. Review the proposed scenario and narrative structure.
+4. Review or revise the generated outline.
+5. Review visual style, then layout choices.
+6. Render the deck slide by slide.
+7. Draw a box on any slide and leave a comment to trigger targeted edits.
+
+Creator Playground can branch from a shared outline into multiple lane threads,
+each with its own creator prompt, style/layout/html checkpoints, cutoff status,
+and slide-by-slide arena comparison.
+
+## Model Routing
+
+Default subagent models live in `backend/app/llm/models.py`. Override any node
+with environment variables:
 
 ```bash
 OSZ_MODEL_OUTLINE=anthropic/claude-sonnet-4.6
@@ -89,73 +144,47 @@ OSZ_MODEL_STYLE_VISION=google/gemini-3.1-pro-preview
 OSZ_MODEL_HTML=anthropic/claude-sonnet-4.6
 ```
 
-Vision guard: if a non-vision-capable model is routed to a node with images,
-the adapter reroutes to `VISION_FALLBACK` and logs a warning.
+If a non-vision-capable model is routed to a node with images, the adapter
+reroutes to the configured vision fallback.
 
-## File map
+## Repository Map
 
-```
+```text
 backend/
   app/
-    main.py                     FastAPI entry
-    api/
-      decks.py                  POST /decks, GET /decks/{id}, upload materials
-      hitl.py                   POST /decks/{id}/resume
-      comments.py               comment intake + apply_edits (earliest-stage-wins)
-      history.py                history, regenerate-from-stage, rewind
-      playground.py             creator playground lanes + masterpiece prompts
-      common.py                 graph singleton + state serializers
-    graph/
-      state.py                  SlideState TypedDict + Pydantic leaves
-      graph.py                  StateGraph wiring, interrupts, Send fan-out
-      nodes/
-        ingest.py               material parsing (text + vision for images)
-        outline.py              propose_structures_node + outline_node
-        style.py                visual style (palette/typography/density/tone)
-        layout.py               per-slide pattern picking via LLM + Python scorer
-        consolidate.py          deterministic brief merge (no LLM)
-        html_one.py             Send target: one slide's HTML with anti-slop rules
-        edit.py                 comment → edit-op list + earliest-stage collapse
-    llm/
-      zenmux.py                 OpenAI(ZenMux) client, retry, structured output,
-                                stream, vision guard
-      models.py                 NODE → model id mapping (+ env override)
-      vision.py                 image_url part helpers
-      stream.py                 LangGraph get_stream_writer() passthrough
-    catalog/
-      structures.py             STRUCTURE_DEFINITIONS (SCQA, Pyramid, BLUF, ...)
-      scenarios.py              SCENARIO_DEFINITIONS (executive, sales pitch, ...)
-      layouts.py                Layout Catalog §1-5 + §8/10/12 constants
-      scorer.py                 §6/§7 weighted decision engine (pure)
-      validator.py              §10.3/§10.4 HTML constraint checks (pure)
-    artifacts/
-      store.py                  ./threads/{id}/ markdown+html mirror writer
-  tests/
-    test_scorer.py              golden layout decisions
-    test_validator.py           canvas/overflow/pagination/font rules
-    test_edit_collapse.py       multi-intent comment collapse
+    main.py                 FastAPI entrypoint
+    api/                    HTTP endpoints and SSE streaming
+    graph/                  LangGraph state, wiring, and nodes
+    llm/                    ZenMux adapter, streaming, model routing, vision
+    catalog/                Structure, scenario, layout, scorer, validator
+    artifacts/              Derived markdown/html mirror writer
+  tests/                    Backend behavior and regression tests
 
 frontend/
   src/
-    main.tsx
-    App.tsx                     workflow shell
-    DeckCanvas.tsx              iframe-per-slide canvas
-    CommentLayer.tsx            drag-box + comment overlay
-    HitlReviewPanel.tsx         structure / style / layout review UIs
-    api.ts                      thin fetch wrapper
+    App.tsx                 Workflow shell
+    DeckCanvas.tsx          Iframe-per-slide canvas
+    CommentLayer.tsx        Drag-box comment overlay
+    HitlReviewPanel.tsx     Review gates
+    PlaygroundPanel.tsx     Creator Playground
+    api.ts                  Fetch wrapper
 ```
 
-## Non-obvious design rules (read before changing)
+## Design Rules
 
-1. **Checkpointer is authoritative**, disk files are derived. Don't read files back.
-2. `html_slides` is `dict[int, str]` merged by a reducer so the `Send` fan-out
-   can commit per slide without clobbering peers.
-3. Regenerate-from-stage explicitly **nulls downstream fields** in the patch —
-   LangGraph doesn't auto-invalidate them.
-4. Comments collapse to the **earliest affected stage**; downstream stages
-   always rerun. Don't try to apply multi-intent edits as separate forks.
-5. Layout selection: **LLM proposes 3-5 pattern candidates; Python scores**.
-   The scorer is deterministic and testable with golden fixtures.
-6. HTML system prompt encodes anti-slop rules verbatim (no Inter/Roboto/Arial
-   /Fraunces, no gradients, no rounded-corner-left-accent cards, no SVG
-   imagery, `text-wrap: pretty`, modern grid).
+- The LangGraph checkpointer is authoritative; files under `threads/` are a
+  derived mirror and should not be read back into state.
+- `html_slides` is a `dict[int, str]` merged by a reducer so fan-out writes do
+  not clobber each other.
+- Regenerate-from-stage rewinds to the checkpoint whose `next` queue contains
+  the target node; it does not fake-inject node output.
+- Comments collapse to the earliest affected stage so downstream state is
+  regenerated consistently.
+- Layout selection is deterministic: the LLM proposes candidate patterns, then
+  Python scorer logic ranks them.
+- Anti-slop HTML rules are enforced both in the slide prompt and in the
+  catalog validator.
+
+## License
+
+Open Slides Zero is open source under the MIT License. See [LICENSE](LICENSE).

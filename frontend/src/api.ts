@@ -1,4 +1,4 @@
-// Thin fetch wrapper. Vite dev server proxies /api/* to FastAPI on :8000.
+// Thin fetch wrapper. Vite dev server proxies /api/* to FastAPI on :8765.
 // In production, point API_BASE at the deployed backend.
 
 const API_BASE = "/api";

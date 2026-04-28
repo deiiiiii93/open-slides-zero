@@ -5,8 +5,12 @@ __pycache__/
 *.sqlite-*
 threads/
 .env
+.env.*
+!.env.example
+!backend/.env.example
 node_modules/
 dist/
 *.log
 .pytest_cache/
 .ruff_cache/
+CLAUDE.md

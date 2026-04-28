@@ -3,6 +3,7 @@ name = "open-slides-zero-backend"
 version = "0.1.0"
 description = "Slide-deck agent backend: LangGraph orchestrator + ZenMux LLM routing."
 requires-python = ">=3.11"
+license = "MIT"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
