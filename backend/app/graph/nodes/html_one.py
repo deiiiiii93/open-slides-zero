@@ -26,6 +26,10 @@ Avoid AI-slop tropes (these are non-negotiable):
 - NO containers using rounded corners with a left-border accent color.
 - NO imagery drawn inline via SVG; use <img data-prompt-hint="..."> placeholders.
 - NO overused font families (Inter, Roboto, Arial, Fraunces, system-ui, -apple-system).
+- Do not add filler content. Never pad a design with placeholder text, dummy
+  sections, or informational material just to fill space. Every element should
+  earn its place.
+- One thousand no's for every yes.
 - DO use `text-wrap: pretty`, CSS grid, modern advanced CSS (subgrid, container
   queries, :has()) where they actually help readability.
 - Commit to a single bold aesthetic direction — do not hedge.

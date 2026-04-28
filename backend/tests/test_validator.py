@@ -72,3 +72,20 @@ def test_banned_font_warning():
     )
     r = validate_slide_html(bad)
     assert any(w.rule == "banned_font" for w in r.warnings)
+
+
+def test_visible_filler_text_warns_without_blocking():
+    bad = GOOD_SLIDE.replace("Body text.", "Lorem ipsum sample text.")
+    r = validate_slide_html(bad)
+    assert r.ok, [e.message for e in r.errors]
+    assert any(w.rule == "filler_text" for w in r.warnings)
+
+
+def test_image_prompt_hint_placeholder_text_does_not_warn():
+    html = GOOD_SLIDE.replace(
+        'data-prompt-hint="hero image"',
+        'data-prompt-hint="placeholder text for generated hero image"',
+    )
+    r = validate_slide_html(html)
+    assert r.ok, [e.message for e in r.errors]
+    assert not any(w.rule == "filler_text" for w in r.warnings)

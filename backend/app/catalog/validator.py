@@ -6,6 +6,7 @@ logged but non-blocking. Called after html_one produces a slide string.
 
 from __future__ import annotations
 
+from html import unescape
 import re
 from dataclasses import dataclass, field
 from typing import Literal
@@ -37,6 +38,15 @@ BANNED_FONT_PATTERNS = [
     r"font-family:\s*system-ui", r"-apple-system",
 ]
 
+FILLER_TEXT_PATTERNS = [
+    r"\blorem\s+ipsum\b",
+    r"\bplaceholder\s+text\b",
+    r"\bdummy\s+content\b",
+    r"\bsample\s+text\b",
+    r"\btbd\b",
+    r"\byour\s+text\s+here\b",
+]
+
 
 def _font_sizes_in_px(html: str) -> list[int]:
     out: list[int] = []
@@ -55,6 +65,12 @@ def _has_balanced_braces(text: str) -> bool:
             if depth < 0:
                 return False
     return depth == 0
+
+
+def _visible_text(html: str) -> str:
+    html = re.sub(r"<(script|style)\b[^>]*>.*?</\1>", " ", html, flags=re.I | re.S)
+    html = re.sub(r"<[^>]+>", " ", html)
+    return re.sub(r"\s+", " ", unescape(html)).strip()
 
 
 def validate_slide_html(
@@ -148,5 +164,11 @@ def validate_slide_html(
         if re.search(pat, html):
             warnings.append(Issue("banned_font", "warning",
                                   f"Banned/overused font pattern detected: {pat}"))
+
+    visible_text = _visible_text(html)
+    for pat in FILLER_TEXT_PATTERNS:
+        if re.search(pat, visible_text, flags=re.I):
+            warnings.append(Issue("filler_text", "warning",
+                                  f"Potential filler text detected: {pat}"))
 
     return ValidationResult(ok=not errors, errors=errors, warnings=warnings)
