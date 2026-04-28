@@ -756,11 +756,12 @@ export function App() {
             <LayoutStage
               catalog={catalog}
               layouts={deck.values?.layouts as Array<Record<string, any>> | undefined}
+              selectedVisualStylePresetId={deck.values?.visual_style_preset_id as string | null | undefined}
               title="③ Review layouts"
               submitLabel="Create fork from layout"
               submitDisabledWhenUnchanged
-              onSubmit={async ({ overrides }) =>
-                onForkFromReview({ review_stage: "layout", overrides })
+              onSubmit={async ({ overrides, visual_style_preset_id }) =>
+                onForkFromReview({ review_stage: "layout", overrides, visual_style_preset_id })
               }
             />
           )}

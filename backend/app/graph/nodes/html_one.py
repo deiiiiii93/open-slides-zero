@@ -56,6 +56,18 @@ def _slide_prompt(
     typography = style.get("typography", {})
     pattern = brief_slide["pattern"]
     zones = brief_slide["zones"]
+    guidance_lines: list[str] = []
+    if brief.get("visual_style_preference"):
+        guidance_lines.append(f"- Free-text style hint: {brief['visual_style_preference']}")
+    if brief.get("visual_style_preset_label") and brief.get("visual_style_preset_prompt"):
+        guidance_lines.append(
+            f"- Selected preset ({brief['visual_style_preset_label']}): "
+            f"{brief['visual_style_preset_prompt']}"
+        )
+    visual_guidance = (
+        "\nVisual preference guidance:\n" + "\n".join(guidance_lines) + "\n"
+        if guidance_lines else ""
+    )
 
     system = f"""\
 You are an HTML/CSS slide composer. Output ONE complete self-contained HTML
@@ -85,6 +97,7 @@ Design system to apply:
 - Typography: {typography}
 - Density: {brief['density']}
 - Tone: {style.get('tone', 'editorial')}
+{visual_guidance}
 
 Language of text: {brief['language']}.
 """

@@ -38,6 +38,10 @@ def consolidate_node(state: dict[str, Any]) -> dict[str, Any]:
         "aspect_ratio": state.get("aspect_ratio", "16:9"),
         "density": style.get("density", state.get("density_preference", "balanced")),
         "style": style,
+        "visual_style_preference": state.get("visual_style_preference") or "",
+        "visual_style_preset_id": state.get("visual_style_preset_id"),
+        "visual_style_preset_label": state.get("visual_style_preset_label"),
+        "visual_style_preset_prompt": state.get("visual_style_preset_prompt"),
         "creator_prompt": state.get("creator_prompt") or "",
         "slides": per_slide,
     }
@@ -53,6 +57,19 @@ def consolidate_node(state: dict[str, Any]) -> dict[str, Any]:
         md_parts.extend([
             "## Creator Prompt",
             str(brief["creator_prompt"]),
+            "",
+        ])
+    guidance_parts = []
+    if brief["visual_style_preference"]:
+        guidance_parts.append(f"Free-text hint: {brief['visual_style_preference']}")
+    if brief["visual_style_preset_label"] and brief["visual_style_preset_prompt"]:
+        guidance_parts.append(
+            f"{brief['visual_style_preset_label']}: {brief['visual_style_preset_prompt']}"
+        )
+    if guidance_parts:
+        md_parts.extend([
+            "## Visual Preference Guidance",
+            *guidance_parts,
             "",
         ])
     md_parts.extend([

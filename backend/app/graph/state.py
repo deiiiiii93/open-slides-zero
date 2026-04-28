@@ -115,6 +115,9 @@ class SlideState(TypedDict, total=False):
     aspect_ratio: str                       # "16:9" | "4:3" | "21:9"
     density_preference: str                 # "minimal" | "balanced" | "dense" | "very_dense"
     visual_style_preference: str | None     # free-text user hint (e.g. "MBB deck")
+    visual_style_preset_id: str | None      # optional preset selected before HTML generation
+    visual_style_preset_label: str | None
+    visual_style_preset_prompt: str | None
     style_reference_image_uri: str | None
     creator_prompt: str | None              # lane-specific extra instructions
     parent_thread_id: str | None            # playground base deck for a lane thread

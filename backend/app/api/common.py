@@ -10,6 +10,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
 
 from ..artifacts import store
+from ..catalog.visual_presets import visual_style_preset_state
 from ..graph.graph import get_graph
 from ..graph.layout_overrides import apply_layout_overrides
 
@@ -102,6 +103,7 @@ def synthetic_interrupt(values: dict[str, Any] | None) -> dict[str, Any] | None:
         return {
             "gate": "layout",
             "layouts": values.get("layouts"),
+            "visual_style_preset_id": values.get("visual_style_preset_id"),
             "hint": (
                 "Per-slide override map, e.g. "
                 "{'overrides': {3: 'radial', 5: 'timeline_horizontal'}, 'approved': true}"
@@ -159,11 +161,12 @@ def _resume_patch_for_synthetic_gate(
     if stage == "await_layout":
         overrides: dict[int, str] = resume.get("overrides", {}) or {}
         layouts = apply_layout_overrides(values.get("layouts"), overrides)
+        preset_update = visual_style_preset_state(resume.get("visual_style_preset_id"))
         if not resume.get("approved"):
-            return ("await_layout", {"layouts": layouts})
+            return ("await_layout", {"layouts": layouts, **preset_update})
         return (
             "await_layout",
-            {"layouts": layouts, "current_stage": "consolidate"},
+            {"layouts": layouts, "current_stage": "consolidate", **preset_update},
         )
     if stage == "html":
         gate = _html_failure_payload(values)

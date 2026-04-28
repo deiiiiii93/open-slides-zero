@@ -829,9 +829,12 @@ function LaneDetail({
         <LayoutStage
           catalog={catalog}
           layouts={gate.layouts}
+          selectedVisualStylePresetId={gate.visual_style_preset_id}
           title="Lane layouts"
           submitLabel="Approve layouts"
-          onSubmit={async ({ overrides }) => onResume(lane, { approved: true, overrides })}
+          onSubmit={async ({ overrides, visual_style_preset_id }) =>
+            onResume(lane, { approved: true, overrides, visual_style_preset_id })
+          }
         />
       )}
 

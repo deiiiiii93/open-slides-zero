@@ -1,13 +1,13 @@
 // Shared step panels for both live HITL interrupts and ready-time review.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { CatalogResponse, DeckState } from "./api";
 import { LayoutWireframe } from "./LayoutWireframe";
 import { Markdown } from "./Markdown";
 
 type StructureSubmit = { scenario_id: string; structure_id: string };
 type StyleSubmit = { feedback: string };
-type LayoutSubmit = { overrides: Record<number, string> };
+type LayoutSubmit = { overrides: Record<number, string>; visual_style_preset_id?: string | null };
 type HtmlRetrySubmit = { retry_failed: true };
 type OutlineSubmit = { approved?: true; playground?: true };
 
@@ -38,6 +38,7 @@ type LayoutStageProps = {
   submitLabel: string;
   onSubmit: (payload: LayoutSubmit) => Promise<void>;
   submitDisabledWhenUnchanged?: boolean;
+  selectedVisualStylePresetId?: string | null;
 };
 
 type HtmlStageProps = {
@@ -110,9 +111,12 @@ export function HitlReviewPanel({ deck, catalog, onResume }: {
       <LayoutStage
         catalog={catalog}
         layouts={payload.layouts}
+        selectedVisualStylePresetId={payload.visual_style_preset_id}
         title="④ Review layouts (scores shown)"
         submitLabel="Approve & render HTML"
-        onSubmit={async ({ overrides }) => onResume({ approved: true, overrides })}
+        onSubmit={async ({ overrides, visual_style_preset_id }) =>
+          onResume({ approved: true, overrides, visual_style_preset_id })
+        }
       />
     );
   }
@@ -347,15 +351,47 @@ export function LayoutStage({
   submitLabel,
   onSubmit,
   submitDisabledWhenUnchanged = false,
+  selectedVisualStylePresetId = null,
 }: LayoutStageProps) {
   const [overrides, setOverrides] = useState<Record<number, string>>({});
+  const [visualPresetId, setVisualPresetId] = useState(selectedVisualStylePresetId ?? "");
   const rows = layouts ?? [];
   const patternIds = Object.keys(catalog?.patterns ?? {});
+  const visualPresets = catalog?.visual_style_presets ?? [];
+  const selectedPreset = visualPresets.find((preset) => preset.id === visualPresetId);
   const hasOverrides = Object.values(overrides).some(Boolean);
+  const hasPresetChange = visualPresetId !== (selectedVisualStylePresetId ?? "");
+
+  useEffect(() => {
+    setVisualPresetId(selectedVisualStylePresetId ?? "");
+  }, [selectedVisualStylePresetId]);
 
   return (
     <div style={{ padding: 16, border: "1px solid #e5e5e5", borderRadius: 6 }}>
       <h3>{title}</h3>
+      {visualPresets.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ display: "block", fontSize: 13, fontWeight: 600 }}>
+            Visual direction
+            <select
+              value={visualPresetId}
+              onChange={(e) => setVisualPresetId(e.target.value)}
+              style={{ display: "block", width: "100%", maxWidth: 420, marginTop: 6 }}
+            >
+              <option value="">No preset</option>
+              {visualPresets.map((preset) => (
+                <option key={preset.id} value={preset.id}>
+                  {preset.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div style={{ color: "#64748b", fontSize: 12, lineHeight: 1.45, marginTop: 6, maxWidth: 680 }}>
+            {selectedPreset?.description ??
+              "Optional final visual preference appended directly to the HTML generation prompt."}
+          </div>
+        </div>
+      )}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
         {rows.map((l) => (
           <div
@@ -421,8 +457,13 @@ export function LayoutStage({
       </div>
       <div style={{ marginTop: 12 }}>
         <button
-          disabled={submitDisabledWhenUnchanged && !hasOverrides}
-          onClick={() => onSubmit({ overrides })}
+          disabled={submitDisabledWhenUnchanged && !hasOverrides && !hasPresetChange}
+          onClick={() =>
+            onSubmit({
+              overrides,
+              visual_style_preset_id: visualPresetId || null,
+            })
+          }
         >
           {submitLabel}
         </button>

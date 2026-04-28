@@ -6,6 +6,7 @@ import pytest
 
 from app.api import decks, hitl, history
 from app.artifacts import store
+from app.catalog.visual_presets import VISUAL_STYLE_PRESETS
 from app.graph import graph as graph_module
 from app.graph.nodes import html_one, layout, outline, style
 from app.llm.zenmux import CompletionResult
@@ -24,6 +25,7 @@ def isolated_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     graph_module._compiled = None
     monkeypatch.setattr(graph_module, "DB_PATH", tmp_path / "threads.sqlite")
     monkeypatch.setattr(store, "ROOT", tmp_path / "threads")
+    calls: dict[str, list[list[dict[str, object]]]] = {"html_messages": []}
 
     def fake_chat_structured(_model, _messages, schema, **_kwargs):
         if schema is outline._ProposedChoices:
@@ -101,6 +103,7 @@ def isolated_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         raise AssertionError(f"Unexpected schema: {schema}")
 
     def fake_chat(_model, messages, **_kwargs):
+        calls["html_messages"].append(messages)
         prompt = messages[-1]["content"]
         title_line = next((line for line in prompt.splitlines() if line.startswith("Title: ")), "Title: Slide")
         pattern_line = next((line for line in messages[0]["content"].splitlines() if "Use the `" in line), "")
@@ -122,7 +125,7 @@ def isolated_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(layout.zenmux, "chat_structured", fake_chat_structured)
     monkeypatch.setattr(html_one.zenmux, "chat_with_metadata", fake_chat)
 
-    yield
+    yield calls
     graph_module._compiled = None
 
 
@@ -190,6 +193,51 @@ def test_style_review_fork_lands_at_style_interrupt_with_new_preference(isolated
 
     assert _interrupt_gate(forked) == "style"
     assert forked["values"]["visual_style_preference"] == "Use a warmer palette and sharper serif contrast."
+
+
+def test_layout_approval_stores_visual_preset_and_sends_it_to_html(isolated_graph):
+    created = decks.create_deck(
+        decks.CreateDeckBody(
+            deck_name="Preset deck",
+            expected_pages=2,
+            visual_style_preference="Use calm enterprise restraint.",
+            materials=[decks.Material(kind="text", uri="text:Revenue up. Margin stable.")],
+        )
+    )
+    thread_id = created["thread_id"]
+    structured = hitl.resume_deck(
+        thread_id,
+        {
+            "scenario_id": created["values"]["scenario_id"],
+            "structure_id": created["values"]["structure_candidates"][0],
+        },
+    )
+    assert _interrupt_gate(structured) == "outline"
+    styled = hitl.resume_deck(thread_id, {"approved": True})
+    assert _interrupt_gate(styled) == "style"
+    laid_out = hitl.resume_deck(thread_id, {"approved": True})
+    assert _interrupt_gate(laid_out) == "layout"
+
+    ready = hitl.resume_deck(
+        thread_id,
+        {
+            "approved": True,
+            "overrides": {},
+            "visual_style_preset_id": "product_clarity",
+        },
+    )
+
+    preset = VISUAL_STYLE_PRESETS["product_clarity"]
+    assert ready["values"]["current_stage"] == "ready"
+    assert ready["values"]["visual_style_preset_id"] == "product_clarity"
+    assert ready["values"]["visual_style_preset_label"] == "Product Clarity"
+    assert ready["values"]["brief"]["visual_style_preset_prompt"] == preset["prompt"]
+
+    html_system_prompts = [messages[0]["content"] for messages in isolated_graph["html_messages"]]
+    assert html_system_prompts
+    assert all("Visual preference guidance" in prompt for prompt in html_system_prompts)
+    assert all("Use calm enterprise restraint." in prompt for prompt in html_system_prompts)
+    assert all(preset["prompt"] in prompt for prompt in html_system_prompts)
 
 
 def test_layout_review_fork_rerenders_html_and_supports_future_forks(isolated_graph):

@@ -39,6 +39,7 @@ export type CatalogResponse = {
   scenarios: Array<{ id: string; name_en: string; name_zh: string; structures: string[] }>;
   structures: Array<{ id: string; name_en: string; name_zh: string; description_en: string }>;
   patterns: Record<string, { family: string; kind: string; zones: string[] }>;
+  visual_style_presets: Array<{ id: string; label: string; description: string; prompt: string }>;
 };
 
 // --- Endpoints ---
@@ -94,6 +95,7 @@ export type ForkFromStyleBody = {
 export type ForkFromLayoutBody = {
   review_stage: "layout";
   overrides: Record<number, string>;
+  visual_style_preset_id?: string | null;
   deck_name?: string | null;
 };
 

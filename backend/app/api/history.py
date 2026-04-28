@@ -21,6 +21,7 @@ from langgraph.types import Command
 from pydantic import BaseModel, Field
 
 from ..artifacts import store
+from ..catalog.visual_presets import visual_style_preset_state
 from ..graph import graph as graph_module
 from ..graph.layout_overrides import apply_layout_overrides
 from .common import config_for, current_state, graph, mirror_to_disk
@@ -227,6 +228,7 @@ def _fork_from_review(
     structure_id: str | None = None,
     feedback: str | None = None,
     overrides: dict[int | str, str] | None = None,
+    visual_style_preset_id: str | None = None,
     deck_name: str | None = None,
 ) -> dict[str, Any]:
     g = graph()
@@ -260,6 +262,7 @@ def _fork_from_review(
     else:
         target_stage = "consolidate"
         patch["layouts"] = apply_layout_overrides(snap.values.get("layouts"), overrides)
+        patch.update(visual_style_preset_state(visual_style_preset_id))
 
     source_target_cfg = _find_prestage_checkpoint(g, cfg, target_stage)
     if source_target_cfg is None:
@@ -310,6 +313,7 @@ class ForkFromStyleBody(BaseModel):
 class ForkFromLayoutBody(BaseModel):
     review_stage: Literal["layout"]
     overrides: dict[int | str, str] = Field(default_factory=dict)
+    visual_style_preset_id: str | None = None
     deck_name: str | None = None
 
 
@@ -350,6 +354,7 @@ def fork_from_review(thread_id: str, body: ForkFromReviewBody) -> dict[str, Any]
         thread_id,
         "layout",
         overrides=body.overrides,
+        visual_style_preset_id=body.visual_style_preset_id,
         deck_name=body.deck_name,
     )
 

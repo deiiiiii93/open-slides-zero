@@ -22,6 +22,7 @@ from ..artifacts import store
 from ..catalog.layouts import PATTERNS
 from ..catalog.scenarios import SCENARIO_DEFINITIONS
 from ..catalog.structures import STRUCTURE_DEFINITIONS
+from ..catalog.visual_presets import list_visual_style_presets
 from ..graph.graph import DB_PATH
 from .common import config_for, current_state, delete_thread, graph, mirror_to_disk
 
@@ -305,6 +306,7 @@ def get_catalog(thread_id: str) -> dict[str, Any]:
             if not s.get("legacy")
         ],
         "patterns": {pid: p for pid, p in PATTERNS.items()},
+        "visual_style_presets": list_visual_style_presets(),
     }
 
 

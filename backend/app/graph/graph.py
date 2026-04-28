@@ -32,6 +32,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send, interrupt
 
+from ..catalog.visual_presets import visual_style_preset_state
 from .layout_overrides import apply_layout_overrides
 from .nodes.consolidate import consolidate_node
 from .nodes.edit import edit_intent_node
@@ -106,6 +107,7 @@ def await_layout_review(state: SlideState) -> dict[str, Any]:
     resume = interrupt({
         "gate": "layout",
         "layouts": state.get("layouts"),
+        "visual_style_preset_id": state.get("visual_style_preset_id"),
         "hint": (
             "Per-slide override map, e.g. {'overrides': {3: 'radial', 5: 'timeline_horizontal'}, "
             "'approved': true}"
@@ -113,9 +115,10 @@ def await_layout_review(state: SlideState) -> dict[str, Any]:
     })
     overrides: dict[int, str] = resume.get("overrides", {}) or {}
     layouts = apply_layout_overrides(state.get("layouts"), overrides)
+    preset_update = visual_style_preset_state(resume.get("visual_style_preset_id"))
     if not resume.get("approved"):
-        return {"layouts": layouts}
-    return {"layouts": layouts, "current_stage": "consolidate"}
+        return {"layouts": layouts, **preset_update}
+    return {"layouts": layouts, "current_stage": "consolidate", **preset_update}
 
 
 # ---------------------------------------------------------------------------

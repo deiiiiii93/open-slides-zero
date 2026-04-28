@@ -6,7 +6,7 @@ POST /decks/{thread_id}/resume
 
       structure: {"scenario_id": "...", "structure_id": "..."}
       style:     {"approved": true} OR {"revise": "feedback string"}
-      layout:    {"approved": true, "overrides": {"3": "radial", "5": "timeline_horizontal"}}
+      layout:    {"approved": true, "overrides": {"3": "radial"}, "visual_style_preset_id": "..."}
 """
 
 from __future__ import annotations
