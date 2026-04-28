@@ -14,15 +14,15 @@ design-led decks from plain source material.
 
 ### Snowball Risk Profile
 
-![Snowball Risk Profile cover](docs/images/snowball-risk-profile-cover.png)
+![Snowball Risk Profile cover](https://github.com/deiiiiii93/open-slides-zero/blob/main/docs/images/snowball-risk-profile-cover.png?raw=true)
 
-![Snowball Risk Profile pricing and loss probability slide](docs/images/snowball-risk-profile-pricing.png)
+![Snowball Risk Profile pricing and loss probability slide](https://github.com/deiiiiii93/open-slides-zero/blob/main/docs/images/snowball-risk-profile-pricing.png?raw=true)
 
 ### How to make your coffee bar attractive?
 
-![Coffee bar design cover](docs/images/coffee-bar-cover.png)
+![Coffee bar design cover](https://github.com/deiiiiii93/open-slides-zero/blob/main/docs/images/coffee-bar-cover.png?raw=true)
 
-![Coffee bar six-principle framework slide](docs/images/coffee-bar-framework.png)
+![Coffee bar six-principle framework slide](https://github.com/deiiiiii93/open-slides-zero/blob/main/docs/images/coffee-bar-framework.png?raw=true)
 
 ## Architecture
 
