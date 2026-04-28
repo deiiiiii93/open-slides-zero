@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 
 from app.api import decks, hitl, history
 from app.artifacts import store
@@ -201,6 +202,7 @@ def test_layout_approval_stores_visual_preset_and_sends_it_to_html(isolated_grap
             deck_name="Preset deck",
             expected_pages=2,
             visual_style_preference="Use calm enterprise restraint.",
+            visual_style_preset_id="product_clarity",
             materials=[decks.Material(kind="text", uri="text:Revenue up. Margin stable.")],
         )
     )
@@ -238,6 +240,82 @@ def test_layout_approval_stores_visual_preset_and_sends_it_to_html(isolated_grap
     assert all("Visual preference guidance" in prompt for prompt in html_system_prompts)
     assert all("Use calm enterprise restraint." in prompt for prompt in html_system_prompts)
     assert all(preset["prompt"] in prompt for prompt in html_system_prompts)
+    assert all("Direction-specific HTML rules" in prompt for prompt in html_system_prompts)
+
+
+def test_create_deck_normalizes_ai_decide_and_validates_presets(isolated_graph):
+    for preset_id in (None, "", "ai_decide"):
+        created = decks.create_deck(
+            decks.CreateDeckBody(
+                deck_name=f"AI decide {preset_id}",
+                expected_pages=2,
+                visual_style_preset_id=preset_id,
+                materials=[decks.Material(kind="text", uri="text:Revenue up. Margin stable.")],
+            )
+        )
+        assert created["values"].get("visual_style_preset_id") is None
+        assert created["values"].get("visual_style_preset_style_bias") is None
+
+    created = decks.create_deck(
+        decks.CreateDeckBody(
+            deck_name="Preset deck",
+            expected_pages=2,
+            visual_style_preset_id="cultural_luxury",
+            materials=[decks.Material(kind="text", uri="text:Revenue up. Margin stable.")],
+        )
+    )
+    assert created["values"]["visual_style_preset_id"] == "cultural_luxury"
+    assert created["values"]["visual_style_preset_label"] == "Cultural Luxury"
+    assert created["values"]["visual_style_preset_style_bias"]["tone"] == "premium editorial"
+
+    with pytest.raises(HTTPException) as exc:
+        decks.create_deck(
+            decks.CreateDeckBody(
+                deck_name="Bad preset",
+                expected_pages=2,
+                visual_style_preset_id="not_a_real_preset",
+                materials=[decks.Material(kind="text", uri="text:Revenue up. Margin stable.")],
+            )
+        )
+    assert exc.value.status_code == 400
+
+
+def test_layout_review_preset_change_reruns_style(isolated_graph):
+    created = decks.create_deck(
+        decks.CreateDeckBody(
+            deck_name="Change direction deck",
+            expected_pages=2,
+            materials=[decks.Material(kind="text", uri="text:Revenue up. Margin stable.")],
+        )
+    )
+    thread_id = created["thread_id"]
+    structured = hitl.resume_deck(
+        thread_id,
+        {
+            "scenario_id": created["values"]["scenario_id"],
+            "structure_id": created["values"]["structure_candidates"][0],
+        },
+    )
+    assert _interrupt_gate(structured) == "outline"
+    styled = hitl.resume_deck(thread_id, {"approved": True})
+    assert _interrupt_gate(styled) == "style"
+    laid_out = hitl.resume_deck(thread_id, {"approved": True})
+    assert _interrupt_gate(laid_out) == "layout"
+
+    rerouted = hitl.resume_deck(
+        thread_id,
+        {
+            "approved": True,
+            "overrides": {},
+            "visual_style_preset_id": "product_clarity",
+        },
+    )
+
+    assert _interrupt_gate(rerouted) == "style"
+    assert rerouted["values"]["visual_style_preset_id"] == "product_clarity"
+    assert rerouted["values"].get("layouts") in (None, [])
+    assert not rerouted["values"].get("brief")
+    assert not rerouted["values"].get("html_slides")
 
 
 def test_layout_review_fork_stops_at_layout_gate_and_supports_future_forks(isolated_graph):
@@ -284,3 +362,41 @@ def test_layout_review_fork_stops_at_layout_gate_and_supports_future_forks(isola
     )
     assert second_fork["source_thread_id"] == rendered["thread_id"]
     assert _interrupt_gate(second_fork) == "style"
+
+
+def test_layout_review_fork_preset_change_starts_from_style(isolated_graph):
+    source = _create_ready_deck()
+    html_calls_before = len(isolated_graph["html_messages"])
+
+    forked = history.fork_from_review(
+        source["thread_id"],
+        history.ForkFromLayoutBody(
+            review_stage="layout",
+            overrides={},
+            visual_style_preset_id="product_clarity",
+        ),
+    )
+
+    assert forked["source_thread_id"] == source["thread_id"]
+    assert _interrupt_gate(forked) == "style"
+    assert forked["values"]["visual_style_preset_id"] == "product_clarity"
+    assert forked["values"].get("layouts") in (None, [])
+    assert not forked["values"].get("brief")
+    assert not forked["values"].get("html_slides")
+    assert len(isolated_graph["html_messages"]) == html_calls_before
+
+
+def test_layout_review_fork_rejects_unknown_visual_preset(isolated_graph):
+    source = _create_ready_deck()
+
+    with pytest.raises(HTTPException) as exc:
+        history.fork_from_review(
+            source["thread_id"],
+            history.ForkFromLayoutBody(
+                review_stage="layout",
+                overrides={},
+                visual_style_preset_id="not_a_real_preset",
+            ),
+        )
+
+    assert exc.value.status_code == 400

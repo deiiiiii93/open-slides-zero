@@ -268,7 +268,6 @@ def test_stale_lane_layout_gate_can_resume_from_synthetic_interrupt(isolated_gra
             "payload": {
                 "approved": True,
                 "overrides": {},
-                "visual_style_preset_id": "cartoon_fairytale_worlds",
             }
         },
     )
@@ -277,12 +276,7 @@ def test_stale_lane_layout_gate_can_resume_from_synthetic_interrupt(isolated_gra
     done = next(event for event in events if event["type"] == "done")
     assert done["state"]["values"]["current_stage"] == "ready"
     assert len(done["state"]["values"]["html_slides"]) == 2
-    assert done["state"]["values"]["visual_style_preset_label"] == "Cartoon / Fairytale Worlds"
-    assert done["state"]["values"]["brief"]["visual_style_preset_id"] == "cartoon_fairytale_worlds"
-    assert _has_prompt(
-        isolated_graph["html_messages"],
-        "Inspired by animation studios, children's entertainment",
-    )
+    assert done["state"]["values"].get("visual_style_preset_label") is None
 
 
 def test_playground_enforces_five_lane_limit(isolated_graph):

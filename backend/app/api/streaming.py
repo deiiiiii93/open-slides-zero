@@ -154,6 +154,7 @@ def stream_create_deck(body: CreateDeckBody) -> StreamingResponse:
             density_preference=body.density_preference,
             language=body.language,
             visual_style_preference=body.visual_style_preference,
+            visual_style_preset_id=body.visual_style_preset_id,
             style_reference_image_uri=body.style_reference_image_uri,
         )
     except ValueError as exc:
@@ -175,6 +176,7 @@ async def stream_create_deck_uploads(
     density_preference: str = Form(default="balanced"),
     language: str = Form(default="en"),
     visual_style_preference: str | None = Form(default=None),
+    visual_style_preset_id: str | None = Form(default=None),
     files: list[UploadFile] = File(...),
 ) -> StreamingResponse:
     thread_id = uuid.uuid4().hex[:12]
@@ -193,6 +195,7 @@ async def stream_create_deck_uploads(
             density_preference=density_preference,
             language=language,
             visual_style_preference=visual_style_preference,
+            visual_style_preset_id=visual_style_preset_id,
             style_reference_image_uri=None,
         )
     except HTTPException:

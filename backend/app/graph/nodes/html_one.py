@@ -64,6 +64,10 @@ def _slide_prompt(
             f"- Selected preset ({brief['visual_style_preset_label']}): "
             f"{brief['visual_style_preset_prompt']}"
         )
+    html_rules = brief.get("visual_style_preset_html_rules") or []
+    if brief.get("visual_style_preset_label") and html_rules:
+        guidance_lines.append("- Direction-specific HTML rules:")
+        guidance_lines.extend(f"  - {rule}" for rule in html_rules)
     visual_guidance = (
         "\nVisual preference guidance:\n" + "\n".join(guidance_lines) + "\n"
         if guidance_lines else ""

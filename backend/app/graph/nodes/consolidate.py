@@ -42,6 +42,9 @@ def consolidate_node(state: dict[str, Any]) -> dict[str, Any]:
         "visual_style_preset_id": state.get("visual_style_preset_id"),
         "visual_style_preset_label": state.get("visual_style_preset_label"),
         "visual_style_preset_prompt": state.get("visual_style_preset_prompt"),
+        "visual_style_preset_style_bias": state.get("visual_style_preset_style_bias"),
+        "visual_style_preset_layout_bias": state.get("visual_style_preset_layout_bias"),
+        "visual_style_preset_html_rules": state.get("visual_style_preset_html_rules"),
         "creator_prompt": state.get("creator_prompt") or "",
         "slides": per_slide,
     }
@@ -65,6 +68,11 @@ def consolidate_node(state: dict[str, Any]) -> dict[str, Any]:
     if brief["visual_style_preset_label"] and brief["visual_style_preset_prompt"]:
         guidance_parts.append(
             f"{brief['visual_style_preset_label']}: {brief['visual_style_preset_prompt']}"
+        )
+    if brief["visual_style_preset_html_rules"]:
+        guidance_parts.append(
+            "HTML rules: "
+            + "; ".join(str(rule) for rule in brief["visual_style_preset_html_rules"])
         )
     if guidance_parts:
         md_parts.extend([

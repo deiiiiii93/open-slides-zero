@@ -22,7 +22,7 @@ from ..artifacts import store
 from ..catalog.layouts import PATTERNS
 from ..catalog.scenarios import SCENARIO_DEFINITIONS
 from ..catalog.structures import STRUCTURE_DEFINITIONS
-from ..catalog.visual_presets import list_visual_style_presets
+from ..catalog.visual_presets import list_visual_style_presets, visual_style_preset_state
 from ..graph.graph import DB_PATH
 from .common import config_for, current_state, delete_thread, graph, mirror_to_disk
 
@@ -59,6 +59,7 @@ class CreateDeckBody(BaseModel):
     density_preference: str = "balanced"
     language: str = "en"
     visual_style_preference: str | None = None
+    visual_style_preset_id: str | None = None
     style_reference_image_uri: str | None = None
     materials: list[Material] = Field(default_factory=list)
 
@@ -112,11 +113,12 @@ def _build_initial_state(
     density_preference: str,
     language: str,
     visual_style_preference: str | None,
+    visual_style_preset_id: str | None,
     style_reference_image_uri: str | None,
 ) -> dict[str, Any]:
     if not materials:
         raise ValueError("Provide at least one file or paste text.")
-    return {
+    initial = {
         "thread_id": thread_id,
         "deck_name": _derive_deck_name_from_materials(deck_name, materials),
         "materials": [_serialize_material(material) for material in materials],
@@ -128,6 +130,8 @@ def _build_initial_state(
         "style_reference_image_uri": style_reference_image_uri,
         "current_stage": "ingest",
     }
+    initial.update(visual_style_preset_state(visual_style_preset_id))
+    return initial
 
 
 def _sanitize_upload_filename(filename: str | None) -> str:
@@ -273,6 +277,7 @@ def create_deck(body: CreateDeckBody) -> dict[str, Any]:
             density_preference=body.density_preference,
             language=body.language,
             visual_style_preference=body.visual_style_preference,
+            visual_style_preset_id=body.visual_style_preset_id,
             style_reference_image_uri=body.style_reference_image_uri,
         )
     except ValueError as exc:

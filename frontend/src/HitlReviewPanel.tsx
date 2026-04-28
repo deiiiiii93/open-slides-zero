@@ -378,7 +378,7 @@ export function LayoutStage({
               onChange={(e) => setVisualPresetId(e.target.value)}
               style={{ display: "block", width: "100%", maxWidth: 420, marginTop: 6 }}
             >
-              <option value="">No preset</option>
+              <option value="">AI Decide</option>
               {visualPresets.map((preset) => (
                 <option key={preset.id} value={preset.id}>
                   {preset.label}

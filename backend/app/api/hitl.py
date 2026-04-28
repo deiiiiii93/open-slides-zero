@@ -29,12 +29,15 @@ def resume_deck(thread_id: str, body: dict[str, Any]) -> dict[str, Any]:
     snap = graph().get_state(config_for(thread_id))  # type: ignore[arg-type]
     if not snap:
         raise HTTPException(status_code=404, detail="Unknown deck")
-    if snap.interrupts:
-        graph().invoke(Command(resume=body), config_for(thread_id))  # type: ignore[arg-type]
-    else:
-        cfg = resume_synthetic_interrupt(thread_id, body)
-        if cfg is None:
-            raise HTTPException(status_code=409, detail="No pending interrupt to resume")
-        graph().invoke(None, cfg)  # type: ignore[arg-type]
+    try:
+        if snap.interrupts:
+            graph().invoke(Command(resume=body), config_for(thread_id))  # type: ignore[arg-type]
+        else:
+            cfg = resume_synthetic_interrupt(thread_id, body)
+            if cfg is None:
+                raise HTTPException(status_code=409, detail="No pending interrupt to resume")
+            graph().invoke(None, cfg)  # type: ignore[arg-type]
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     mirror_to_disk(thread_id)
     return current_state(thread_id)

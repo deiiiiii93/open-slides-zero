@@ -39,7 +39,15 @@ export type CatalogResponse = {
   scenarios: Array<{ id: string; name_en: string; name_zh: string; structures: string[] }>;
   structures: Array<{ id: string; name_en: string; name_zh: string; description_en: string }>;
   patterns: Record<string, { family: string; kind: string; zones: string[] }>;
-  visual_style_presets: Array<{ id: string; label: string; description: string; prompt: string }>;
+  visual_style_presets: Array<{
+    id: string;
+    label: string;
+    description: string;
+    prompt: string;
+    style_bias?: Record<string, string>;
+    layout_bias?: { prefer?: string[]; avoid?: string[] };
+    html_rules?: string[];
+  }>;
 };
 
 // --- Endpoints ---
@@ -51,6 +59,7 @@ export type CreateDeckBody = {
   density_preference?: string;
   language?: string;
   visual_style_preference?: string | null;
+  visual_style_preset_id?: string | null;
   style_reference_image_uri?: string | null;
   materials: Material[];
 };

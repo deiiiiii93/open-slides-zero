@@ -116,6 +116,10 @@ export function App() {
   }, [refresh]);
 
   useEffect(() => {
+    if (!catalog) void api.getCatalog("catalog").then(setCatalog).catch(() => undefined);
+  }, [catalog]);
+
+  useEffect(() => {
     if (!deck) void refreshDeckList();
   }, [deck, refreshDeckList]);
 
@@ -288,6 +292,7 @@ export function App() {
     aspect: string;
     density: string;
     styleHint: string;
+    visualStylePresetId: string | null;
     files: File[];
   }) {
     if (form.files.length > 0) {
@@ -300,6 +305,9 @@ export function App() {
       body.append("language", "en");
       if (form.styleHint.trim()) {
         body.append("visual_style_preference", form.styleHint.trim());
+      }
+      if (form.visualStylePresetId) {
+        body.append("visual_style_preset_id", form.visualStylePresetId);
       }
       for (const file of form.files) {
         body.append("files", file);
@@ -317,6 +325,7 @@ export function App() {
       density_preference: form.density,
       language: "en",
       visual_style_preference: form.styleHint || null,
+      visual_style_preset_id: form.visualStylePresetId,
       materials: mats,
     };
     await consumeStream(`${STREAM_BASE}/decks/stream`, body);
@@ -393,6 +402,7 @@ export function App() {
         onSubmit={onCreate}
         busy={busy}
         err={err}
+        catalog={catalog}
         recentDecks={deckList}
         onLoadDeck={(id) => void refresh(id).catch((e) => setErr(String(e)))}
       />
@@ -1002,6 +1012,7 @@ function CreateForm({
   onSubmit,
   busy,
   err,
+  catalog,
   recentDecks,
   onLoadDeck,
 }: {
@@ -1012,10 +1023,12 @@ function CreateForm({
     aspect: string;
     density: string;
     styleHint: string;
+    visualStylePresetId: string | null;
     files: File[];
   }) => void;
   busy: boolean;
   err: string | null;
+  catalog: CatalogResponse | null;
   recentDecks: DeckListItem[] | null;
   onLoadDeck: (id: string) => void;
 }) {
@@ -1025,8 +1038,11 @@ function CreateForm({
   const [aspect, setAspect] = useState("16:9");
   const [density, setDensity] = useState("balanced");
   const [styleHint, setStyleHint] = useState("");
+  const [visualPresetId, setVisualPresetId] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
+  const visualPresets = catalog?.visual_style_presets ?? [];
+  const selectedPreset = visualPresets.find((preset) => preset.id === visualPresetId);
 
   function addFiles(nextFiles: File[]) {
     const accepted: File[] = [];
@@ -1155,7 +1171,7 @@ function CreateForm({
           ))}
         </div>
       )}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginTop: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8, marginTop: 12 }}>
         <label>
           Pages
           <input
@@ -1189,6 +1205,21 @@ function CreateForm({
           </select>
         </label>
         <label>
+          Visual direction
+          <select
+            value={visualPresetId}
+            onChange={(e) => setVisualPresetId(e.target.value)}
+            style={{ width: "100%" }}
+          >
+            <option value="">AI Decide</option>
+            {visualPresets.map((preset) => (
+              <option key={preset.id} value={preset.id}>
+                {preset.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
           Style hint
           <input
             placeholder="e.g. MBB slate"
@@ -1198,10 +1229,26 @@ function CreateForm({
           />
         </label>
       </div>
+      {selectedPreset && (
+        <div style={{ color: "#64748b", fontSize: 12, lineHeight: 1.45, marginTop: 6 }}>
+          {selectedPreset.description}
+        </div>
+      )}
       <button
         style={{ marginTop: 16 }}
         disabled={busy || (!text.trim() && files.length === 0)}
-        onClick={() => onSubmit({ deckName, text, pages, aspect, density, styleHint, files })}
+        onClick={() =>
+          onSubmit({
+            deckName,
+            text,
+            pages,
+            aspect,
+            density,
+            styleHint,
+            visualStylePresetId: visualPresetId || null,
+            files,
+          })
+        }
       >
         {busy ? "Streaming…" : "Create deck"}
       </button>

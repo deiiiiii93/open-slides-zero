@@ -21,7 +21,7 @@ from langgraph.types import Command
 from pydantic import BaseModel, Field
 
 from ..artifacts import store
-from ..catalog.visual_presets import visual_style_preset_state
+from ..catalog.visual_presets import normalize_visual_style_preset_id, visual_style_preset_state
 from ..graph import graph as graph_module
 from ..graph.layout_overrides import apply_layout_overrides
 from .common import config_for, current_state, graph, mirror_to_disk
@@ -272,6 +272,30 @@ def _fork_from_review(
         target_stage = "style"
         patch["visual_style_preference"] = feedback.strip()
     else:
+        preset_update = visual_style_preset_state(visual_style_preset_id)
+        preset_changed = (
+            normalize_visual_style_preset_id(visual_style_preset_id)
+            != normalize_visual_style_preset_id(snap.values.get("visual_style_preset_id"))
+        )
+        if preset_changed:
+            source_target_cfg = _find_prestage_checkpoint(g, cfg, "style")
+            if source_target_cfg is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="No prior checkpoint found with node 'style' pending.",
+                )
+            patch = {
+                **_downstream_clear_patch("style"),
+                **patch,
+                **preset_update,
+                "current_stage": "style",
+            }
+            new_target_cfg = _clone_checkpoint_lineage(thread_id, source_target_cfg, new_thread_id)
+            new_cfg = g.update_state(new_target_cfg, patch)  # type: ignore[arg-type]
+            g.invoke(None, new_cfg)  # type: ignore[arg-type]
+            mirror_to_disk(new_thread_id)
+            return current_state(new_thread_id, source_thread_id=thread_id)
+
         source_target_cfg = _find_checkpoint_with_next(g, cfg, "await_layout")
         if source_target_cfg is None:
             raise HTTPException(
@@ -281,7 +305,7 @@ def _fork_from_review(
         patch.update(_downstream_clear_patch("consolidate"))
         patch["layouts"] = apply_layout_overrides(snap.values.get("layouts"), overrides)
         patch["current_stage"] = "await_layout"
-        patch.update(visual_style_preset_state(visual_style_preset_id))
+        patch.update(preset_update)
 
         new_target_cfg = _clone_checkpoint_lineage(thread_id, source_target_cfg, new_thread_id)
         g.update_state(new_target_cfg, patch)  # type: ignore[arg-type]
@@ -360,28 +384,31 @@ def regenerate(thread_id: str, body: RegenerateBody) -> dict[str, Any]:
 
 @router.post("/decks/{thread_id}/fork_from_review")
 def fork_from_review(thread_id: str, body: ForkFromReviewBody) -> dict[str, Any]:
-    if body.review_stage == "structure":
+    try:
+        if body.review_stage == "structure":
+            return _fork_from_review(
+                thread_id,
+                "structure",
+                scenario_id=body.scenario_id,
+                structure_id=body.structure_id,
+                deck_name=body.deck_name,
+            )
+        if body.review_stage == "style":
+            return _fork_from_review(
+                thread_id,
+                "style",
+                feedback=body.feedback,
+                deck_name=body.deck_name,
+            )
         return _fork_from_review(
             thread_id,
-            "structure",
-            scenario_id=body.scenario_id,
-            structure_id=body.structure_id,
+            "layout",
+            overrides=body.overrides,
+            visual_style_preset_id=body.visual_style_preset_id,
             deck_name=body.deck_name,
         )
-    if body.review_stage == "style":
-        return _fork_from_review(
-            thread_id,
-            "style",
-            feedback=body.feedback,
-            deck_name=body.deck_name,
-        )
-    return _fork_from_review(
-        thread_id,
-        "layout",
-        overrides=body.overrides,
-        visual_style_preset_id=body.visual_style_preset_id,
-        deck_name=body.deck_name,
-    )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/decks/{thread_id}/history")

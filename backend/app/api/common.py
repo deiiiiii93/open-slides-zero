@@ -10,7 +10,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
 
 from ..artifacts import store
-from ..catalog.visual_presets import visual_style_preset_state
+from ..catalog.visual_presets import normalize_visual_style_preset_id, visual_style_preset_state
 from ..graph.graph import get_graph
 from ..graph.layout_overrides import apply_layout_overrides
 
@@ -161,7 +161,27 @@ def _resume_patch_for_synthetic_gate(
     if stage == "await_layout":
         overrides: dict[int, str] = resume.get("overrides", {}) or {}
         layouts = apply_layout_overrides(values.get("layouts"), overrides)
+        preset_changed = (
+            normalize_visual_style_preset_id(resume.get("visual_style_preset_id"))
+            != normalize_visual_style_preset_id(values.get("visual_style_preset_id"))
+        )
         preset_update = visual_style_preset_state(resume.get("visual_style_preset_id"))
+        if preset_changed:
+            return (
+                "await_layout",
+                {
+                    "current_stage": "style",
+                    "visual_style_md": "",
+                    "visual_style": {},
+                    "layouts": [],
+                    "consolidated_brief_md": "",
+                    "brief": {},
+                    "html_slides": {},
+                    "html_failures": [],
+                    "pending_html_retry_slides": [],
+                    **preset_update,
+                },
+            )
         if not resume.get("approved"):
             return ("await_layout", {"layouts": layouts, **preset_update})
         return (

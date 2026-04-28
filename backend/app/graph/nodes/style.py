@@ -46,6 +46,28 @@ class _VisualStyle(BaseModel):
     rationale: str = ""
 
 
+def _visual_direction_style_guidance(state: dict[str, Any]) -> str:
+    label = state.get("visual_style_preset_label")
+    style_bias = state.get("visual_style_preset_style_bias") or {}
+    if not label or not style_bias:
+        return ""
+    lines = [
+        "VISUAL DIRECTION PRESET:",
+        f"{label}",
+        "",
+        "Style bias to express strongly while preserving recognizable brand anchors when present:",
+    ]
+    for key, value in style_bias.items():
+        lines.append(f"- {key}: {value}")
+    lines.extend([
+        "",
+        "The resulting visual_style object must visibly reflect this direction in tone, "
+        "palette, typography, density, imagery policy, and rationale. Do not treat it "
+        "as a surface-level HTML-only hint.",
+    ])
+    return "\n".join(lines)
+
+
 def style_node(state: dict[str, Any]) -> dict[str, Any]:
     ref = state.get("style_reference_image_uri")
     user_pref = state.get("visual_style_preference") or ""
@@ -77,6 +99,8 @@ def style_node(state: dict[str, Any]) -> dict[str, Any]:
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
+    if visual_direction_guidance := _visual_direction_style_guidance(state):
+        messages.append({"role": "user", "content": visual_direction_guidance})
     if creator_prompt:
         messages.append({
             "role": "user",

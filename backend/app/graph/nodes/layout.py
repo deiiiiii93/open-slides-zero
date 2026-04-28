@@ -37,6 +37,48 @@ class _BulkSignals(BaseModel):
     slides: list[_PerSlideSignals]
 
 
+def _visual_direction_layout_guidance(state: dict[str, Any]) -> str:
+    label = state.get("visual_style_preset_label")
+    layout_bias = state.get("visual_style_preset_layout_bias") or {}
+    if not label or not layout_bias:
+        return ""
+    prefer = [p for p in (layout_bias.get("prefer") or []) if p in L.PATTERNS]
+    avoid = [p for p in (layout_bias.get("avoid") or []) if p in L.PATTERNS]
+    lines = [
+        "VISUAL DIRECTION LAYOUT BIAS:",
+        f"{label}",
+        "",
+        "Use this as candidate-generation guidance. Only propose pattern ids that exist.",
+    ]
+    if prefer:
+        lines.append(f"- Prefer when content fits: {', '.join(prefer)}")
+    if avoid:
+        lines.append(f"- Avoid unless content clearly requires them: {', '.join(avoid)}")
+    return "\n".join(lines)
+
+
+def _preferred_pattern_for_family(
+    preferred: list[str],
+    family: str,
+    *,
+    is_cover: bool,
+    is_closing: bool,
+) -> str | None:
+    if is_cover:
+        allowed_kinds = {"cover"}
+    elif is_closing:
+        allowed_kinds = {"closing"}
+    else:
+        allowed_kinds = {"content", "timeline"}
+    for pattern_id in preferred:
+        pattern = L.PATTERNS.get(pattern_id)
+        if not pattern:
+            continue
+        if pattern["family"] == family and pattern["kind"] in allowed_kinds:
+            return pattern_id
+    return None
+
+
 def _ascii_wireframe(pattern_id: str) -> str:
     """Deterministic lightweight ASCII preview from the pattern's zone list."""
     p = L.get_pattern(pattern_id)
@@ -119,6 +161,8 @@ def layout_node(state: dict[str, Any]) -> dict[str, Any]:
     density = style.get("density", state.get("density_preference", "balanced"))
     aspect_ratio = state.get("aspect_ratio", "16:9")
     languages = state.get("languages") or [state.get("language", "en")]
+    layout_bias = state.get("visual_style_preset_layout_bias") or {}
+    preferred_patterns = [p for p in (layout_bias.get("prefer") or []) if p in L.PATTERNS]
 
     pattern_catalog = "\n".join(
         f"- {pid} (family={p['family']}, kind={p['kind']}, zones={p['zones']})"
@@ -143,6 +187,8 @@ def layout_node(state: dict[str, Any]) -> dict[str, Any]:
             ),
         },
     ]
+    if visual_direction_guidance := _visual_direction_layout_guidance(state):
+        messages.append({"role": "user", "content": visual_direction_guidance})
     if creator_prompt:
         messages.append({
             "role": "user",
@@ -184,6 +230,15 @@ def layout_node(state: dict[str, Any]) -> dict[str, Any]:
         decision = pick_pattern(sig, llm_candidates=candidates)
         pattern_id = decision["pattern"]
         family = decision["family"]
+        if pattern_id not in candidates:
+            preferred_pattern = _preferred_pattern_for_family(
+                preferred_patterns,
+                family,
+                is_cover=is_cover,
+                is_closing=is_closing,
+            )
+            if preferred_pattern:
+                pattern_id = preferred_pattern
         previous_family = family
 
         ranking: list[ScoreBreakdown] = decision["ranking"]

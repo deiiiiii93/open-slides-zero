@@ -32,7 +32,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send, interrupt
 
-from ..catalog.visual_presets import visual_style_preset_state
+from ..catalog.visual_presets import normalize_visual_style_preset_id, visual_style_preset_state
 from .layout_overrides import apply_layout_overrides
 from .nodes.consolidate import consolidate_node
 from .nodes.edit import edit_intent_node
@@ -115,7 +115,24 @@ def await_layout_review(state: SlideState) -> dict[str, Any]:
     })
     overrides: dict[int, str] = resume.get("overrides", {}) or {}
     layouts = apply_layout_overrides(state.get("layouts"), overrides)
+    preset_changed = (
+        normalize_visual_style_preset_id(resume.get("visual_style_preset_id"))
+        != normalize_visual_style_preset_id(state.get("visual_style_preset_id"))
+    )
     preset_update = visual_style_preset_state(resume.get("visual_style_preset_id"))
+    if preset_changed:
+        return {
+            "current_stage": "style",
+            "visual_style_md": "",
+            "visual_style": {},
+            "layouts": [],
+            "consolidated_brief_md": "",
+            "brief": {},
+            "html_slides": {},
+            "html_failures": [],
+            "pending_html_retry_slides": [],
+            **preset_update,
+        }
     if not resume.get("approved"):
         return {"layouts": layouts, **preset_update}
     return {"layouts": layouts, "current_stage": "consolidate", **preset_update}
@@ -235,9 +252,13 @@ def build_graph(checkpointer: SqliteSaver | None = None):
 
     # Layout gate loops back to layout when not approved.
     def layout_next(state: SlideState) -> str:
+        if state.get("current_stage") == "style":
+            return "style"
         return "consolidate" if state.get("current_stage") == "consolidate" else "layout"
     g.add_conditional_edges(
-        "await_layout", layout_next, {"layout": "layout", "consolidate": "consolidate"}
+        "await_layout",
+        layout_next,
+        {"style": "style", "layout": "layout", "consolidate": "consolidate"},
     )
 
     g.add_conditional_edges("consolidate", fan_out_html, ["html_one"])
