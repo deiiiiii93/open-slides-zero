@@ -68,6 +68,8 @@ class EditOp(BaseModel):
 
 def _merge_html(current: dict[int, str] | None, incoming: dict[int, str] | None) -> dict[int, str]:
     """Merge a Send() fan-out partial result into the full slide map."""
+    if incoming == {}:
+        return {}
     out: dict[int, str] = dict(current or {})
     for k, v in (incoming or {}).items():
         out[int(k)] = v

@@ -33,14 +33,14 @@ router = APIRouter()
 # Order matters — keys appearing after from_stage get nulled.
 _DOWNSTREAM_FIELDS: dict[str, list[str]] = {
     "outline":      ["outline_md", "outline_slides", "visual_style_md", "visual_style",
-                     "layouts", "consolidated_brief_md", "html_slides",
+                     "layouts", "consolidated_brief_md", "brief", "html_slides",
                      "html_failures", "pending_html_retry_slides"],
     "style":        ["visual_style_md", "visual_style",
-                     "layouts", "consolidated_brief_md", "html_slides",
+                     "layouts", "consolidated_brief_md", "brief", "html_slides",
                      "html_failures", "pending_html_retry_slides"],
-    "layout":       ["layouts", "consolidated_brief_md", "html_slides",
+    "layout":       ["layouts", "consolidated_brief_md", "brief", "html_slides",
                      "html_failures", "pending_html_retry_slides"],
-    "consolidate":  ["consolidated_brief_md", "html_slides",
+    "consolidate":  ["consolidated_brief_md", "brief", "html_slides",
                      "html_failures", "pending_html_retry_slides"],
     "html":         ["html_slides", "html_failures", "pending_html_retry_slides"],
     "image_only":   [],  # no state invalidation; only prompt-hint change
@@ -51,6 +51,8 @@ def _empty_for(field: str) -> Any:
     if field.endswith("_md"):
         return ""
     if field == "html_slides":
+        return {}
+    if field == "brief":
         return {}
     if field == "html_failures" or field == "pending_html_retry_slides":
         return []
@@ -80,14 +82,24 @@ def _find_prestage_checkpoint(g: Any, cfg: dict[str, Any], stage: str) -> dict[s
     target_node = _STAGE_TO_NODE.get(stage)
     if not target_node:
         return None
+    return _find_checkpoint_with_next(g, cfg, target_node)
+
+
+def _find_checkpoint_with_next(g: Any, cfg: dict[str, Any], node: str) -> dict[str, Any] | None:
+    """Walk the state history newest→oldest; return the most recent checkpoint
+    whose `next` queue contains `node`."""
     for snap in g.get_state_history(cfg):
-        if target_node in (snap.next or ()):
+        if node in (snap.next or ()):
             return snap.config
     return None
 
 
 def _default_fork_name(values: dict[str, Any], thread_id: str) -> str:
     return f"{values.get('deck_name') or thread_id} (fork)"
+
+
+def _downstream_clear_patch(from_stage: str) -> dict[str, Any]:
+    return {field: _empty_for(field) for field in _DOWNSTREAM_FIELDS[from_stage]}
 
 
 def _clone_checkpoint_lineage(
@@ -186,15 +198,15 @@ def _regenerate_from(
             detail=f"No prior checkpoint found with node '{_STAGE_TO_NODE.get(from_stage)}' pending.",
         )
 
-    # 2. Overlay user patch (if any) onto that historical checkpoint. We do NOT
-    #    null downstream fields here — the target node will overwrite them as
-    #    it re-executes, and nulling up-front removes information the node may
-    #    need (e.g. ripping out `layouts` would starve consolidate).
+    # 2. Overlay user patch onto that historical checkpoint and explicitly clear
+    #    stale downstream state. LangGraph reducers do not infer invalidation
+    #    from rewinds, so fields like `brief` and `html_slides` must be reset.
     user_patch = dict(patch or {})
-    if user_patch:
+    rewind_patch = {**_downstream_clear_patch(from_stage), **user_patch}
+    if rewind_patch:
         # Preserve the target checkpoint_id so update_state forks from there,
         # not from the latest state.
-        new_cfg = g.update_state(target_cfg, user_patch)  # type: ignore[arg-type]
+        new_cfg = g.update_state(target_cfg, rewind_patch)  # type: ignore[arg-type]
     else:
         new_cfg = target_cfg
 
@@ -260,9 +272,21 @@ def _fork_from_review(
         target_stage = "style"
         patch["visual_style_preference"] = feedback.strip()
     else:
-        target_stage = "consolidate"
+        source_target_cfg = _find_checkpoint_with_next(g, cfg, "await_layout")
+        if source_target_cfg is None:
+            raise HTTPException(
+                status_code=409,
+                detail="No prior checkpoint found with node 'await_layout' pending.",
+            )
+        patch.update(_downstream_clear_patch("consolidate"))
         patch["layouts"] = apply_layout_overrides(snap.values.get("layouts"), overrides)
+        patch["current_stage"] = "await_layout"
         patch.update(visual_style_preset_state(visual_style_preset_id))
+
+        new_target_cfg = _clone_checkpoint_lineage(thread_id, source_target_cfg, new_thread_id)
+        g.update_state(new_target_cfg, patch)  # type: ignore[arg-type]
+        mirror_to_disk(new_thread_id)
+        return current_state(new_thread_id, source_thread_id=thread_id)
 
     source_target_cfg = _find_prestage_checkpoint(g, cfg, target_stage)
     if source_target_cfg is None:
@@ -271,6 +295,7 @@ def _fork_from_review(
             detail=f"No prior checkpoint found with node '{_STAGE_TO_NODE.get(target_stage)}' pending.",
         )
 
+    patch = {**_downstream_clear_patch(target_stage), **patch}
     new_target_cfg = _clone_checkpoint_lineage(thread_id, source_target_cfg, new_thread_id)
     new_cfg = g.update_state(new_target_cfg, patch)  # type: ignore[arg-type]
     g.invoke(None, new_cfg)  # type: ignore[arg-type]

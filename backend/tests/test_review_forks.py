@@ -240,9 +240,10 @@ def test_layout_approval_stores_visual_preset_and_sends_it_to_html(isolated_grap
     assert all(preset["prompt"] in prompt for prompt in html_system_prompts)
 
 
-def test_layout_review_fork_rerenders_html_and_supports_future_forks(isolated_graph):
+def test_layout_review_fork_stops_at_layout_gate_and_supports_future_forks(isolated_graph):
     source = _create_ready_deck()
     source_html = source["values"]["html_slides"][0]
+    html_calls_before = len(isolated_graph["html_messages"])
 
     forked = history.fork_from_review(
         source["thread_id"],
@@ -252,21 +253,34 @@ def test_layout_review_fork_rerenders_html_and_supports_future_forks(isolated_gr
         ),
     )
 
-    assert forked["values"]["current_stage"] == "ready"
-    assert not forked["interrupts"]
+    assert forked["values"]["current_stage"] == "await_layout"
+    assert _interrupt_gate(forked) == "layout"
     assert forked["values"]["layouts"][0]["pattern"] == "radial_compact"
-    assert "data-pattern=\"radial_compact\"" in forked["values"]["html_slides"][0]
-    assert forked["values"]["html_slides"][0] != source_html
+    assert forked["values"].get("consolidated_brief_md") in (None, "")
+    assert not forked["values"].get("brief")
+    assert not forked["values"].get("html_slides")
+    assert len(isolated_graph["html_messages"]) == html_calls_before
 
-    fork_history = history.history(forked["thread_id"])
+    rendered = hitl.resume_deck(
+        forked["thread_id"],
+        {"approved": True, "overrides": {}},
+    )
+
+    assert rendered["values"]["current_stage"] == "ready"
+    assert not rendered["interrupts"]
+    assert "data-pattern=\"radial_compact\"" in rendered["values"]["html_slides"][0]
+    assert rendered["values"]["html_slides"][0] != source_html
+    assert len(isolated_graph["html_messages"]) == html_calls_before + 2
+
+    fork_history = history.history(rendered["thread_id"])
     assert len(fork_history["history"]) >= 4
 
     second_fork = history.fork_from_review(
-        forked["thread_id"],
+        rendered["thread_id"],
         history.ForkFromStyleBody(
             review_stage="style",
             feedback="Make the design more restrained.",
         ),
     )
-    assert second_fork["source_thread_id"] == forked["thread_id"]
+    assert second_fork["source_thread_id"] == rendered["thread_id"]
     assert _interrupt_gate(second_fork) == "style"
