@@ -23,6 +23,34 @@ const CANVAS: Record<string, [number, number]> = {
 // PPI constant: 96 CSS pixels per inch (standard devtools assumption).
 const PPI = 96;
 
+export type ExportArtifact = {
+  filename: string;
+  blob: Blob;
+};
+
+type ExportNameOptions = {
+  filenameBase?: string;
+};
+
+export type ExportablePlaygroundLane = {
+  lane_id: string;
+  lane_thread_id: string;
+  creator_prompt: string;
+  cutoff: boolean;
+  state: DeckState | null;
+};
+
+type PackageIndexRow = {
+  laneId: string;
+  laneName: string;
+  stage: string;
+  cutoff: boolean;
+  prompt: string;
+  singleHtmlHref: string;
+  slideIndexHref: string;
+  pptxHref: string;
+};
+
 // ---------------- Shared helpers ----------------
 
 function getCanvasSize(deck: DeckState): [number, number] {
@@ -34,7 +62,8 @@ function sanitizeFileName(name: string): string {
   return name.replace(/[\\/:*?"<>|\x00-\x1f]+/g, "_").trim() || "deck";
 }
 
-function getDeckName(deck: DeckState): string {
+function getDeckName(deck: DeckState, options: ExportNameOptions = {}): string {
+  if (options.filenameBase?.trim()) return sanitizeFileName(options.filenameBase);
   const raw = (deck.values?.deck_name as string | undefined) || `deck-${deck.thread_id.slice(0, 6)}`;
   return sanitizeFileName(raw);
 }
@@ -81,11 +110,11 @@ function downloadBlob(blob: Blob, filename: string): void {
 
 // ---------------- HTML (single file) ----------------
 
-export async function exportHtmlSingle(deck: DeckState): Promise<void> {
+function buildHtmlSingleDocument(deck: DeckState, options: ExportNameOptions = {}): { deckName: string; doc: string } {
   const entries = getSlideEntries(deck);
   if (entries.length === 0) throw new Error("No rendered slides to export");
   const [w, h] = getCanvasSize(deck);
-  const deckName = getDeckName(deck);
+  const deckName = getDeckName(deck, options);
 
   const slides = entries
     .map(([idx, html]) => {
@@ -117,8 +146,20 @@ ${slides}
 </html>
 `;
 
-  const blob = new Blob([doc], { type: "text/html;charset=utf-8" });
-  downloadBlob(blob, `${deckName}.html`);
+  return { deckName, doc };
+}
+
+export function buildHtmlSingleArtifact(deck: DeckState, options: ExportNameOptions = {}): ExportArtifact {
+  const { deckName, doc } = buildHtmlSingleDocument(deck, options);
+  return {
+    filename: `${deckName}.html`,
+    blob: new Blob([doc], { type: "text/html;charset=utf-8" }),
+  };
+}
+
+export async function exportHtmlSingle(deck: DeckState): Promise<void> {
+  const artifact = buildHtmlSingleArtifact(deck);
+  downloadBlob(artifact.blob, artifact.filename);
 }
 
 // ---------------- HTML (zip of slides) ----------------
@@ -167,20 +208,35 @@ ${items}
 `;
 }
 
-export async function exportHtmlZip(deck: DeckState): Promise<void> {
+function addHtmlSlidesToZip(
+  zip: JSZip,
+  entries: Array<[number, string]>,
+  deckName: string,
+  canvas: [number, number],
+  folder = "",
+): void {
+  for (const [idx, html] of entries) {
+    zip.file(`${folder}slide_${pad(idx + 1)}.html`, html);
+  }
+  zip.file(`${folder}index.html`, buildZipIndexHtml(entries, deckName, canvas));
+}
+
+export async function buildHtmlZipArtifact(deck: DeckState, options: ExportNameOptions = {}): Promise<ExportArtifact> {
   const entries = getSlideEntries(deck);
   if (entries.length === 0) throw new Error("No rendered slides to export");
-  const deckName = getDeckName(deck);
+  const deckName = getDeckName(deck, options);
   const canvas = getCanvasSize(deck);
 
   const zip = new JSZip();
-  for (const [idx, html] of entries) {
-    zip.file(`slide_${pad(idx + 1)}.html`, html);
-  }
-  zip.file("index.html", buildZipIndexHtml(entries, deckName, canvas));
+  addHtmlSlidesToZip(zip, entries, deckName, canvas);
 
   const blob = await zip.generateAsync({ type: "blob" });
-  downloadBlob(blob, `${deckName}.zip`);
+  return { filename: `${deckName}.zip`, blob };
+}
+
+export async function exportHtmlZip(deck: DeckState): Promise<void> {
+  const artifact = await buildHtmlZipArtifact(deck);
+  downloadBlob(artifact.blob, artifact.filename);
 }
 
 // ---------------- PPTX (editable) ----------------
@@ -1317,12 +1373,11 @@ function processTable(table: HTMLTableElement, ctx: PptxContext, pos: { x: numbe
   });
 }
 
-/** Main export function. */
-export async function exportPptx(deck: DeckState): Promise<void> {
+export async function buildPptxArtifact(deck: DeckState, options: ExportNameOptions = {}): Promise<ExportArtifact> {
   const entries = getSlideEntries(deck);
   if (entries.length === 0) throw new Error("No rendered slides to export");
   const [w, h] = getCanvasSize(deck);
-  const deckName = getDeckName(deck);
+  const deckName = getDeckName(deck, options);
 
   // Mount all slide iframes off-screen but rendered.
   const host = document.createElement("div");
@@ -1425,8 +1480,113 @@ export async function exportPptx(deck: DeckState): Promise<void> {
     }
 
     const blob = await pptx.write({ outputType: "blob" }) as Blob;
-    downloadBlob(blob, `${deckName}.pptx`);
+    return { filename: `${deckName}.pptx`, blob };
   } finally {
     host.remove();
   }
+}
+
+/** Main export function. */
+export async function exportPptx(deck: DeckState): Promise<void> {
+  const artifact = await buildPptxArtifact(deck);
+  downloadBlob(artifact.blob, artifact.filename);
+}
+
+function buildPackageIndexHtml(packageName: string, rows: PackageIndexRow[]): string {
+  const items = rows
+    .map((row) => {
+      return `    <tr>
+      <td><strong>${escapeText(row.laneName)}</strong><br /><code>${escapeText(row.laneId)}</code></td>
+      <td>${escapeText(row.stage)}</td>
+      <td>${row.cutoff ? "Yes" : "No"}</td>
+      <td>
+        <a href="${escapeAttr(row.singleHtmlHref)}">Single HTML</a><br />
+        <a href="${escapeAttr(row.slideIndexHref)}">Slide HTML index</a><br />
+        <a href="${escapeAttr(row.pptxHref)}">PPTX</a>
+      </td>
+      <td><pre>${escapeText(row.prompt || "Baseline lane")}</pre></td>
+    </tr>`;
+    })
+    .join("\n");
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeText(packageName)}</title>
+  <style>
+    body { margin: 0; padding: 24px; background: #f8fafc; color: #111827; font-family: Georgia, serif; }
+    h1 { margin: 0 0 16px; font-size: 24px; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #e5e7eb; }
+    th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 14px; }
+    th { background: #f3f4f6; font-weight: 600; }
+    a { color: #1d4ed8; }
+    code { color: #64748b; font-size: 12px; }
+    pre { margin: 0; white-space: pre-wrap; font: inherit; color: #374151; }
+  </style>
+</head>
+<body>
+  <h1>${escapeText(packageName)}</h1>
+  <table>
+    <thead>
+      <tr><th>Lane</th><th>Stage</th><th>Cut off</th><th>Artifacts</th><th>Prompt</th></tr>
+    </thead>
+    <tbody>
+${items}
+    </tbody>
+  </table>
+</body>
+</html>
+`;
+}
+
+export async function buildPlaygroundLanesPackageArtifact(
+  deck: DeckState,
+  lanes: ExportablePlaygroundLane[],
+): Promise<ExportArtifact> {
+  const exportableLanes = lanes.filter((lane) => hasExportableSlides(lane.state));
+  if (exportableLanes.length === 0) throw new Error("No rendered playground lanes to export");
+
+  const packageName = `${getDeckName(deck)}-playground-lanes`;
+  const zip = new JSZip();
+  const rows: PackageIndexRow[] = [];
+
+  for (const lane of exportableLanes) {
+    if (!lane.state) continue;
+
+    const folder = `${sanitizeFileName(lane.lane_id)}/`;
+    const laneName = (lane.state.values?.deck_name as string | undefined) || lane.lane_id;
+    const stage = (lane.state.values?.current_stage as string | undefined) || "pending";
+    const entries = getSlideEntries(lane.state);
+    const canvas = getCanvasSize(lane.state);
+    const htmlSingle = buildHtmlSingleArtifact(lane.state);
+    const pptx = await buildPptxArtifact(lane.state);
+
+    zip.file(`${folder}${htmlSingle.filename}`, htmlSingle.blob);
+    addHtmlSlidesToZip(zip, entries, getDeckName(lane.state), canvas, folder);
+    zip.file(`${folder}${pptx.filename}`, pptx.blob);
+
+    rows.push({
+      laneId: lane.lane_id,
+      laneName,
+      stage,
+      cutoff: lane.cutoff,
+      prompt: lane.creator_prompt,
+      singleHtmlHref: `${folder}${htmlSingle.filename}`,
+      slideIndexHref: `${folder}index.html`,
+      pptxHref: `${folder}${pptx.filename}`,
+    });
+  }
+
+  zip.file("index.html", buildPackageIndexHtml(packageName, rows));
+  const blob = await zip.generateAsync({ type: "blob" });
+  return { filename: `${packageName}.zip`, blob };
+}
+
+export async function exportPlaygroundLanesPackage(
+  deck: DeckState,
+  lanes: ExportablePlaygroundLane[],
+): Promise<void> {
+  const artifact = await buildPlaygroundLanesPackageArtifact(deck, lanes);
+  downloadBlob(artifact.blob, artifact.filename);
 }

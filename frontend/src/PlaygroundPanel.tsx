@@ -14,6 +14,13 @@ import {
   type DeckState,
   type PlaygroundLane,
 } from "./api";
+import {
+  exportHtmlSingle,
+  exportHtmlZip,
+  exportPlaygroundLanesPackage,
+  exportPptx,
+  hasExportableSlides,
+} from "./exporter";
 import { normalizeImagePlaceholders } from "./imagePlaceholders";
 import { streamSSE, type StreamEvent } from "./sse";
 
@@ -126,6 +133,7 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
   const [activeLaneId, setActiveLaneId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [creatingLane, setCreatingLane] = useState(false);
+  const [exporting, setExporting] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [view, setView] = useState<"lanes" | "arena">("lanes");
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -160,6 +168,7 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
         return aOrder - bOrder || a.laneId.localeCompare(b.laneId);
       });
   }, [lanes, liveByLane]);
+  const hasExportableLane = useMemo(() => lanes.some((lane) => hasExportableSlides(lane.state)), [lanes]);
 
   function upsertLane(nextLane: PlaygroundLane) {
     setLanes((prev) => {
@@ -476,6 +485,35 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
     await consumeLaneStream(api.commentStreamUrl(lane.lane_thread_id, slideIdx), { text, box }, lane);
   }
 
+  async function runLaneExport(
+    lane: PlaygroundLane,
+    label: string,
+    fn: (state: DeckState) => Promise<void>,
+  ) {
+    if (!lane.state) return;
+    setErr(null);
+    setExporting(`${laneLabel(lane)} ${label}`);
+    try {
+      await fn(lane.state);
+    } catch (e) {
+      setErr(`Export failed: ${String(e)}`);
+    } finally {
+      setExporting(null);
+    }
+  }
+
+  async function downloadAllLanes() {
+    setErr(null);
+    setExporting("all lanes");
+    try {
+      await exportPlaygroundLanesPackage(deck, lanes);
+    } catch (e) {
+      setErr(`Export failed: ${String(e)}`);
+    } finally {
+      setExporting(null);
+    }
+  }
+
   return (
     <section
       style={{
@@ -504,7 +542,13 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
               {lanes.length}/{maxLanes} lanes
             </div>
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <button
+              disabled={!hasExportableLane || exporting !== null}
+              onClick={() => void downloadAllLanes()}
+            >
+              {exporting === "all lanes" ? "Packaging..." : "Download all lanes"}
+            </button>
             <button
               onClick={() => setView("lanes")}
               style={{ border: view === "lanes" ? "1px solid #2563eb" : "1px solid #e5e5e5" }}
@@ -586,10 +630,12 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
                 currentSlide={currentSlide}
                 setCurrentSlide={setCurrentSlide}
                 busy={Boolean(liveByLane[activeLane.lane_id]?.isRunning)}
+                exporting={exporting}
                 onResume={resumeLane}
                 onComment={commentOnLane}
                 onCutoff={cutoffLane}
                 onSaveMasterpiece={saveMasterpiece}
+                onExport={runLaneExport}
               />
             ) : (
               <div style={{ padding: 16, border: "1px solid #e5e5e5", borderRadius: 6 }}>
@@ -638,16 +684,19 @@ function LaneDetail({
   currentSlide,
   setCurrentSlide,
   busy,
+  exporting,
   onResume,
   onComment,
   onCutoff,
   onSaveMasterpiece,
+  onExport,
 }: {
   lane: PlaygroundLane;
   catalog: CatalogResponse | null;
   currentSlide: number;
   setCurrentSlide: (idx: number) => void;
   busy: boolean;
+  exporting: string | null;
   onResume: (lane: PlaygroundLane, payload: Record<string, unknown>) => Promise<void>;
   onComment: (
     lane: PlaygroundLane,
@@ -657,13 +706,16 @@ function LaneDetail({
   ) => Promise<void>;
   onCutoff: (lane: PlaygroundLane) => Promise<void>;
   onSaveMasterpiece: (lane: PlaygroundLane) => Promise<void>;
+  onExport: (lane: PlaygroundLane, label: string, fn: (state: DeckState) => Promise<void>) => Promise<void>;
 }) {
+  const [showExport, setShowExport] = useState(false);
   const state = lane.state;
   const gate = firstInterrupt(state) as any;
   const stage = (state?.values?.current_stage as string | undefined) ?? "pending";
   const slides = (state?.values?.html_slides as Record<number, string>) ?? {};
   const slideOrder = expectedSlideOrder(state);
   const hasSlides = slideOrder.length > 0;
+  const canExport = hasExportableSlides(state);
   const aspectRatio = (state?.values?.aspect_ratio as keyof typeof CANVAS | undefined) ?? "16:9";
   const [, baseH] = CANVAS[aspectRatio] ?? CANVAS["16:9"];
   const overlayHeight = (baseH * LANE_CANVAS_WIDTH) / (CANVAS[aspectRatio]?.[0] ?? CANVAS["16:9"][0]);
@@ -684,7 +736,60 @@ function LaneDetail({
             </div>
           )}
         </div>
-        <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+        <div style={{ display: "flex", gap: 8, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <div style={{ position: "relative" }}>
+            <button
+              disabled={!canExport || exporting !== null}
+              onClick={() => setShowExport((open) => !open)}
+            >
+              {exporting?.startsWith(laneLabel(lane)) ? "Exporting..." : "Export"}
+            </button>
+            {showExport && canExport && exporting === null && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 4px)",
+                  right: 0,
+                  minWidth: 190,
+                  background: "#fff",
+                  border: "1px solid #e5e5e5",
+                  borderRadius: 6,
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+                  zIndex: 100,
+                  padding: "4px 0",
+                }}
+              >
+                {[
+                  { key: "html", label: "HTML (single file)", fn: exportHtmlSingle },
+                  { key: "zip", label: "HTML (zip of slides)", fn: exportHtmlZip },
+                  { key: "pptx", label: "PPTX (editable)", fn: exportPptx },
+                ].map((opt) => (
+                  <button
+                    key={opt.key}
+                    onClick={() => {
+                      setShowExport(false);
+                      void onExport(lane, opt.key, opt.fn);
+                    }}
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "6px 12px",
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      fontSize: 13,
+                      fontFamily: "inherit",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f5f5f5")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button
             disabled={busy || lane.cutoff}
             onClick={() => void onCutoff(lane)}
