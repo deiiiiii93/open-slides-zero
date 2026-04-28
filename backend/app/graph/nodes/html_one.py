@@ -46,6 +46,7 @@ def _slide_prompt(
     brief_slide: dict[str, Any],
     brief: dict[str, Any],
     feedback: str | None = None,
+    creator_prompt: str | None = None,
 ) -> list[dict[str, Any]]:
     width, height = _canvas_css(brief["aspect_ratio"])
     style = brief["style"]
@@ -93,10 +94,20 @@ ASCII layout wireframe for reference:
 
 Return ONLY the complete HTML document. Begin with <!DOCTYPE html>.
 """
-    return [
+    messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
+    if creator_prompt:
+        messages.append({
+            "role": "user",
+            "content": (
+                "CREATOR PLAYGROUND LANE EXTRA INSTRUCTIONS:\n"
+                f"{creator_prompt.strip()}\n\n"
+                "Treat these as direct user instructions for this lane."
+            ),
+        })
+    return messages
 
 
 def _html_max_tokens() -> int:
@@ -199,7 +210,8 @@ def html_one_node(state: dict[str, Any]) -> dict[str, Any]:
         )
 
     feedback = state.get("feedback")
-    base_messages = _slide_prompt(slide, brief, feedback=feedback)
+    creator_prompt = brief.get("creator_prompt") or state.get("creator_prompt")
+    base_messages = _slide_prompt(slide, brief, feedback=feedback, creator_prompt=creator_prompt)
     tag = f"html:{slide_idx}"
     push_event({"node": "html_one", "slide_idx": slide_idx, "state": "started"})
     previous_html = ""

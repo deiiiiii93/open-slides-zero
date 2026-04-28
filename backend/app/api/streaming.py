@@ -26,13 +26,21 @@ from fastapi.responses import StreamingResponse
 from langgraph.types import Command
 from pydantic import BaseModel, Field
 
-from .common import config_for, current_state, delete_thread, graph, mirror_to_disk
+from .common import (
+    config_for,
+    current_state,
+    delete_thread,
+    graph,
+    mirror_to_disk,
+    resume_synthetic_interrupt,
+)
 from .decks import (
     CreateDeckBody,
     _build_initial_state,
     _coerce_text_material,
     normalize_uploaded_materials,
 )
+from .playground_store import is_cutoff_thread
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -207,6 +215,8 @@ class ResumeBody(BaseModel):
 
 @router.post("/decks/{thread_id}/resume/stream")
 def stream_resume(thread_id: str, body: ResumeBody) -> StreamingResponse:
+    if is_cutoff_thread(thread_id):
+        raise HTTPException(status_code=409, detail="Playground lane is cut off.")
     snap = graph().get_state(config_for(thread_id))  # type: ignore[arg-type]
     if not snap:
         raise HTTPException(status_code=404, detail="Unknown deck")
@@ -215,9 +225,14 @@ def stream_resume(thread_id: str, body: ResumeBody) -> StreamingResponse:
     if snap.interrupts:
         input_payload: Any = Command(resume=body.payload)
     else:
-        # No interrupt: treat as "continue from wherever the graph is paused"
-        # (e.g. a failed node that's been retried / patched).
-        input_payload = None
+        recovered_cfg = resume_synthetic_interrupt(thread_id, body.payload)
+        if recovered_cfg is not None:
+            cfg = recovered_cfg
+            input_payload = None
+        else:
+            # No interrupt: treat as "continue from wherever the graph is paused"
+            # (e.g. a failed node that's been retried / patched).
+            input_payload = None
 
     def gen() -> Iterable[str]:
         yield _sse({"type": "thread", "thread_id": thread_id})

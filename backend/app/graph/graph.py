@@ -4,7 +4,9 @@ Topology (matches the plan):
 
   ingest → outline_propose → [interrupt: structure]
                               ↓
-                        outline → style → [interrupt: style]
+                        outline → [interrupt: outline/playground]
+                              ↓
+                         style → [interrupt: style]
                                           ↓
                                        layout → [interrupt: layout]
                                                 ↓
@@ -83,6 +85,21 @@ def await_style_review(state: SlideState) -> dict[str, Any]:
         "visual_style_md": "",
         "visual_style": {},
     }
+
+
+def await_outline_review(state: SlideState) -> dict[str, Any]:
+    resume = interrupt({
+        "gate": "outline",
+        "outline_md": state.get("outline_md"),
+        "outline_slides": state.get("outline_slides"),
+        "hint": (
+            "Return {approved: true} to continue the normal flow, or "
+            "{playground: true} to stop here and create creator playground lanes."
+        ),
+    })
+    if resume.get("playground"):
+        return {"current_stage": "playground"}
+    return {"current_stage": "style"}
 
 
 def await_layout_review(state: SlideState) -> dict[str, Any]:
@@ -183,6 +200,7 @@ def build_graph(checkpointer: SqliteSaver | None = None):
     g.add_node("propose_structure", propose_structures_node)
     g.add_node("await_structure", await_structure)
     g.add_node("outline", outline_node)
+    g.add_node("await_outline", await_outline_review)
     g.add_node("style", style_node)
     g.add_node("await_style", await_style_review)
     g.add_node("layout", layout_node)
@@ -197,7 +215,12 @@ def build_graph(checkpointer: SqliteSaver | None = None):
     g.add_edge("ingest", "propose_structure")
     g.add_edge("propose_structure", "await_structure")
     g.add_edge("await_structure", "outline")
-    g.add_edge("outline", "style")
+    g.add_edge("outline", "await_outline")
+
+    def outline_next(state: SlideState) -> str:
+        return "__end__" if state.get("current_stage") == "playground" else "style"
+    g.add_conditional_edges("await_outline", outline_next, {"style": "style", "__end__": END})
+
     g.add_edge("style", "await_style")
 
     # Style gate loops back to style when user requests revisions.

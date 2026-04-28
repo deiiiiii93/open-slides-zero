@@ -18,6 +18,7 @@ import {
 } from "./HitlReviewPanel";
 import { LiveStream } from "./LiveStream";
 import { Markdown } from "./Markdown";
+import { PlaygroundPanel } from "./PlaygroundPanel";
 import {
   api,
   STREAM_BASE,
@@ -26,6 +27,7 @@ import {
   type DeckListItem,
   type DeckState,
   type ForkFromReviewBody,
+  type Masterpiece,
   type Material,
 } from "./api";
 import { streamSSE, type StreamEvent } from "./sse";
@@ -77,6 +79,7 @@ export function App() {
   const [err, setErr] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const [showMasterpieces, setShowMasterpieces] = useState(false);
   const [exporting, setExporting] = useState<string | null>(null);
   const [deckList, setDeckList] = useState<DeckListItem[] | null>(null);
   const [selectedReviewStage, setSelectedReviewStage] = useState<ReviewStage>("ready");
@@ -363,6 +366,7 @@ export function App() {
     setDeck(null);
     setErr(null);
     setBuffersByTag({});
+    setShowMasterpieces(false);
   }
 
   async function runExport(
@@ -476,6 +480,16 @@ export function App() {
           <button
             onClick={() => {
               setShowExport(false);
+              setShowHistory(false);
+              setShowMasterpieces((s) => !s);
+            }}
+          >
+            Masterpieces
+          </button>
+          <button
+            onClick={() => {
+              setShowMasterpieces(false);
+              setShowExport(false);
               setShowHistory((s) => {
                 const next = !s;
                 if (next) void refreshDeckList();
@@ -489,6 +503,7 @@ export function App() {
             <button
               disabled={!hasExportableSlides(deck) || exporting !== null}
               onClick={() => {
+                setShowMasterpieces(false);
                 setShowHistory(false);
                 setShowExport((s) => !s);
               }}
@@ -654,6 +669,13 @@ export function App() {
         }}
       >
         <main style={{ minWidth: 0 }}>
+          {showMasterpieces ? (
+            <MasterpieceManager
+              deck={deck}
+              onClose={() => setShowMasterpieces(false)}
+            />
+          ) : (
+            <>
           {readyReviewEnabled && (
             <section
               style={{
@@ -748,7 +770,10 @@ export function App() {
           )}
 
           {(!readyReviewEnabled || selectedReviewStage === "ready") && (
-            <>
+            stage === "playground" && !hasInterrupt ? (
+              <PlaygroundPanel deck={deck} catalog={catalog} />
+            ) : (
+              <>
               {hasPendingTasks && !hasInterrupt && !busy && (
                 <div
                   style={{
@@ -820,6 +845,9 @@ export function App() {
                   <CommentLayer width={CANVAS_W} height={CANVAS_H} onSubmit={onComment} />
                 </DeckCanvas>
               )}
+              </>
+            )
+          )}
             </>
           )}
         </main>
@@ -836,6 +864,134 @@ export function App() {
         )}
       </div>
     </div>
+  );
+}
+
+// ---------------- Masterpieces ----------------
+
+function MasterpieceManager({
+  deck,
+  onClose,
+}: {
+  deck: DeckState;
+  onClose: () => void;
+}) {
+  const [items, setItems] = useState<Masterpiece[]>([]);
+  const [laneCount, setLaneCount] = useState<number | null>(null);
+  const [maxLanes, setMaxLanes] = useState(5);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const playgroundOpen = (deck.values?.current_stage as string | undefined) === "playground";
+
+  const refresh = useCallback(async () => {
+    const result = await api.listMasterpieces();
+    setItems(result.masterpieces);
+    if (playgroundOpen) {
+      const lanes = await api.listPlaygroundLanes(deck.thread_id);
+      setLaneCount(lanes.lanes.length);
+      setMaxLanes(lanes.max_lanes);
+    } else {
+      setLaneCount(null);
+    }
+  }, [deck.thread_id, playgroundOpen]);
+
+  useEffect(() => {
+    void refresh().catch((e) => setErr(String(e)));
+  }, [refresh]);
+
+  async function deleteItem(item: Masterpiece) {
+    setBusy(item.id);
+    setErr(null);
+    try {
+      await api.deleteMasterpiece(item.id);
+      await refresh();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function useAsLane(item: Masterpiece) {
+    if (!playgroundOpen || laneCount == null || laneCount >= maxLanes) return;
+    setBusy(item.id);
+    setErr(null);
+    try {
+      for await (const ev of streamSSE(
+        api.createPlaygroundLaneStreamUrl(deck.thread_id),
+        { creator_prompt: item.prompt },
+      )) {
+        if (ev.type === "error") throw new Error(ev.message);
+      }
+      await refresh();
+      onClose();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <section style={{ border: "1px solid #e5e5e5", borderRadius: 6, background: "#fff", padding: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+        <div>
+          <h3 style={{ margin: 0 }}>Masterpieces</h3>
+          {playgroundOpen && laneCount != null && (
+            <div style={{ color: "#64748b", fontSize: 13, marginTop: 4 }}>
+              Playground lanes: {laneCount}/{maxLanes}
+            </div>
+          )}
+        </div>
+        <button onClick={onClose}>Close</button>
+      </div>
+
+      {err && (
+        <div style={{ color: "crimson", padding: 8, border: "1px solid crimson", marginTop: 12 }}>
+          {err}
+        </div>
+      )}
+
+      <div style={{ display: "grid", gap: 10, marginTop: 14 }}>
+        {items.length === 0 && (
+          <div style={{ color: "#64748b", padding: 12, border: "1px solid #e5e5e5", borderRadius: 6 }}>
+            No saved masterpiece prompts yet.
+          </div>
+        )}
+        {items.map((item) => (
+          <div
+            key={item.id}
+            style={{
+              border: "1px solid #e5e5e5",
+              borderRadius: 6,
+              padding: 12,
+              background: "#fafafa",
+            }}
+          >
+            <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{item.prompt}</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginTop: 10 }}>
+              <span style={{ color: "#64748b", fontSize: 12 }}>
+                {new Date(item.created_at).toLocaleString()}
+              </span>
+              <div style={{ display: "flex", gap: 8 }}>
+                {playgroundOpen && (
+                  <button
+                    disabled={busy !== null || laneCount == null || laneCount >= maxLanes}
+                    onClick={() => void useAsLane(item)}
+                  >
+                    Use as lane
+                  </button>
+                )}
+                <button disabled={busy !== null} onClick={() => void deleteItem(item)}>
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 

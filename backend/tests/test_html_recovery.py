@@ -166,7 +166,9 @@ def _create_html_stage(monkeypatch: pytest.MonkeyPatch, fake_html):
             "structure_id": created["values"]["structure_candidates"][0],
         },
     )
-    assert _interrupt_gate(structured) == "style"
+    assert _interrupt_gate(structured) == "outline"
+    styled = hitl.resume_deck(thread_id, {"approved": True})
+    assert _interrupt_gate(styled) == "style"
     laid_out = hitl.resume_deck(thread_id, {"approved": True})
     assert _interrupt_gate(laid_out) == "layout"
     return thread_id, hitl.resume_deck(thread_id, {"approved": True, "overrides": {}})

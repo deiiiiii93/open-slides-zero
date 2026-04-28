@@ -16,18 +16,25 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from langgraph.types import Command
 
-from .common import config_for, current_state, graph, mirror_to_disk
+from .common import config_for, current_state, graph, mirror_to_disk, resume_synthetic_interrupt
+from .playground_store import is_cutoff_thread
 
 router = APIRouter()
 
 
 @router.post("/decks/{thread_id}/resume")
 def resume_deck(thread_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    if is_cutoff_thread(thread_id):
+        raise HTTPException(status_code=409, detail="Playground lane is cut off.")
     snap = graph().get_state(config_for(thread_id))  # type: ignore[arg-type]
     if not snap:
         raise HTTPException(status_code=404, detail="Unknown deck")
-    if not snap.interrupts:
-        raise HTTPException(status_code=409, detail="No pending interrupt to resume")
-    graph().invoke(Command(resume=body), config_for(thread_id))  # type: ignore[arg-type]
+    if snap.interrupts:
+        graph().invoke(Command(resume=body), config_for(thread_id))  # type: ignore[arg-type]
+    else:
+        cfg = resume_synthetic_interrupt(thread_id, body)
+        if cfg is None:
+            raise HTTPException(status_code=409, detail="No pending interrupt to resume")
+        graph().invoke(None, cfg)  # type: ignore[arg-type]
     mirror_to_disk(thread_id)
     return current_state(thread_id)

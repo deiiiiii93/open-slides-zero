@@ -17,7 +17,9 @@ FastAPI (:8000) ── app/api/{decks,hitl,comments,history}
     ▼
 LangGraph StateGraph
     ingest → propose_structure → [interrupt: structure]
-             → outline → style → [interrupt: style]
+             → outline → [interrupt: outline]
+                    ├─ normal → style → [interrupt: style]
+                    └─ playground → lane threads from shared outline
              → layout  → [interrupt: layout]
              → consolidate → Send(html_one, i) × N → ready
              (⇄ edit_intent on comments)
@@ -64,12 +66,18 @@ npm run dev          # opens :5173, proxies /api → :8000
 
 1. Paste source material into the form; pick pages/aspect/density; Create.
 2. Gate ① — pick scenario + narrative structure from the shortlist.
-3. Gate ② — review the generated palette/typography/density; approve or revise.
-4. Gate ③ — inspect per-slide layout + scorer rankings; override patterns if needed.
-5. Deck renders slide-by-slide as iframes at 960×540 (scaled to fit).
-6. Draw a box on any slide, leave a comment. The agent classifies the intent
+3. Gate ② — review the generated outline; continue normally or open Creator Playground.
+4. Gate ③ — review the generated palette/typography/density; approve or revise.
+5. Gate ④ — inspect per-slide layout + scorer rankings; override patterns if needed.
+6. Deck renders slide-by-slide as iframes at 960×540 (scaled to fit).
+7. Draw a box on any slide, leave a comment. The agent classifies the intent
    into one or more edit-ops, collapses to the earliest affected stage, and
    regenerates downstream.
+
+Creator Playground keeps the outline shared and creates up to five lane threads.
+Each lane has its own creator prompt, style/layout/html checkpoints, cut-off
+status, and slide-by-slide arena comparison. Saved masterpiece prompts are stored
+in the checkpoint SQLite DB.
 
 ## Per-subagent model routing
 
@@ -95,6 +103,7 @@ backend/
       hitl.py                   POST /decks/{id}/resume
       comments.py               comment intake + apply_edits (earliest-stage-wins)
       history.py                history, regenerate-from-stage, rewind
+      playground.py             creator playground lanes + masterpiece prompts
       common.py                 graph singleton + state serializers
     graph/
       state.py                  SlideState TypedDict + Pydantic leaves

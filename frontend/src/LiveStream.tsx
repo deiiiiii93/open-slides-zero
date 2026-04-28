@@ -9,6 +9,10 @@ type Props = {
   activeNode: string | null;
   activeSlide: number | null;
   elapsedByTag: Record<string, number>;
+  title?: string;
+  subtitle?: string;
+  isActive?: boolean;
+  maxHeight?: string | number;
 };
 
 const NODE_LABELS: Record<string, string> = {
@@ -30,7 +34,16 @@ function fmtMs(ms: number): string {
   return `${m}m ${rs}s`;
 }
 
-export function LiveStream({ buffersByTag, activeNode, activeSlide, elapsedByTag }: Props) {
+export function LiveStream({
+  buffersByTag,
+  activeNode,
+  activeSlide,
+  elapsedByTag,
+  title = "Live",
+  subtitle,
+  isActive = false,
+  maxHeight = "calc(100vh - 120px)",
+}: Props) {
   const tagsInOrder = ["propose_structure", "outline", "style", "layout"];
   const htmlTags = Object.keys(buffersByTag)
     .filter((t) => t.startsWith("html:"))
@@ -47,14 +60,14 @@ export function LiveStream({ buffersByTag, activeNode, activeSlide, elapsedByTag
     <div
       style={{
         padding: 12,
-        border: "1px solid #e5e5e5",
+        border: isActive ? "1px solid #2563eb" : "1px solid #e5e5e5",
         borderRadius: 8,
         background: "#fff",
         fontFamily: "ui-sans-serif, -apple-system, sans-serif",
         display: "flex",
         flexDirection: "column",
         gap: 10,
-        maxHeight: "calc(100vh - 120px)",
+        maxHeight,
         overflowY: "auto",
       }}
     >
@@ -66,8 +79,13 @@ export function LiveStream({ buffersByTag, activeNode, activeSlide, elapsedByTag
           color: "#6b7280",
         }}
       >
-        Live
+        {title}
       </div>
+      {subtitle && (
+        <div style={{ fontSize: 12, color: "#64748b", marginTop: -6 }}>
+          {subtitle}
+        </div>
+      )}
       <div style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{label}</div>
 
       {commentBuf && (

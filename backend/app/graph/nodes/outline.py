@@ -151,5 +151,5 @@ def outline_node(state: dict[str, Any]) -> dict[str, Any]:
         "outline_slides": [s.model_dump() for s in outline.slides],
         "language": outline.language,
         "languages": [outline.language],
-        "current_stage": "style",
+        "current_stage": "await_outline",
     }

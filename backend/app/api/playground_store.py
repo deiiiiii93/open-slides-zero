@@ -1,0 +1,224 @@
+"""SQLite helpers for creator playground metadata.
+
+LangGraph checkpoints remain the source of truth for lane state. These tables
+only track parent/lane relationships, cut-off status, and saved prompt snippets.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+import uuid
+from datetime import datetime, timezone
+from typing import Any
+
+from ..graph import graph as graph_module
+
+MAX_LANES_PER_DECK = 5
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _connect() -> sqlite3.Connection:
+    graph_module.DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(graph_module.DB_PATH))
+    conn.row_factory = sqlite3.Row
+    _ensure_tables(conn)
+    return conn
+
+
+def _ensure_tables(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS playground_lanes (
+            parent_thread_id TEXT NOT NULL,
+            lane_id TEXT NOT NULL,
+            lane_thread_id TEXT NOT NULL UNIQUE,
+            creator_prompt TEXT NOT NULL,
+            cutoff INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (parent_thread_id, lane_id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_playground_lanes_parent
+        ON playground_lanes(parent_thread_id, created_at)
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS masterpieces (
+            id TEXT PRIMARY KEY,
+            prompt TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.commit()
+
+
+def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "parent_thread_id": row["parent_thread_id"],
+        "lane_id": row["lane_id"],
+        "lane_thread_id": row["lane_thread_id"],
+        "creator_prompt": row["creator_prompt"],
+        "cutoff": bool(row["cutoff"]),
+        "created_at": row["created_at"],
+    }
+
+
+def list_lanes(parent_thread_id: str) -> list[dict[str, Any]]:
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT parent_thread_id, lane_id, lane_thread_id, creator_prompt, cutoff, created_at
+            FROM playground_lanes
+            WHERE parent_thread_id = ?
+            ORDER BY created_at, lane_id
+            """,
+            (parent_thread_id,),
+        ).fetchall()
+    return [_row_to_dict(row) for row in rows]
+
+
+def create_lane_record(
+    parent_thread_id: str,
+    lane_thread_id: str,
+    creator_prompt: str,
+) -> dict[str, Any]:
+    with _connect() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM playground_lanes WHERE parent_thread_id = ?",
+            (parent_thread_id,),
+        ).fetchone()[0]
+        if count >= MAX_LANES_PER_DECK:
+            raise ValueError(f"Creator playground allows at most {MAX_LANES_PER_DECK} lanes.")
+        lane_id = f"lane-{count + 1}"
+        created_at = _now()
+        conn.execute(
+            """
+            INSERT INTO playground_lanes
+            (parent_thread_id, lane_id, lane_thread_id, creator_prompt, cutoff, created_at)
+            VALUES (?, ?, ?, ?, 0, ?)
+            """,
+            (parent_thread_id, lane_id, lane_thread_id, creator_prompt, created_at),
+        )
+        conn.commit()
+    return {
+        "parent_thread_id": parent_thread_id,
+        "lane_id": lane_id,
+        "lane_thread_id": lane_thread_id,
+        "creator_prompt": creator_prompt,
+        "cutoff": False,
+        "created_at": created_at,
+    }
+
+
+def delete_lane_record(parent_thread_id: str, lane_id: str) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "DELETE FROM playground_lanes WHERE parent_thread_id = ? AND lane_id = ?",
+            (parent_thread_id, lane_id),
+        )
+        conn.commit()
+
+
+def get_lane(parent_thread_id: str, lane_id: str) -> dict[str, Any] | None:
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT parent_thread_id, lane_id, lane_thread_id, creator_prompt, cutoff, created_at
+            FROM playground_lanes
+            WHERE parent_thread_id = ? AND lane_id = ?
+            """,
+            (parent_thread_id, lane_id),
+        ).fetchone()
+    return _row_to_dict(row) if row else None
+
+
+def get_lane_by_thread(lane_thread_id: str) -> dict[str, Any] | None:
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT parent_thread_id, lane_id, lane_thread_id, creator_prompt, cutoff, created_at
+            FROM playground_lanes
+            WHERE lane_thread_id = ?
+            """,
+            (lane_thread_id,),
+        ).fetchone()
+    return _row_to_dict(row) if row else None
+
+
+def mark_lane_cutoff(parent_thread_id: str, lane_id: str) -> dict[str, Any] | None:
+    with _connect() as conn:
+        conn.execute(
+            """
+            UPDATE playground_lanes
+            SET cutoff = 1
+            WHERE parent_thread_id = ? AND lane_id = ?
+            """,
+            (parent_thread_id, lane_id),
+        )
+        conn.commit()
+    return get_lane(parent_thread_id, lane_id)
+
+
+def is_cutoff_thread(thread_id: str) -> bool:
+    lane = get_lane_by_thread(thread_id)
+    return bool(lane and lane["cutoff"])
+
+
+def _masterpiece_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "prompt": row["prompt"],
+        "created_at": row["created_at"],
+    }
+
+
+def list_masterpieces() -> list[dict[str, Any]]:
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, prompt, created_at
+            FROM masterpieces
+            ORDER BY created_at DESC
+            """
+        ).fetchall()
+    return [_masterpiece_to_dict(row) for row in rows]
+
+
+def save_masterpiece(prompt: str) -> dict[str, Any]:
+    clean_prompt = prompt.strip()
+    if not clean_prompt:
+        raise ValueError("Cannot save a blank masterpiece prompt.")
+
+    with _connect() as conn:
+        existing = conn.execute(
+            "SELECT id, prompt, created_at FROM masterpieces WHERE prompt = ?",
+            (clean_prompt,),
+        ).fetchone()
+        if existing:
+            return _masterpiece_to_dict(existing)
+        masterpiece_id = uuid.uuid4().hex[:12]
+        created_at = _now()
+        conn.execute(
+            """
+            INSERT INTO masterpieces (id, prompt, created_at)
+            VALUES (?, ?, ?)
+            """,
+            (masterpiece_id, clean_prompt, created_at),
+        )
+        conn.commit()
+    return {"id": masterpiece_id, "prompt": clean_prompt, "created_at": created_at}
+
+
+def delete_masterpiece(masterpiece_id: str) -> bool:
+    with _connect() as conn:
+        cursor = conn.execute("DELETE FROM masterpieces WHERE id = ?", (masterpiece_id,))
+        conn.commit()
+        return cursor.rowcount > 0

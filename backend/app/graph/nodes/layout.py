@@ -114,6 +114,7 @@ def layout_node(state: dict[str, Any]) -> dict[str, Any]:
     if not outline_slides:
         return {"errors": ["layout_node: missing outline_slides"], "layouts": []}
 
+    creator_prompt = (state.get("creator_prompt") or "").strip()
     style = state.get("visual_style") or {}
     density = style.get("density", state.get("density_preference", "balanced"))
     aspect_ratio = state.get("aspect_ratio", "16:9")
@@ -142,6 +143,15 @@ def layout_node(state: dict[str, Any]) -> dict[str, Any]:
             ),
         },
     ]
+    if creator_prompt:
+        messages.append({
+            "role": "user",
+            "content": (
+                "CREATOR PLAYGROUND LANE EXTRA INSTRUCTIONS:\n"
+                f"{creator_prompt}\n\n"
+                "Treat these as direct user instructions for this lane."
+            ),
+        })
     push_event({"node": "layout", "state": "started"})
     with tagged_stream("layout"):
         enriched = zenmux.chat_structured(

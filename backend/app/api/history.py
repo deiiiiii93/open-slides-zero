@@ -17,6 +17,7 @@ from typing import Any
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException
+from langgraph.types import Command
 from pydantic import BaseModel, Field
 
 from ..artifacts import store
@@ -270,6 +271,14 @@ def _fork_from_review(
     new_target_cfg = _clone_checkpoint_lineage(thread_id, source_target_cfg, new_thread_id)
     new_cfg = g.update_state(new_target_cfg, patch)  # type: ignore[arg-type]
     g.invoke(None, new_cfg)  # type: ignore[arg-type]
+    if review_stage == "structure":
+        fork_snap = g.get_state(config_for(new_thread_id))  # type: ignore[arg-type]
+        interrupts = list(fork_snap.interrupts or []) if fork_snap else []
+        if interrupts:
+            payload = interrupts[0]
+            value = payload.value if hasattr(payload, "value") else payload
+            if isinstance(value, dict) and value.get("gate") == "outline":
+                g.invoke(Command(resume={"approved": True}), config_for(new_thread_id))  # type: ignore[arg-type]
     mirror_to_disk(new_thread_id)
     return current_state(new_thread_id, source_thread_id=thread_id)
 

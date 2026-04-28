@@ -49,6 +49,7 @@ class _VisualStyle(BaseModel):
 def style_node(state: dict[str, Any]) -> dict[str, Any]:
     ref = state.get("style_reference_image_uri")
     user_pref = state.get("visual_style_preference") or ""
+    creator_prompt = (state.get("creator_prompt") or "").strip()
     outline_md = state.get("outline_md", "")
 
     system = (
@@ -72,6 +73,15 @@ def style_node(state: dict[str, Any]) -> dict[str, Any]:
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
+    if creator_prompt:
+        messages.append({
+            "role": "user",
+            "content": (
+                "CREATOR PLAYGROUND LANE EXTRA INSTRUCTIONS:\n"
+                f"{creator_prompt}\n\n"
+                "Treat these as direct user instructions for this lane."
+            ),
+        })
 
     model = get_model("style.vision") if ref else get_model("style.text")
     push_event({"node": "style", "state": "started"})

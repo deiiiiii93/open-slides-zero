@@ -38,6 +38,7 @@ def consolidate_node(state: dict[str, Any]) -> dict[str, Any]:
         "aspect_ratio": state.get("aspect_ratio", "16:9"),
         "density": style.get("density", state.get("density_preference", "balanced")),
         "style": style,
+        "creator_prompt": state.get("creator_prompt") or "",
         "slides": per_slide,
     }
 
@@ -47,13 +48,21 @@ def consolidate_node(state: dict[str, Any]) -> dict[str, Any]:
         f"- Aspect: {brief['aspect_ratio']}",
         f"- Density: {brief['density']}",
         "",
+    ]
+    if brief["creator_prompt"]:
+        md_parts.extend([
+            "## Creator Prompt",
+            str(brief["creator_prompt"]),
+            "",
+        ])
+    md_parts.extend([
         "## Style",
         "```json",
         json.dumps(style, indent=2, ensure_ascii=False),
         "```",
         "",
         "## Slides",
-    ]
+    ])
     for s in per_slide:
         md_parts.append(f"### {s['slide_idx'] + 1}. {s['title']}")
         md_parts.append(f"- role: {s['role']}")

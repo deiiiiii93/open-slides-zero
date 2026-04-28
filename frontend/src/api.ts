@@ -63,6 +63,21 @@ export type DeckListItem = {
   created_at: string | null;
 };
 
+export type PlaygroundLane = {
+  lane_id: string;
+  lane_thread_id: string;
+  creator_prompt: string;
+  cutoff: boolean;
+  created_at: string;
+  state: DeckState | null;
+};
+
+export type Masterpiece = {
+  id: string;
+  prompt: string;
+  created_at: string;
+};
+
 export type ForkFromStructureBody = {
   review_stage: "structure";
   scenario_id: string;
@@ -124,4 +139,22 @@ export const api = {
 
   rewind: (id: string, checkpoint_id: string) =>
     http<DeckState>("POST", `/decks/${id}/rewind`, { checkpoint_id }),
+
+  listPlaygroundLanes: (id: string) =>
+    http<{ max_lanes: number; lanes: PlaygroundLane[] }>("GET", `/decks/${id}/playground/lanes`),
+
+  createPlaygroundLaneStreamUrl: (id: string) =>
+    `${STREAM_BASE}/decks/${id}/playground/lanes/stream`,
+
+  cutoffPlaygroundLane: (id: string, laneId: string) =>
+    http<{ ok: boolean; lane: PlaygroundLane }>("POST", `/decks/${id}/playground/lanes/${laneId}/cutoff`, {}),
+
+  saveLaneMasterpiece: (id: string, laneId: string) =>
+    http<{ ok: boolean; masterpiece: Masterpiece }>("POST", `/decks/${id}/playground/lanes/${laneId}/masterpiece`, {}),
+
+  listMasterpieces: () =>
+    http<{ masterpieces: Masterpiece[] }>("GET", "/masterpieces"),
+
+  deleteMasterpiece: (id: string) =>
+    http<{ ok: boolean }>("DELETE", `/masterpieces/${id}`),
 };

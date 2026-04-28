@@ -9,6 +9,7 @@ type StructureSubmit = { scenario_id: string; structure_id: string };
 type StyleSubmit = { feedback: string };
 type LayoutSubmit = { overrides: Record<number, string> };
 type HtmlRetrySubmit = { retry_failed: true };
+type OutlineSubmit = { approved?: true; playground?: true };
 
 type StructureStageProps = {
   catalog: CatalogResponse | null;
@@ -48,6 +49,12 @@ type HtmlStageProps = {
   onSubmit: (payload: HtmlRetrySubmit) => Promise<void>;
 };
 
+type OutlineStageProps = {
+  outlineMd?: string;
+  title: string;
+  onSubmit: (payload: OutlineSubmit) => Promise<void>;
+};
+
 function firstInterrupt(deck: DeckState): any {
   const i = deck.interrupts?.[0];
   if (!i) return null;
@@ -62,7 +69,7 @@ export function HitlReviewPanel({ deck, catalog, onResume }: {
   const payload = firstInterrupt(deck);
   if (!payload) return null;
 
-  const gate = payload.gate as "structure" | "style" | "layout" | "html";
+  const gate = payload.gate as "structure" | "outline" | "style" | "layout" | "html";
   if (gate === "structure") {
     return (
       <StructureStage
@@ -79,7 +86,7 @@ export function HitlReviewPanel({ deck, catalog, onResume }: {
   if (gate === "style") {
     return (
       <StyleStage
-        title="② Review visual style"
+        title="③ Review visual style"
         submitLabel="Revise"
         approveLabel="Approve & continue"
         visualStyleMd={payload.visual_style_md}
@@ -89,12 +96,21 @@ export function HitlReviewPanel({ deck, catalog, onResume }: {
       />
     );
   }
+  if (gate === "outline") {
+    return (
+      <OutlineStage
+        title="② Review outline"
+        outlineMd={payload.outline_md}
+        onSubmit={onResume}
+      />
+    );
+  }
   if (gate === "layout") {
     return (
       <LayoutStage
         catalog={catalog}
         layouts={payload.layouts}
-        title="③ Review layouts (scores shown)"
+        title="④ Review layouts (scores shown)"
         submitLabel="Approve & render HTML"
         onSubmit={async ({ overrides }) => onResume({ approved: true, overrides })}
       />
@@ -103,7 +119,7 @@ export function HitlReviewPanel({ deck, catalog, onResume }: {
   if (gate === "html") {
     return (
       <HtmlStage
-        title="④ Retry failed HTML slides"
+        title="⑤ Retry failed HTML slides"
         submitLabel="Retry failed slides"
         failedSlides={payload.failed_slides}
         renderedCount={payload.rendered_count}
@@ -113,6 +129,41 @@ export function HitlReviewPanel({ deck, catalog, onResume }: {
     );
   }
   return <pre>{JSON.stringify(payload, null, 2)}</pre>;
+}
+
+export function OutlineStage({ outlineMd, title, onSubmit }: OutlineStageProps) {
+  const [playground, setPlayground] = useState(false);
+
+  return (
+    <div style={{ padding: 16, border: "1px solid #e5e5e5", borderRadius: 6 }}>
+      <h3>{title}</h3>
+      <div
+        style={{
+          background: "#fafafa",
+          padding: 12,
+          maxHeight: 460,
+          overflow: "auto",
+          border: "1px solid #e5e5e5",
+          borderRadius: 4,
+        }}
+      >
+        <Markdown>{outlineMd ?? ""}</Markdown>
+      </div>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
+        <input
+          type="checkbox"
+          checked={playground}
+          onChange={(e) => setPlayground(e.target.checked)}
+        />
+        Creator playground mode
+      </label>
+      <div style={{ marginTop: 12 }}>
+        <button onClick={() => onSubmit(playground ? { playground: true } : { approved: true })}>
+          {playground ? "Open playground" : "Continue"}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export function StructureStage({

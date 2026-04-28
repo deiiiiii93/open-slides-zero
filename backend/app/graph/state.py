@@ -98,6 +98,7 @@ def _merge_html_failures(
 
 Stage = Literal[
     "ingest", "outline", "await_structure",
+    "await_outline", "playground",
     "style", "await_style",
     "layout", "await_layout",
     "consolidate", "html", "ready", "editing",
@@ -115,6 +116,9 @@ class SlideState(TypedDict, total=False):
     density_preference: str                 # "minimal" | "balanced" | "dense" | "very_dense"
     visual_style_preference: str | None     # free-text user hint (e.g. "MBB deck")
     style_reference_image_uri: str | None
+    creator_prompt: str | None              # lane-specific extra instructions
+    parent_thread_id: str | None            # playground base deck for a lane thread
+    lane_id: str | None                     # playground lane id within parent
 
     # ---- C / D: structure choice ----
     scenario_id: str
