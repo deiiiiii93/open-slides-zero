@@ -63,6 +63,9 @@ def score_families(sig: SlideSignal) -> list[ScoreBreakdown]:
     if sig.content_type in ("comparison", "data"):
         bump("horizontal", "content_type", 0.9)
         bump("grid", "content_type", 0.7)
+    if sig.content_type in ("gallery", "photo_gallery", "image_gallery"):
+        bump("grid", "content_type", 1.1)
+        bump("horizontal", "content_type", 0.35)
     if sig.content_type == "timeline":
         bump("vertical", "content_type", 0.8)
         bump("narrative", "content_type", 0.5)
@@ -75,57 +78,79 @@ def score_families(sig: SlideSignal) -> list[ScoreBreakdown]:
     # ---- §6.2 semantic family ----
     sem = sig.semantic_family
     if sem == "comparison":
-        bump("horizontal", "semantic", 0.85); bump("grid", "semantic", 0.75)
+        bump("horizontal", "semantic", 0.85)
+        bump("grid", "semantic", 0.75)
     elif sem == "quant":
-        bump("horizontal", "semantic", 0.8); bump("grid", "semantic", 0.65)
+        bump("horizontal", "semantic", 0.8)
+        bump("grid", "semantic", 0.65)
     elif sem == "table":
-        bump("vertical", "semantic", 0.85); bump("paginated", "semantic", 0.55)
+        bump("vertical", "semantic", 0.85)
+        bump("paginated", "semantic", 0.55)
     elif sem == "hierarchy":
-        bump("radial", "semantic", 0.8); bump("vertical", "semantic", 0.4)
+        bump("radial", "semantic", 0.8)
+        bump("vertical", "semantic", 0.4)
     elif sem == "sequential":
-        bump("narrative", "semantic", 0.75); bump("vertical", "semantic", 0.55)
+        bump("narrative", "semantic", 0.75)
+        bump("vertical", "semantic", 0.55)
+    elif sem == "gallery":
+        bump("grid", "semantic", 1.2)
+        bump("horizontal", "semantic", 0.45)
 
     # ---- §6.3 content shape ----
     shape = sig.content_shape
     if shape in ("parallel_cards", "parallel_columns"):
-        bump("grid", "shape", 0.95); bump("horizontal", "shape", 0.7)
+        bump("grid", "shape", 0.95)
+        bump("horizontal", "shape", 0.7)
     elif shape == "matrix_2x2":
         bump("grid", "shape", 1.1)
     elif shape == "timeline":
-        bump("vertical", "shape", 0.9); bump("narrative", "shape", 0.6)
+        bump("vertical", "shape", 0.9)
+        bump("narrative", "shape", 0.6)
     elif shape == "ordered_steps":
-        bump("vertical", "shape", 0.75); bump("narrative", "shape", 0.7)
+        bump("vertical", "shape", 0.75)
+        bump("narrative", "shape", 0.7)
     elif shape == "tree":
-        bump("radial", "shape", 0.8); bump("vertical", "shape", 0.45)
+        bump("radial", "shape", 0.8)
+        bump("vertical", "shape", 0.45)
     elif shape == "radial_branches":
         bump("radial", "shape", 1.0)
     elif shape == "chart":
-        bump("horizontal", "shape", 0.9); bump("grid", "shape", 0.6)
+        bump("horizontal", "shape", 0.9)
+        bump("grid", "shape", 0.6)
     elif shape == "table":
-        bump("vertical", "shape", 0.8); bump("paginated", "shape", 0.7)
+        bump("vertical", "shape", 0.8)
+        bump("paginated", "shape", 0.7)
+    elif shape == "image_gallery":
+        bump("grid", "shape", 1.35)
+        bump("horizontal", "shape", 0.5)
 
     # ---- §6.4 aspect ratio ----
     if sig.aspect_ratio == "21:9":
         bump("horizontal", "aspect", 1.2)
     elif sig.aspect_ratio == "4:3":
-        bump("vertical", "aspect", 1.0); bump("adaptive", "aspect", 0.7)
+        bump("vertical", "aspect", 1.0)
+        bump("adaptive", "aspect", 0.7)
     elif sig.aspect_ratio == "16:9":
-        bump("horizontal", "aspect", 0.8); bump("vertical", "aspect", 0.2)
+        bump("horizontal", "aspect", 0.8)
+        bump("vertical", "aspect", 0.2)
 
     # ---- §6.5 item count ----
     n = sig.item_count
     if n <= 3:
         bump("horizontal", "items", 0.6)
     elif n <= 7:
-        bump("vertical", "items", 0.6); bump("grid", "items", 0.45)
+        bump("vertical", "items", 0.6)
+        bump("grid", "items", 0.45)
     else:
-        bump("vertical", "items", 0.9); bump("paginated", "items", 0.8)
+        bump("vertical", "items", 0.9)
+        bump("paginated", "items", 0.8)
 
     # ---- §6.6 text length (with §12 language expansion) ----
     max_expansion = max((TEXT_EXPANSION.get(lang, 1.0) for lang in sig.languages), default=1.0)
     effective_text = sig.text_length * max_expansion
     if effective_text > 320:
-        bump("vertical", "text", 0.8); bump("adaptive", "text", 0.7)
+        bump("vertical", "text", 0.8)
+        bump("adaptive", "text", 0.7)
     elif effective_text > 160:
         bump("vertical", "text", 0.5)
     else:
@@ -244,6 +269,13 @@ def pick_pattern(
                 if p["kind"] == "closing" and p["family"] == family:
                     chosen = pid
                     break
+    if chosen is None:
+        shape_preferred = {
+            "image_gallery": "image_gallery_grid",
+        }
+        preferred = shape_preferred.get(sig.content_shape)
+        if preferred and preferred in PATTERNS and family_of(preferred) == family:
+            chosen = preferred
     if chosen is None:
         chosen = default_pattern_for_family(family)
 

@@ -1,6 +1,7 @@
 """HTML composer prompt tests."""
 
 from app.catalog.visual_presets import VISUAL_STYLE_PRESETS
+from app.graph.nodes.consolidate import consolidate_node
 from app.graph.nodes.html_one import _slide_prompt
 
 
@@ -102,3 +103,54 @@ def test_html_prompt_omits_visual_direction_guidance_for_ai_decide():
     system_prompt = messages[0]["content"]
     assert "Visual preference guidance" not in system_prompt
     assert "Direction-specific HTML rules" not in system_prompt
+
+
+def test_image_slots_survive_brief_and_reach_html_prompt():
+    consolidated = consolidate_node({
+        "language": "en",
+        "aspect_ratio": "16:9",
+        "visual_style": {
+            "palette": {"background": "#fff", "text": "#111"},
+            "typography": {"heading": "Aptos", "body": "Aptos"},
+            "tone": "editorial",
+            "density": "balanced",
+        },
+        "outline_slides": [
+            {
+                "title": "Three Views",
+                "role": "context",
+                "bullets": ["Morning, noon, and night views"],
+                "image_slots": [
+                    "morning exterior photo",
+                    "noon interior detail",
+                    "night skyline crop",
+                ],
+            }
+        ],
+        "layouts": [
+            {
+                "slide_idx": 0,
+                "title": "Three Views",
+                "pattern": "image_gallery_grid",
+                "family": "grid",
+                "zones": ["title", "image-1", "image-2", "image-3", "image-4", "caption"],
+                "content_shape": "image_gallery",
+                "wireframe": "",
+            }
+        ],
+    })
+
+    brief = consolidated["brief"]
+    assert brief["slides"][0]["image_slots"] == [
+        "morning exterior photo",
+        "noon interior detail",
+        "night skyline crop",
+    ]
+    assert "image_slots" in consolidated["consolidated_brief_md"]
+
+    messages = _slide_prompt(brief["slides"][0], brief)
+    joined = "\n\n".join(str(message["content"]) for message in messages)
+    assert "Image slot guidance" in joined
+    assert "render exactly one visible" in joined
+    assert "morning exterior photo" in joined
+    assert "data-prompt-hint" in joined

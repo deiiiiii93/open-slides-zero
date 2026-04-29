@@ -157,6 +157,24 @@ STRUCTURE_DEFINITIONS: dict[str, dict[str, Any]] = {
         "slide_mix_en": "Current struggle -> call to change -> guide/tool -> transformed future.",
         "slide_mix_zh": "当前困境 -> 变革召唤 -> 导师/工具 -> 未来新常态。",
     },
+    "gallery": {
+        "id": "gallery",
+        "name_en": "Gallery",
+        "name_zh": "图集相册",
+        "description_en": "Album and picture-gallery structure for image-led storytelling.",
+        "description_zh": "面向相册、图集与视觉记录的图片主导型叙事结构。",
+        "tone_en": "Visual, editorial, and lightly contextual.",
+        "tone_zh": "视觉优先、编辑感强、少量语境说明。",
+        "focus_en": "Present one strong image moment or a curated set of related images on each slide.",
+        "focus_zh": "每页呈现一个核心影像瞬间，或一组经过策展的相关图片。",
+        "evidence_en": "Captions, scene context, source notes, dates, locations, and thematic tags.",
+        "evidence_zh": "图片说明、场景语境、来源备注、日期、地点与主题标签。",
+        "slide_mix_en": (
+            "Cover -> collection overview -> image feature spreads -> multi-image gallery "
+            "grids -> closing summary."
+        ),
+        "slide_mix_zh": "封面 -> 图集概览 -> 单图重点页 -> 多图网格页 -> 总结收束。",
+    },
     "grouping": {
         "id": "grouping",
         "name_en": "Grouping (Legacy)",

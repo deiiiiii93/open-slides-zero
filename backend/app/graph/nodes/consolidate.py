@@ -25,6 +25,7 @@ def consolidate_node(state: dict[str, Any]) -> dict[str, Any]:
             "title": layout.get("title") or outline.get("title"),
             "role": outline.get("role"),
             "bullets": outline.get("bullets", []),
+            "image_slots": outline.get("image_slots", []),
             "speaker_notes": outline.get("speaker_notes", ""),
             "pattern": layout["pattern"],
             "family": layout["family"],
@@ -98,6 +99,10 @@ def consolidate_node(state: dict[str, Any]) -> dict[str, Any]:
             md_parts.append("- bullets:")
             for b in s["bullets"]:
                 md_parts.append(f"  - {b}")
+        if s.get("image_slots"):
+            md_parts.append("- image_slots:")
+            for slot in s["image_slots"]:
+                md_parts.append(f"  - {slot}")
         if s.get("wireframe"):
             md_parts.append("```")
             md_parts.append(s["wireframe"])

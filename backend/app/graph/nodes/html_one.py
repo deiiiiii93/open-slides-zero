@@ -72,6 +72,22 @@ def _slide_prompt(
         "\nVisual preference guidance:\n" + "\n".join(guidance_lines) + "\n"
         if guidance_lines else ""
     )
+    image_slots = [
+        str(slot).strip()
+        for slot in (brief_slide.get("image_slots") or [])
+        if str(slot).strip()
+    ]
+    image_slot_system_guidance = (
+        "- When Image slot guidance is provided, render exactly one visible "
+        "data-image-placeholder slot per requested image slot. Use the slot text as "
+        "the data-prompt-hint and Suggested text.\n"
+        if image_slots else ""
+    )
+    image_slot_user_guidance = (
+        "\nImage slot guidance (render as visible image placeholders):\n"
+        + "\n".join(f"- {slot}" for slot in image_slots)
+        if image_slots else "\nImage slot guidance: (none)"
+    )
 
     system = f"""\
 You are an HTML/CSS slide composer. Output ONE complete self-contained HTML
@@ -91,6 +107,9 @@ document for a single slide. Hard constraints:
   subtle fill, dashed/bordered treatment, and box-sizing:border-box.
 - Use <img> only for real, non-empty src values; real images must have explicit
   width/height attributes or inline width/height styles, and object-fit:cover.
+- Image-slot placeholders are allowed and expected when the slide asks for imagery.
+{image_slot_system_guidance}- Do not render image-slot guidance as ordinary body copy; it is only for
+  placeholder prompt hints and captions.
 - Use inline <style> — no external stylesheet or JS frameworks.
 - Use the `{pattern}` layout pattern with zones: {zones}.
 
@@ -115,6 +134,7 @@ Title: {brief_slide['title']}
 Role: {brief_slide['role']}
 Bullets: {brief_slide['bullets']}
 Speaker notes (do NOT render verbatim, only for your reasoning): {brief_slide.get('speaker_notes', '')}
+{image_slot_user_guidance}
 ASCII layout wireframe for reference:
 {brief_slide.get('wireframe', '')}{feedback_block}
 

@@ -57,6 +57,19 @@ def test_pick_pattern_override_beats_everything():
     assert decision["source"] == "override"
 
 
+def test_image_gallery_signal_picks_gallery_grid():
+    sig = SlideSignal(
+        content_type="gallery",
+        semantic_family="gallery",
+        content_shape="image_gallery",
+        item_count=3,
+        text_length=120,
+    )
+    decision = pick_pattern(sig)
+    assert decision["family"] == "grid"
+    assert decision["pattern"] == "image_gallery_grid"
+
+
 def test_scorer_never_produces_unknown_family():
     sig = SlideSignal()
     ranked = score_families(sig)

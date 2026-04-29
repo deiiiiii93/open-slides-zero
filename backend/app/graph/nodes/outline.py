@@ -79,6 +79,11 @@ class _OutlineSlide(BaseModel):
     title: str
     role: str = Field(description="cover | context | tension | decision | proof | execution | impact | close | closing")
     bullets: list[str] = Field(default_factory=list, max_length=8)
+    image_slots: list[str] = Field(
+        default_factory=list,
+        max_length=6,
+        description="Concise image placeholder prompt hints, especially for Gallery decks.",
+    )
     speaker_notes: str = ""
 
 
@@ -103,6 +108,17 @@ def outline_node(state: dict[str, Any]) -> dict[str, Any]:
     materials_blob = "\n\n---\n\n".join(
         (m.get("parsed") or "") for m in state.get("materials", [])
     )[:16000]
+    gallery_guidance = ""
+    if structure_id == "gallery":
+        gallery_guidance = (
+            "\nGallery-specific requirements:\n"
+            "- Build an image-led album/gallery outline, not a text-heavy report.\n"
+            "- For every non-closing slide, populate image_slots with 1-4 concise "
+            "image placeholder descriptions.\n"
+            "- Keep captions, scene context, dates, places, tags, and source notes in bullets.\n"
+            "- Keep image-slot instructions out of bullets; put them only in image_slots.\n"
+            "- Do not write placeholder copy such as 'Add image here' in bullets or titles.\n"
+        )
 
     messages = [
         {
@@ -116,6 +132,7 @@ def outline_node(state: dict[str, Any]) -> dict[str, Any]:
                 f"Focus: {structure['focus_en']}\n"
                 f"Evidence: {structure['evidence_en']}\n"
                 f"Slide mix: {structure['slide_mix_en']}\n\n"
+                f"{gallery_guidance}"
                 "Keep bullets short and information-dense. Detect language from the material."
             ),
         },
@@ -142,6 +159,11 @@ def outline_node(state: dict[str, Any]) -> dict[str, Any]:
         md_lines.append(f"_role: {s.role}_")
         for b in s.bullets:
             md_lines.append(f"- {b}")
+        if s.image_slots:
+            md_lines.append("")
+            md_lines.append("_image_slots:_")
+            for slot in s.image_slots:
+                md_lines.append(f"- {slot}")
         if s.speaker_notes:
             md_lines.append("")
             md_lines.append(f"> {s.speaker_notes}")

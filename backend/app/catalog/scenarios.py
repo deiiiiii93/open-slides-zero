@@ -43,6 +43,12 @@ SCENARIO_DEFINITIONS: list[dict[str, Any]] = [
         "name_zh": "愿景宣讲/发布",
         "structures": ["hero_journey"],
     },
+    {
+        "id": "gallery",
+        "name_en": "Gallery",
+        "name_zh": "图集相册",
+        "structures": ["gallery"],
+    },
 ]
 
 

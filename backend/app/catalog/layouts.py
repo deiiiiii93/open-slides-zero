@@ -159,6 +159,11 @@ PATTERNS: dict[str, dict[str, Any]] = {
         "zones": ["visual", "metric1", "metric2", "metric3", "caption"], "kind": "content",
         "intent": {"orientation": "horizontal", "composition": "split", "emphasis": "data"},
     },
+    "image_gallery_grid": {
+        "family": "grid", "legacy": "matrix_quadrant",
+        "zones": ["title", "image-1", "image-2", "image-3", "image-4", "caption"], "kind": "content",
+        "intent": {"orientation": "grid", "composition": "gallery", "emphasis": "visual"},
+    },
     "editorial_inverted_impact": {
         "family": "grid", "legacy": "three_columns",
         "zones": ["eyebrow", "title", "col-1", "col-2", "col-3"], "kind": "content",
@@ -268,6 +273,8 @@ SEMANTIC_FAMILIES: dict[str, dict[str, Any]] = {
                                    "chart_bar", "chart_pie", "chart_line"],
                    "default_shape": "chart"},
     "table":      {"slide_types": ["table_grid"], "default_shape": "table"},
+    "gallery":    {"slide_types": ["gallery", "album", "photo_gallery"],
+                   "default_shape": "image_gallery"},
     "freeform":   {"slide_types": ["matrix", "content", "bullet_list", "wordcloud"],
                    "default_shape": "freeform_text"},
 }
@@ -275,7 +282,7 @@ SEMANTIC_FAMILIES: dict[str, dict[str, Any]] = {
 CONTENT_SHAPES: list[str] = [
     "timeline", "ordered_steps", "parallel_cards", "parallel_columns",
     "matrix_2x2", "tree", "radial_branches", "funnel", "pyramid",
-    "keyword_cloud", "chart", "table", "freeform_text",
+    "keyword_cloud", "chart", "table", "image_gallery", "freeform_text",
 ]
 
 

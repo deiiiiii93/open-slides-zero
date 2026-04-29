@@ -85,6 +85,18 @@ def _ascii_wireframe(pattern_id: str) -> str:
     zones = p["zones"]
     family = p["family"]
 
+    if pattern_id == "image_gallery_grid":
+        return "\n".join([
+            "┌───────────────────┐",
+            "│       title       │",
+            "├─────────┬─────────┤",
+            "│  img1   │  img2   │",
+            "├─────────┼─────────┤",
+            "│  img3   │  img4   │",
+            "├─────────┴─────────┤",
+            "│      caption      │",
+            "└───────────────────┘",
+        ])
     if family == "horizontal" and len(zones) == 2:
         return "\n".join([
             "┌─────────┬─────────┐",
@@ -133,7 +145,25 @@ def _signal_from_outline_slide(
     is_cover = role == "cover"
     is_closing = role in ("closing", "close")
     bullets = outline_slide.get("bullets") or []
+    image_slots = outline_slide.get("image_slots") or []
     text_len = sum(len(b) for b in bullets) + len(outline_slide.get("title", ""))
+    if image_slots and not is_closing:
+        text_len += sum(len(str(slot)) for slot in image_slots)
+        return (
+            SlideSignal(
+                content_type="gallery",
+                semantic_family="gallery",
+                content_shape="image_gallery",
+                item_count=max(len(bullets), len(image_slots)),
+                text_length=text_len,
+                is_cover=is_cover,
+                is_closing=is_closing,
+                story_role=role if role else None,
+                editorial_enabled=True,
+            ),
+            is_cover,
+            is_closing,
+        )
     return (
         SlideSignal(
             content_type="content",
@@ -211,6 +241,7 @@ def layout_node(state: dict[str, Any]) -> dict[str, Any]:
     previous_family: str | None = None
     for i, osl in enumerate(outline_slides):
         sig, is_cover, is_closing = _signal_from_outline_slide(osl)
+        image_slots = osl.get("image_slots") or []
         enrich = signal_by_idx.get(i)
         candidates: list[str] = []
         if enrich:
@@ -221,6 +252,13 @@ def layout_node(state: dict[str, Any]) -> dict[str, Any]:
             sig.text_length = max(sig.text_length, enrich.text_length)
             sig.story_role = enrich.story_role or sig.story_role
             candidates = [c for c in enrich.candidate_patterns if c in L.PATTERNS]
+        if image_slots and not is_closing:
+            sig.content_type = "gallery"
+            sig.semantic_family = "gallery"
+            sig.content_shape = "image_gallery"
+            sig.item_count = max(sig.item_count, len(image_slots))
+            if not is_cover and "image_gallery_grid" not in candidates:
+                candidates.insert(0, "image_gallery_grid")
         sig.aspect_ratio = aspect_ratio
         sig.density_preference = density
         sig.languages = languages

@@ -89,6 +89,14 @@ const PER_PATTERN: Record<string, Box[]> = {
     { name: "metric3", x: 53, y: 52, w: 44, h: 21 },
     { name: "caption", x: 53, y: 75, w: 44, h: 19 },
   ],
+  image_gallery_grid: [
+    { name: "title", x: 4, y: 4, w: 92, h: 10 },
+    { name: "image-1", x: 3, y: 18, w: 46, h: 25, accent: true },
+    { name: "image-2", x: 51, y: 18, w: 46, h: 25, accent: true },
+    { name: "image-3", x: 3, y: 46, w: 46, h: 25, accent: true },
+    { name: "image-4", x: 51, y: 46, w: 46, h: 25, accent: true },
+    { name: "caption", x: 3, y: 76, w: 94, h: 18 },
+  ],
 
   // --- content vertical ---
   text_top_chart_bottom: [
