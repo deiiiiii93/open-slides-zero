@@ -41,6 +41,7 @@ class SlideSignal:
     story_role: str | None = None            # cover/context/tension/decision/proof/execution/impact/close
     density_preference: str = "balanced"     # "minimal","balanced","dense","very_dense"
     previous_family: str | None = None
+    preset_layout_bias: dict[str, list[str]] | None = None  # {"prefer": [pattern_ids], "avoid": [...]}
 
 
 @dataclass
@@ -183,6 +184,39 @@ def score_families(sig: SlideSignal) -> list[ScoreBreakdown]:
         for fam, weight in role_map.get(sig.story_role, []):
             bump(fam, f"role:{sig.story_role}", weight)
 
+    # ---- §6.9 preset layout bias ----
+    # Net contribution per family is capped at [-0.8, +1.0] so the preset can flip
+    # close calls but cannot override clear content fit (e.g. image_gallery -> grid
+    # still wins even when the preset prefers narrative patterns).
+    if sig.preset_layout_bias:
+        prefer = sig.preset_layout_bias.get("prefer") or []
+        avoid = sig.preset_layout_bias.get("avoid") or []
+        per_family_delta: dict[str, float] = {f: 0.0 for f in ALL_FAMILIES}
+        per_family_components: dict[str, dict[str, float]] = {f: {} for f in ALL_FAMILIES}
+        for pid in prefer:
+            if pid not in PATTERNS:
+                continue
+            fam = PATTERNS[pid]["family"]
+            if fam not in per_family_delta:
+                continue
+            per_family_delta[fam] += 0.6
+            per_family_components[fam][f"preset:prefer:{pid}"] = 0.6
+        for pid in avoid:
+            if pid not in PATTERNS:
+                continue
+            fam = PATTERNS[pid]["family"]
+            if fam not in per_family_delta:
+                continue
+            per_family_delta[fam] -= 0.4
+            per_family_components[fam][f"preset:avoid:{pid}"] = -0.4
+        for fam, raw_delta in per_family_delta.items():
+            if raw_delta == 0.0:
+                continue
+            capped = max(-0.8, min(1.0, raw_delta))
+            scale = capped / raw_delta if raw_delta else 0.0
+            for rule_key, rule_val in per_family_components[fam].items():
+                bump(fam, rule_key, rule_val * scale)
+
     ranked = sorted(
         (ScoreBreakdown(family=f, score=scores[f], components=components[f])
          for f in ALL_FAMILIES),
@@ -251,12 +285,25 @@ def pick_pattern(
     family, full = pick_family(sig)
 
     # Choose a pattern: LLM candidate in the same family preferred; else default.
+    # Within the family, an LLM candidate that the preset also prefers wins over
+    # a generic in-family candidate so the visual direction shapes pattern choice.
     chosen = None
+    preferred_set = set((sig.preset_layout_bias or {}).get("prefer") or [])
     if llm_candidates:
-        for pid in llm_candidates:
-            if pid in PATTERNS and family_of(pid) == family:
-                chosen = pid
-                break
+        if preferred_set:
+            for pid in llm_candidates:
+                if (
+                    pid in PATTERNS
+                    and family_of(pid) == family
+                    and pid in preferred_set
+                ):
+                    chosen = pid
+                    break
+        if chosen is None:
+            for pid in llm_candidates:
+                if pid in PATTERNS and family_of(pid) == family:
+                    chosen = pid
+                    break
     if chosen is None:
         # Fall back: for cover/closing slides, prefer matching cover/closing patterns in family.
         if sig.is_cover:

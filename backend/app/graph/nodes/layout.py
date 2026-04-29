@@ -193,6 +193,7 @@ def layout_node(state: dict[str, Any]) -> dict[str, Any]:
     languages = state.get("languages") or [state.get("language", "en")]
     layout_bias = state.get("visual_style_preset_layout_bias") or {}
     preferred_patterns = [p for p in (layout_bias.get("prefer") or []) if p in L.PATTERNS]
+    preset_layout_bias_for_scorer = layout_bias if layout_bias else None
 
     pattern_catalog = "\n".join(
         f"- {pid} (family={p['family']}, kind={p['kind']}, zones={p['zones']})"
@@ -265,6 +266,7 @@ def layout_node(state: dict[str, Any]) -> dict[str, Any]:
         sig.previous_family = previous_family
         sig.is_cover = is_cover
         sig.is_closing = is_closing
+        sig.preset_layout_bias = preset_layout_bias_for_scorer
 
         decision = pick_pattern(sig, llm_candidates=candidates)
         pattern_id = decision["pattern"]

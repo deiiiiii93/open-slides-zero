@@ -90,3 +90,122 @@ def test_high_risk_content_tiebreak_prefers_safe_family():
     )
     family, _ = pick_family(sig)
     assert family in {"vertical", "adaptive", "paginated"}
+
+
+def test_preset_bias_flips_close_call():
+    # 4:3 aspect with light text gives a horizontal/vertical close call. The
+    # cultural_luxury preset bumps vertical (cover_full_bleed,
+    # editorial_full_bleed_campaign) enough to flip the family.
+    base = SlideSignal(
+        content_type="content",
+        semantic_family="freeform",
+        content_shape="freeform_text",
+        aspect_ratio="4:3",
+        item_count=2,
+        text_length=60,
+    )
+    family_no_preset, _ = pick_family(base)
+
+    biased = SlideSignal(
+        content_type="content",
+        semantic_family="freeform",
+        content_shape="freeform_text",
+        aspect_ratio="4:3",
+        item_count=2,
+        text_length=60,
+        preset_layout_bias={
+            "prefer": [
+                "cover_full_bleed",
+                "cover_split_image",
+                "editorial_hero_split",
+                "narrative_focus",
+                "editorial_full_bleed_campaign",
+            ],
+            "avoid": [
+                "data_dashboard",
+                "three_parallel_columns",
+                "content_card_grid",
+                "image_gallery_grid",
+                "editorial_execution_grid",
+            ],
+        },
+    )
+    family_with_preset, ranking = pick_family(biased)
+    assert family_no_preset != family_with_preset
+    assert family_with_preset == "vertical"
+    # The ranking components should expose preset:prefer:* and preset:avoid:* rows
+    # so the HITL UI can show why the family flipped.
+    top = next(r for r in ranking if r.family == "vertical")
+    assert any(k.startswith("preset:prefer:") for k in top.components)
+    grid = next(r for r in ranking if r.family == "grid")
+    assert any(k.startswith("preset:avoid:") for k in grid.components)
+
+
+def test_preset_bias_cannot_override_clear_content_fit():
+    # A real image-gallery signal pulls grid +3.65 from content/semantic/shape.
+    # editorial_authority's preset bias has only one grid pattern in `prefer`
+    # (+0.6 capped) — not enough to flip away from grid.
+    sig = SlideSignal(
+        content_type="gallery",
+        semantic_family="gallery",
+        content_shape="image_gallery",
+        item_count=3,
+        text_length=120,
+        preset_layout_bias={
+            "prefer": [
+                "editorial_thesis_panel",
+                "editorial_reason_cards",
+                "paginated_document",
+                "safe_vertical_stack",
+                "content_f_shape",
+            ],
+            "avoid": [
+                "radial_compact",
+                "editorial_full_bleed_campaign",
+                "cover_full_bleed",
+                "cover_split_image",
+            ],
+        },
+    )
+    decision = pick_pattern(sig)
+    assert decision["family"] == "grid"
+    assert decision["pattern"] == "image_gallery_grid"
+
+
+def test_preset_bias_steers_pattern_within_family():
+    # When several LLM candidates are in the chosen family, the one that the
+    # preset prefers wins over a generic in-family candidate.
+    sig = SlideSignal(
+        content_type="comparison",
+        semantic_family="comparison",
+        content_shape="parallel_columns",
+        item_count=3,
+        text_length=120,
+        preset_layout_bias={
+            "prefer": ["data_split_metric"],   # horizontal family
+            "avoid": [],
+        },
+    )
+    decision = pick_pattern(
+        sig,
+        llm_candidates=["three_parallel_columns", "data_split_metric"],
+    )
+    assert decision["family"] == "horizontal"
+    assert decision["pattern"] == "data_split_metric"
+
+
+def test_no_preset_bias_leaves_components_unchanged():
+    # Regression guard: when preset_layout_bias is None, no preset:* keys appear
+    # and the ranking matches what the §6.1–§6.8 rules produce alone.
+    sig = SlideSignal(
+        content_type="comparison",
+        content_shape="parallel_columns",
+        item_count=3,
+        text_length=120,
+    )
+    ranking = score_families(sig)
+    for row in ranking:
+        for key in row.components:
+            assert not key.startswith("preset:"), (
+                f"unexpected preset component without bias: {key}"
+            )

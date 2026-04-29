@@ -66,3 +66,23 @@ def vision_capable(model_id: str) -> bool:
 
 # Preferred vision fallback when the routed model doesn't accept images.
 VISION_FALLBACK = "google/gemini-3.1-pro-preview"
+
+
+# Per-preset overlays for the html stage. Each entry may set a "model" id and/or
+# a "temperature". A missing field falls back to the html default and 0.4 — so
+# adding a preset here only changes the behaviors that are explicitly listed.
+_HTML_PRESET_OVERLAYS: dict[str, dict[str, object]] = {
+    "cartoon_fairytale_worlds":     {"temperature": 0.7},
+    "design_portfolio_expression":  {"temperature": 0.6},
+    "cultural_luxury":              {"temperature": 0.55},
+    "product_clarity":              {"temperature": 0.4},
+    "editorial_authority":          {"temperature": 0.3},
+    "strategic_prestige":           {"temperature": 0.25},
+}
+
+
+def html_overlay_for_preset(preset_id: str | None) -> dict[str, object]:
+    """Return the html-stage overlay for a preset id, or an empty dict."""
+    if not preset_id:
+        return {}
+    return dict(_HTML_PRESET_OVERLAYS.get(preset_id, {}))

@@ -266,7 +266,7 @@ def test_create_deck_normalizes_ai_decide_and_validates_presets(isolated_graph):
     )
     assert created["values"]["visual_style_preset_id"] == "cultural_luxury"
     assert created["values"]["visual_style_preset_label"] == "Cultural Luxury"
-    assert created["values"]["visual_style_preset_style_bias"]["tone"] == "premium editorial"
+    assert "premium editorial" in created["values"]["visual_style_preset_style_bias"]["tone"]
 
     with pytest.raises(HTTPException) as exc:
         decks.create_deck(

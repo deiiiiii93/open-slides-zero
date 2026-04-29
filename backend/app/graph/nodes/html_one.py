@@ -15,7 +15,7 @@ from typing import Any
 from ...catalog import layouts as L
 from ...catalog.validator import validate_slide_html
 from ...llm import zenmux
-from ...llm.models import get_model
+from ...llm.models import get_model, html_overlay_for_preset
 from ...llm.stream import push_event, tagged_stream
 
 
@@ -259,12 +259,19 @@ def html_one_node(state: dict[str, Any]) -> dict[str, Any]:
     creator_prompt = brief.get("creator_prompt") or state.get("creator_prompt")
     base_messages = _slide_prompt(slide, brief, feedback=feedback, creator_prompt=creator_prompt)
     tag = f"html:{slide_idx}"
-    model = get_model("html")
+    preset_id = brief.get("visual_style_preset_id")
+    overlay = html_overlay_for_preset(preset_id)
+    overlay_model = overlay.get("model")
+    model = overlay_model if isinstance(overlay_model, str) and overlay_model else get_model("html")
+    overlay_temperature = overlay.get("temperature")
+    temperature = float(overlay_temperature) if isinstance(overlay_temperature, (int, float)) else 0.4
     push_event({
         "node": "html_one",
         "slide_idx": slide_idx,
         "state": "started",
         "model": model,
+        "preset_id": preset_id,
+        "temperature": temperature,
     })
     previous_html = ""
     last_reason = f"slide {slide_idx}: unknown html generation failure"
@@ -286,7 +293,7 @@ def html_one_node(state: dict[str, Any]) -> dict[str, Any]:
                 result = zenmux.chat_with_metadata(
                     model,
                     messages,
-                    temperature=0.4,
+                    temperature=temperature,
                     max_tokens=_html_max_tokens(),
                     timeout=_html_timeout_seconds(),
                     stream=True,

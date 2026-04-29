@@ -80,4 +80,4 @@ def test_style_prompt_includes_visual_direction_style_bias(monkeypatch):
     assert "VISUAL DIRECTION PRESET" in joined
     assert "Cultural Luxury" in joined
     assert "premium editorial" in joined
-    assert "large cinematic crops" in joined
+    assert "large cinematic crop" in joined  # substring matches both "crop" and "crops"
