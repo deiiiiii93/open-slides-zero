@@ -645,7 +645,7 @@ export function App() {
                         {
                           key: "pngs-original",
                           label: "Original PNGs before images",
-                          fn: (d: DeckState) => exportPngZip(deckWithBaseSlides(d)),
+                          fn: (d: DeckState) => exportPngZip(d, { useBaseSlides: true }),
                         },
                         {
                           key: "pptx-original",

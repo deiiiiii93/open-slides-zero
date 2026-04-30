@@ -8,7 +8,6 @@
 
 import JSZip from "jszip";
 import PptxGenJS from "pptxgenjs";
-import html2canvas from "html2canvas";
 import type { DeckState } from "./api";
 import { normalizeImagePlaceholders } from "./imagePlaceholders";
 
@@ -22,16 +21,8 @@ const CANVAS: Record<string, [number, number]> = {
 
 // PPI constant: 96 CSS pixels per inch (standard devtools assumption).
 const PPI = 96;
+const API_BASE = "/api";
 const PNG_EXPORT_SCALE = 2;
-const RASTER_IMAGE_INLINE_TIMEOUT_MS = 30000;
-const RASTER_IMAGE_LOAD_TIMEOUT_MS = 5000;
-const RASTER_PLACEHOLDER_DATA_URL = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`
-<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
-  <rect width="640" height="360" fill="#f4f1ea"/>
-  <rect x="12" y="12" width="616" height="336" rx="14" fill="none" stroke="#b7b0a4" stroke-width="4" stroke-dasharray="16 12"/>
-  <text x="320" y="188" text-anchor="middle" font-family="Arial, sans-serif" font-size="28" fill="#6e665c">Image unavailable</text>
-</svg>
-`)}`;
 
 export type ExportArtifact = {
   filename: string;
@@ -40,6 +31,7 @@ export type ExportArtifact = {
 
 type ExportNameOptions = {
   filenameBase?: string;
+  useBaseSlides?: boolean;
 };
 
 export type ExportablePlaygroundLane = {
@@ -119,6 +111,33 @@ function downloadBlob(blob: Blob, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
+function filenameFromContentDisposition(header: string | null): string | null {
+  if (!header) return null;
+  const utf8 = header.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8?.[1]) {
+    try {
+      return decodeURIComponent(utf8[1].trim().replace(/^"|"$/g, ""));
+    } catch {
+      return utf8[1].trim().replace(/^"|"$/g, "");
+    }
+  }
+  const ascii = header.match(/filename=(?:"([^"]+)"|([^;]+))/i);
+  return (ascii?.[1] || ascii?.[2] || "").trim() || null;
+}
+
+async function responseErrorDetail(res: Response): Promise<string> {
+  const text = await res.text();
+  if (!text) return `${res.status} ${res.statusText}`;
+  try {
+    const parsed = JSON.parse(text) as { detail?: unknown };
+    if (typeof parsed.detail === "string") return parsed.detail;
+    if (parsed.detail) return JSON.stringify(parsed.detail);
+  } catch {
+    // Fall through to raw response text.
+  }
+  return text;
+}
+
 function isPptxEmbeddableImageSrc(src: string): boolean {
   if (src.startsWith("data:image/") || src.startsWith("blob:")) return true;
   try {
@@ -140,19 +159,6 @@ function pptxImageSrc(src: string): string | null {
     return null;
   }
   return null;
-}
-
-function proxiedRasterImageSrc(src: string): string | null {
-  if (src.startsWith("data:image/") || src.startsWith("blob:")) return src;
-  try {
-    const url = new URL(src, window.location.href);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
-    if (url.origin === window.location.origin) return url.href;
-    const proxyPath = `/api/images/proxy?url=${encodeURIComponent(url.href)}`;
-    return new URL(proxyPath, window.location.href).href;
-  } catch {
-    return null;
-  }
 }
 
 function renderUnavailableImage(
@@ -315,320 +321,36 @@ export async function exportHtmlZip(deck: DeckState): Promise<void> {
   downloadBlob(artifact.blob, artifact.filename);
 }
 
-// ---------------- PNG (zip of raster slides) ----------------
-
-function rewriteRasterStyleUrls(styleValue: string): string {
-  return styleValue.replace(/url\(\s*(['"]?)(.*?)\1\s*\)/g, (match, _quote, rawUrl) => {
-    const url = String(rawUrl || "").trim();
-    if (!url || url.startsWith("#") || url.startsWith("data:")) return match;
-    const proxied = proxiedRasterImageSrc(url);
-    return proxied ? `url("${proxied.replace(/"/g, "%22")}")` : match;
-  });
-}
-
-function rewriteRasterSrcSet(srcset: string): string {
-  if (!srcset || srcset.trim().startsWith("data:")) return srcset;
-  return srcset
-    .split(",")
-    .map((candidate) => {
-      const parts = candidate.trim().split(/\s+/).filter(Boolean);
-      if (parts.length === 0) return candidate;
-      const proxied = proxiedRasterImageSrc(parts[0]);
-      if (!proxied) return candidate.trim();
-      return [proxied, ...parts.slice(1)].join(" ");
-    })
-    .join(", ");
-}
-
-function prepareRasterSlideHtml(html: string): string {
-  if (!html || typeof DOMParser === "undefined") return html;
-  const doc = new DOMParser().parseFromString(html, "text/html");
-
-  doc.querySelectorAll<HTMLImageElement>("img[src]").forEach((img) => {
-    const proxied = proxiedRasterImageSrc(img.getAttribute("src") || "");
-    if (proxied) img.setAttribute("src", proxied);
-    img.setAttribute("loading", "eager");
-    img.setAttribute("decoding", "sync");
-  });
-
-  doc.querySelectorAll<HTMLSourceElement>("source[src], source[srcset]").forEach((source) => {
-    const src = source.getAttribute("src");
-    if (src) {
-      const proxied = proxiedRasterImageSrc(src);
-      if (proxied) source.setAttribute("src", proxied);
-    }
-    const srcset = source.getAttribute("srcset");
-    if (srcset) source.setAttribute("srcset", rewriteRasterSrcSet(srcset));
-  });
-
-  doc.querySelectorAll<HTMLElement>("[style]").forEach((el) => {
-    const style = el.getAttribute("style") || "";
-    const rewritten = rewriteRasterStyleUrls(style);
-    if (rewritten !== style) el.setAttribute("style", rewritten);
-  });
-
-  doc.querySelectorAll<HTMLStyleElement>("style").forEach((style) => {
-    style.textContent = rewriteRasterStyleUrls(style.textContent || "");
-  });
-
-  const doctype = doc.doctype ? `<!DOCTYPE ${doc.doctype.name}>` : "<!DOCTYPE html>";
-  return `${doctype}\n${doc.documentElement.outerHTML}`;
-}
-
-async function waitForIframeImages(f: HTMLIFrameElement, timeoutMs = 10000): Promise<void> {
-  const doc = f.contentDocument;
-  if (!doc) return;
-  const images = Array.from(doc.images);
-  if (images.length === 0) return;
-
-  const inlineTimeoutMs = Math.max(timeoutMs, RASTER_IMAGE_INLINE_TIMEOUT_MS);
-  await Promise.all(images.map((img) => inlineRasterImage(img, inlineTimeoutMs)));
-}
-
-function canInlineRasterImageSrc(src: string): boolean {
-  if (!src || src.startsWith("data:")) return false;
-  if (src.startsWith("blob:")) return true;
-  try {
-    const url = new URL(src, window.location.href);
-    return url.protocol === "http:" || url.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.addEventListener("load", () => {
-      if (typeof reader.result === "string") resolve(reader.result);
-      else reject(new Error("Unable to encode image as data URL."));
-    }, { once: true });
-    reader.addEventListener("error", () => reject(reader.error ?? new Error("Unable to read image.")), {
-      once: true,
-    });
-    reader.readAsDataURL(blob);
-  });
-}
-
-function waitForImageLoad(img: HTMLImageElement, timeoutMs = RASTER_IMAGE_LOAD_TIMEOUT_MS): Promise<boolean> {
-  if (img.complete) return Promise.resolve(img.naturalWidth > 0);
-  return new Promise((resolve) => {
-    const done = (ok: boolean) => {
-      window.clearTimeout(timer);
-      img.removeEventListener("load", onLoad);
-      img.removeEventListener("error", onError);
-      resolve(ok);
-    };
-    const onLoad = () => done(img.naturalWidth > 0);
-    const onError = () => done(false);
-    const timer = window.setTimeout(() => done(false), timeoutMs);
-    img.addEventListener("load", onLoad, { once: true });
-    img.addEventListener("error", onError, { once: true });
-  });
-}
-
-async function fetchImageDataUrl(src: string, timeoutMs: number): Promise<string | null> {
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(src, {
-      credentials: "same-origin",
-      signal: controller.signal,
-    });
-    if (!res.ok) return null;
-    const blob = await res.blob();
-    if (!blob.type.startsWith("image/")) return null;
-    return await blobToDataUrl(blob);
-  } catch {
-    return null;
-  } finally {
-    window.clearTimeout(timer);
-  }
-}
-
-async function inlineRasterImage(img: HTMLImageElement, timeoutMs: number): Promise<void> {
-  img.loading = "eager";
-  const src = img.currentSrc || img.src || img.getAttribute("src") || "";
-  if (canInlineRasterImageSrc(src)) {
-    const inlined = await fetchImageDataUrl(src, timeoutMs);
-    if (inlined) {
-      img.removeAttribute("srcset");
-      img.src = inlined;
-    }
-  }
-
-  if (await waitForImageLoad(img)) return;
-
-  img.removeAttribute("srcset");
-  img.src = RASTER_PLACEHOLDER_DATA_URL;
-  await waitForImageLoad(img, 1000);
-}
-
-async function inlineRasterStyleBackgrounds(doc: Document, timeoutMs: number): Promise<void> {
-  const styled = Array.from(doc.querySelectorAll<HTMLElement>("[style]"));
-  await Promise.all(styled.map(async (el) => {
-    const raw = el.style.backgroundImage;
-    const match = raw.match(/^url\(["']?(.*?)["']?\)$/);
-    if (!match) return;
-    const src = match[1];
-    if (!canInlineRasterImageSrc(src)) return;
-    const inlined = await fetchImageDataUrl(src, timeoutMs);
-    if (inlined) {
-      el.style.backgroundImage = `url("${inlined.replace(/"/g, "%22")}")`;
-    }
-  }));
-}
-
-async function waitForIframeRasterAssets(f: HTMLIFrameElement, timeoutMs = 10000): Promise<void> {
-  const doc = f.contentDocument;
-  if (!doc) return;
-  const inlineTimeoutMs = Math.max(timeoutMs, RASTER_IMAGE_INLINE_TIMEOUT_MS);
-  await Promise.all([
-    waitForIframeImages(f, inlineTimeoutMs),
-    inlineRasterStyleBackgrounds(doc, inlineTimeoutMs),
-  ]);
-  try {
-    const fonts = doc.fonts;
-    if (fonts && "ready" in fonts) {
-      await Promise.race([fonts.ready, new Promise((res) => setTimeout(res, 3000))]);
-    }
-  } catch {
-    // Ignore font readiness errors from sandboxed iframe documents.
-  }
-}
-
-function findSlideRootElement(body: Element, canvas: [number, number]): Element {
-  const [w, h] = canvas;
-  for (const child of Array.from(body.children)) {
-    const r = child.getBoundingClientRect();
-    if (child.tagName === "DIV" && r.width >= w * 0.8 && r.height >= h * 0.8) {
-      return child;
-    }
-  }
-  return body;
-}
-
-function pngIndexHtml(
-  entries: Array<[number, string]>,
-  deckName: string,
-  canvas: [number, number],
-): string {
-  const [w, h] = canvas;
-  const items = entries
-    .map(([idx]) => {
-      const file = `slide_${pad(idx + 1)}.png`;
-      return `    <figure>
-      <img src="${file}" width="${w}" height="${h}" alt="Slide ${idx + 1}" />
-      <figcaption>Slide ${idx + 1}</figcaption>
-    </figure>`;
-    })
-    .join("\n");
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title>${escapeText(deckName)} PNGs</title>
-  <style>
-    body { margin: 0; padding: 24px; background: #f5f5f5; font-family: Georgia, serif; color: #111; }
-    h1 { margin: 0 0 16px; }
-    figure { margin: 0 0 24px; }
-    img { display: block; width: ${w}px; height: ${h}px; border: 1px solid #ccc; background: #fff; }
-    figcaption { margin-top: 6px; font-size: 14px; color: #555; }
-  </style>
-</head>
-<body>
-  <h1>${escapeText(deckName)} PNGs</h1>
-${items}
-</body>
-</html>
-`;
-}
-
-async function renderFrameToPngBlob(
-  frame: HTMLIFrameElement,
-  canvasSize: [number, number],
-  slideNum: number,
-): Promise<Blob> {
-  const doc = frame.contentDocument;
-  const body = doc?.body ?? doc?.documentElement;
-  if (!doc || !body || body.childElementCount === 0) {
-    throw new Error(`PNG export failed: slide ${slideNum} HTML did not load.`);
-  }
-
-  const [w, h] = canvasSize;
-  const rootEl = findSlideRootElement(body, canvasSize);
-  try {
-    const canvas = await html2canvas(rootEl as HTMLElement, {
-      allowTaint: false,
-      backgroundColor: "#fff",
-      foreignObjectRendering: true,
-      height: h,
-      logging: false,
-      scale: PNG_EXPORT_SCALE,
-      useCORS: true,
-      width: w,
-      windowHeight: h,
-      windowWidth: w,
-    });
-    return await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob((blob) => {
-        if (blob) resolve(blob);
-        else reject(new Error(`PNG export failed: slide ${slideNum} could not be encoded.`));
-      }, "image/png");
-    });
-  } catch (exc) {
-    throw new Error(`PNG export failed on slide ${slideNum}: ${String(exc)}`);
-  }
-}
+// ---------------- PNG (zip of screenshot slides) ----------------
 
 export async function buildPngZipArtifact(deck: DeckState, options: ExportNameOptions = {}): Promise<ExportArtifact> {
   const entries = getSlideEntries(deck);
   if (entries.length === 0) throw new Error("No rendered slides to export");
   const deckName = getDeckName(deck, options);
-  const canvas = getCanvasSize(deck);
+  const aspectRatio = (deck.values?.aspect_ratio as string) ?? "16:9";
 
-  const host = document.createElement("div");
-  host.style.cssText =
-    "position:fixed;left:-20000px;top:0;width:0;height:0;overflow:visible;pointer-events:none;";
-  host.setAttribute("aria-hidden", "true");
-  document.body.appendChild(host);
-
-  const frames: HTMLIFrameElement[] = entries.map(([, html]) => {
-    const [w, h] = canvas;
-    const f = document.createElement("iframe");
-    f.width = String(w);
-    f.height = String(h);
-    f.style.width = `${w}px`;
-    f.style.height = `${h}px`;
-    f.style.border = "0";
-    f.srcdoc = prepareRasterSlideHtml(html);
-    host.appendChild(f);
-    return f;
+  const res = await fetch(`${API_BASE}/decks/${encodeURIComponent(deck.thread_id)}/exports/pngs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      deck_name: deckName,
+      aspect_ratio: aspectRatio,
+      scale: PNG_EXPORT_SCALE,
+      base_url: window.location.origin,
+      use_base_slides: Boolean(options.useBaseSlides),
+    }),
   });
 
-  try {
-    await Promise.all(frames.map(async (frame) => {
-      await waitForIframeReady(frame);
-      await waitForIframeRasterAssets(frame);
-    }));
-
-    const zip = new JSZip();
-    for (let i = 0; i < entries.length; i++) {
-      const [idx] = entries[i];
-      const blob = await renderFrameToPngBlob(frames[i], canvas, idx + 1);
-      zip.file(`slide_${pad(idx + 1)}.png`, blob);
-    }
-    zip.file("index.html", pngIndexHtml(entries, deckName, canvas));
-    const blob = await zip.generateAsync({ type: "blob" });
-    return { filename: `${deckName}-pngs.zip`, blob };
-  } finally {
-    host.remove();
+  if (!res.ok) {
+    throw new Error(`PNG export failed: ${await responseErrorDetail(res)}`);
   }
+
+  const filename = filenameFromContentDisposition(res.headers.get("Content-Disposition")) ?? `${deckName}-pngs.zip`;
+  return { filename, blob: await res.blob() };
 }
 
-export async function exportPngZip(deck: DeckState): Promise<void> {
-  const artifact = await buildPngZipArtifact(deck);
+export async function exportPngZip(deck: DeckState, options: ExportNameOptions = {}): Promise<void> {
+  const artifact = await buildPngZipArtifact(deck, options);
   downloadBlob(artifact.blob, artifact.filename);
 }
 
