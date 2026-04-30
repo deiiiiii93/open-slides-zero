@@ -3,11 +3,13 @@ from __future__ import annotations
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Lock
 
 import pytest
+import httpx
 from fastapi.testclient import TestClient
 
-from app.api import decks
+from app.api import decks, images
 from app.artifacts import store
 from app.graph import graph as graph_module
 from app.graph.nodes import image_insert
@@ -25,6 +27,38 @@ def _slide_html() -> str:
   </div>
 </div>
 </body></html>"""
+
+
+def test_proxy_image_returns_same_origin_image_bytes(monkeypatch: pytest.MonkeyPatch):
+    request = httpx.Request("GET", "https://cdn.example.org/photo.jpg")
+    response = httpx.Response(
+        200,
+        headers={"content-type": "image/jpeg"},
+        content=b"jpg-bytes",
+        request=request,
+    )
+
+    class FakeClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def get(self, url: str):
+            assert url == "https://cdn.example.org/photo.jpg"
+            return response
+
+    monkeypatch.setattr(images, "_is_public_http_url", lambda _url: True)
+    monkeypatch.setattr(images.httpx, "Client", FakeClient)
+
+    proxied = images.proxy_image("https://cdn.example.org/photo.jpg")
+
+    assert proxied.media_type == "image/jpeg"
+    assert proxied.body == b"jpg-bytes"
 
 
 def test_image_materials_populate_assets_without_dropping_ocr_text(tmp_path: Path):
@@ -268,14 +302,25 @@ def test_parallel_generate_requests_are_serialized_by_thread(
     isolated_graph, monkeypatch: pytest.MonkeyPatch
 ):
     calls: list[str] = []
+    calls_lock = Lock()
+    active = 0
+    max_active = 0
 
     def fake_generate(prompt: str, output_path: str | Path, **_kwargs):
-        calls.append(prompt)
-        time.sleep(0.05)
-        path = Path(output_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(prompt.encode("utf-8"))
-        return {"path": str(path), "mime_type": "image/png", "model": "fake-image"}
+        nonlocal active, max_active
+        with calls_lock:
+            calls.append(prompt)
+            active += 1
+            max_active = max(max_active, active)
+        try:
+            time.sleep(0.05)
+            path = Path(output_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(prompt.encode("utf-8"))
+            return {"path": str(path), "mime_type": "image/png", "model": "fake-image"}
+        finally:
+            with calls_lock:
+                active -= 1
 
     monkeypatch.setattr(image_insert.image_gen, "generate_image", fake_generate)
     client = TestClient(app)
@@ -303,16 +348,19 @@ def test_parallel_generate_requests_are_serialized_by_thread(
         )
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        responses = list(pool.map(
-            lambda args: post_generate(*args),
-            [
-                ("slide-0-slot-0", 0, "First image"),
-                ("slide-1-slot-0", 1, "Second image"),
-            ],
-        ))
+        responses = list(
+            pool.map(
+                lambda args: post_generate(*args),
+                [
+                    ("slide-0-slot-0", 0, "First image"),
+                    ("slide-1-slot-0", 1, "Second image"),
+                ],
+            )
+        )
 
     assert [response.status_code for response in responses] == [200, 200]
-    assert calls == ["First image", "Second image"]
+    assert sorted(calls) == ["First image", "Second image"]
+    assert max_active == 1
     state = client.get(f"/decks/{thread_id}").json()["values"]
     assert 'data-inserted-image="true"' in state["html_slides"]["0"]
     assert 'data-inserted-image="true"' in state["html_slides"]["1"]

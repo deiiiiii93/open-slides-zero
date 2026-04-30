@@ -108,6 +108,58 @@ function downloadBlob(blob: Blob, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
+function isPptxEmbeddableImageSrc(src: string): boolean {
+  if (src.startsWith("data:image/") || src.startsWith("blob:")) return true;
+  try {
+    const url = new URL(src, window.location.href);
+    return url.origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+function pptxImageSrc(src: string): string | null {
+  if (isPptxEmbeddableImageSrc(src)) return src;
+  try {
+    const url = new URL(src, window.location.href);
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      return `/api/images/proxy?url=${encodeURIComponent(url.href)}`;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function renderUnavailableImage(
+  ctx: PptxContext,
+  pos: { x: number; y: number; w: number; h: number },
+  rotation: number | undefined,
+): void {
+  ctx.slide.addShape("rect" as PptxGenJS.ShapeType, {
+    x: pos.x,
+    y: pos.y,
+    w: pos.w,
+    h: pos.h,
+    rotate: rotation,
+    fill: { color: "F4F1EA", transparency: 8 },
+    line: { color: "B7B0A4", width: 0.75, dashType: "dash" },
+  });
+  ctx.slide.addText("Image unavailable", {
+    x: pos.x,
+    y: pos.y + Math.max(0, pos.h / 2 - 0.14),
+    w: pos.w,
+    h: Math.min(0.32, pos.h),
+    rotate: rotation,
+    align: "center",
+    valign: "middle",
+    margin: 0,
+    fontSize: 9,
+    color: "6E665C",
+    fit: "shrink",
+  });
+}
+
 // ---------------- HTML (single file) ----------------
 
 function buildHtmlSingleDocument(deck: DeckState, options: ExportNameOptions = {}): { deckName: string; doc: string } {
@@ -868,10 +920,16 @@ function processElement(node: Element, ctx: PptxContext, depth = 0): void {
       return;
     }
     if (img.src) {
+      const source = pptxImageSrc(img.src);
+      if (!source) {
+        console.warn(`PPTX export: skipping external image that cannot be embedded: ${img.src}`);
+        renderUnavailableImage(ctx, pos, rotation);
+        return;
+      }
       const opacity = parseFloat(style.opacity);
       const objectFit = style.objectFit;
       const imgOpts: Record<string, unknown> = {
-        path: img.src,
+        path: source,
         x: pos.x,
         y: pos.y,
         w: pos.w,
@@ -884,7 +942,12 @@ function processElement(node: Element, ctx: PptxContext, depth = 0): void {
       } else if (objectFit === "contain") {
         imgOpts.sizing = { type: "contain", w: pos.w, h: pos.h };
       }
-      ctx.slide.addImage(imgOpts);
+      try {
+        ctx.slide.addImage(imgOpts);
+      } catch (exc) {
+        console.warn("PPTX export: image could not be embedded", exc);
+        renderUnavailableImage(ctx, pos, rotation);
+      }
     }
     return; // leaf — don't recurse into children
   }

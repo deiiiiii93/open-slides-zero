@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import mimetypes
+import socket
 import threading
 from contextlib import contextmanager
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Any, Iterator
+from urllib.parse import urljoin, urlparse
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse, RedirectResponse
+import httpx
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
 from ..artifacts import store
@@ -24,6 +28,15 @@ from .common import config_for, current_state, graph, mirror_to_disk
 router = APIRouter()
 _GENERATION_LOCKS: dict[str, threading.Lock] = {}
 _GENERATION_LOCKS_GUARD = threading.Lock()
+_MAX_PROXY_IMAGE_BYTES = 12 * 1024 * 1024
+_PROXY_PLACEHOLDER_SVG = b"""\
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
+<rect width="640" height="360" fill="#f4f1ea"/>
+<rect x="12" y="12" width="616" height="336" rx="14" fill="none" stroke="#b7b0a4" \
+stroke-width="4" stroke-dasharray="16 12"/>
+<text x="320" y="188" text-anchor="middle" font-family="Arial, sans-serif" \
+font-size="28" fill="#6e665c">Image unavailable</text>
+</svg>"""
 
 
 class ImageMappingIn(BaseModel):
@@ -75,6 +88,76 @@ def _serial_image_generation(thread_id: str) -> Iterator[None]:
         yield
     finally:
         lock.release()
+
+
+def _is_public_http_url(url: str) -> bool:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return False
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, parsed.port, type=socket.SOCK_STREAM)
+    except OSError:
+        return False
+    for info in infos:
+        host = info[4][0]
+        try:
+            addr = ip_address(host)
+        except ValueError:
+            return False
+        if (
+            addr.is_private
+            or addr.is_loopback
+            or addr.is_link_local
+            or addr.is_multicast
+            or addr.is_reserved
+            or addr.is_unspecified
+        ):
+            return False
+    return True
+
+
+def _placeholder_image_response() -> Response:
+    return Response(
+        content=_PROXY_PLACEHOLDER_SVG,
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.get("/images/proxy")
+def proxy_image(url: str = Query(..., min_length=1, max_length=4096)) -> Response:
+    current_url = url
+    try:
+        with httpx.Client(timeout=15.0, follow_redirects=False) as client:
+            for _ in range(4):
+                if not _is_public_http_url(current_url):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Only public http(s) image URLs can be proxied.",
+                    )
+                resp = client.get(current_url)
+                if resp.status_code in {301, 302, 303, 307, 308}:
+                    location = resp.headers.get("location")
+                    if not location:
+                        break
+                    current_url = urljoin(current_url, location)
+                    continue
+                resp.raise_for_status()
+                content_type = resp.headers.get("content-type", "").split(";", 1)[0].lower()
+                if not content_type.startswith("image/"):
+                    raise HTTPException(status_code=415, detail="Proxied URL did not return an image.")
+                if len(resp.content) > _MAX_PROXY_IMAGE_BYTES:
+                    raise HTTPException(status_code=413, detail="Image is too large to proxy.")
+                return Response(
+                    content=resp.content,
+                    media_type=content_type or "image/jpeg",
+                    headers={"Cache-Control": "public, max-age=86400"},
+                )
+    except HTTPException:
+        raise
+    except Exception:
+        return _placeholder_image_response()
+    return _placeholder_image_response()
 
 
 @router.post("/decks/{thread_id}/images/plan")
@@ -210,7 +293,7 @@ def image_asset_content(thread_id: str, asset_id: str):
 
     uri = str(asset.get("uri") or "")
     if uri.startswith(("http://", "https://")):
-        return RedirectResponse(uri)
+        return proxy_image(uri)
     if uri.startswith("data:image/"):
         raise HTTPException(status_code=400, detail="Data URI assets do not have file content.")
 
