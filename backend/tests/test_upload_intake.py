@@ -543,6 +543,109 @@ def test_stream_create_deck_rejects_empty_materials(isolated_graph):
     assert client.get("/decks").json()["decks"] == []
 
 
+def test_stream_create_deck_accepts_model_overrides(isolated_graph):
+    client = TestClient(app)
+    overrides = {
+        "style": "google/gemini-3.1-pro-preview",
+        "layout": "openai/gpt-5.4",
+        "html": "openai/gpt-5.4-mini",
+    }
+
+    response = client.post(
+        "/decks/stream",
+        json={
+            "materials": [{"kind": "text", "uri": "text:Quarterly review notes"}],
+            "expected_pages": 4,
+            "model_overrides": overrides,
+        },
+    )
+
+    assert response.status_code == 200
+    done = next(event for event in _parse_sse_events(response.text) if event["type"] == "done")
+    assert done["state"]["values"]["lane_model_overrides"] == overrides
+
+
+def test_stream_create_deck_rejects_invalid_model_overrides(isolated_graph):
+    client = TestClient(app)
+
+    bad_stage = client.post(
+        "/decks/stream",
+        json={
+            "materials": [{"kind": "text", "uri": "text:Quarterly review notes"}],
+            "model_overrides": {"outline": "openai/gpt-5.4"},
+        },
+    )
+    bad_model = client.post(
+        "/decks/stream",
+        json={
+            "materials": [{"kind": "text", "uri": "text:Quarterly review notes"}],
+            "model_overrides": {"style": "unknown/provider-model"},
+        },
+    )
+
+    assert bad_stage.status_code == 400
+    assert "Unknown model override stage" in bad_stage.json()["detail"]
+    assert bad_model.status_code == 400
+    assert "Unknown lane model id" in bad_model.json()["detail"]
+
+
+def test_upload_stream_accepts_model_overrides(isolated_graph):
+    client = TestClient(app)
+    overrides = {
+        "style": "google/gemini-3.1-pro-preview",
+        "layout": "openai/gpt-5.4",
+        "html": "openai/gpt-5.4-mini",
+    }
+
+    response = client.post(
+        "/decks/upload/stream",
+        data={
+            "expected_pages": "4",
+            "aspect_ratio": "16:9",
+            "density_preference": "balanced",
+            "language": "en",
+            "model_overrides": json.dumps(overrides),
+        },
+        files=[("files", ("notes.txt", b"Quarterly review notes", "text/plain"))],
+    )
+
+    assert response.status_code == 200
+    done = next(event for event in _parse_sse_events(response.text) if event["type"] == "done")
+    assert done["state"]["values"]["lane_model_overrides"] == overrides
+
+
+def test_upload_stream_rejects_invalid_model_overrides(isolated_graph):
+    client = TestClient(app)
+
+    bad_stage = client.post(
+        "/decks/upload/stream",
+        data={
+            "expected_pages": "4",
+            "aspect_ratio": "16:9",
+            "density_preference": "balanced",
+            "language": "en",
+            "model_overrides": json.dumps({"outline": "openai/gpt-5.4"}),
+        },
+        files=[("files", ("notes.txt", b"Quarterly review notes", "text/plain"))],
+    )
+    bad_json = client.post(
+        "/decks/upload/stream",
+        data={
+            "expected_pages": "4",
+            "aspect_ratio": "16:9",
+            "density_preference": "balanced",
+            "language": "en",
+            "model_overrides": "{bad json",
+        },
+        files=[("files", ("notes.txt", b"Quarterly review notes", "text/plain"))],
+    )
+
+    assert bad_stage.status_code == 400
+    assert "Unknown model override stage" in bad_stage.json()["detail"]
+    assert bad_json.status_code == 400
+    assert "valid JSON" in bad_json.json()["detail"]
+
+
 def test_upload_stream_unsupported_extension_leaves_no_zombie(isolated_graph):
     client = TestClient(app)
 

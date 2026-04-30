@@ -24,6 +24,7 @@ from ..catalog.scenarios import SCENARIO_DEFINITIONS
 from ..catalog.structures import STRUCTURE_DEFINITIONS
 from ..catalog.visual_presets import list_visual_style_presets, visual_style_preset_state
 from ..graph.graph import DB_PATH
+from ..llm.models import normalize_lane_model_overrides
 from .common import config_for, current_state, delete_thread, graph, mirror_to_disk
 
 router = APIRouter()
@@ -61,6 +62,7 @@ class CreateDeckBody(BaseModel):
     visual_style_preference: str | None = None
     visual_style_preset_id: str | None = None
     style_reference_image_uri: str | None = None
+    model_overrides: dict[str, str] | None = None
     materials: list[Material] = Field(default_factory=list)
 
 
@@ -115,9 +117,11 @@ def _build_initial_state(
     visual_style_preference: str | None,
     visual_style_preset_id: str | None,
     style_reference_image_uri: str | None,
+    model_overrides: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     if not materials:
         raise ValueError("Provide at least one file or paste text.")
+    normalized_model_overrides = normalize_lane_model_overrides(model_overrides)
     initial = {
         "thread_id": thread_id,
         "deck_name": _derive_deck_name_from_materials(deck_name, materials),
@@ -128,6 +132,7 @@ def _build_initial_state(
         "language": language,
         "visual_style_preference": visual_style_preference,
         "style_reference_image_uri": style_reference_image_uri,
+        "lane_model_overrides": normalized_model_overrides or None,
         "current_stage": "ingest",
     }
     initial.update(visual_style_preset_state(visual_style_preset_id))
@@ -279,6 +284,7 @@ def create_deck(body: CreateDeckBody) -> dict[str, Any]:
             visual_style_preference=body.visual_style_preference,
             visual_style_preset_id=body.visual_style_preset_id,
             style_reference_image_uri=body.style_reference_image_uri,
+            model_overrides=body.model_overrides,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

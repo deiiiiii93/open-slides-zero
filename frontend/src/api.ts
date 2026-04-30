@@ -61,6 +61,7 @@ export type CreateDeckBody = {
   visual_style_preference?: string | null;
   visual_style_preset_id?: string | null;
   style_reference_image_uri?: string | null;
+  model_overrides?: Partial<Record<ModelStage, string>>;
   materials: Material[];
 };
 
@@ -88,6 +89,8 @@ export type PlaygroundModelOption = {
   description: string;
 };
 
+export type ModelStage = "style" | "layout" | "html";
+
 export type PlaygroundModelStageOptions = {
   label: string;
   default_model: string;
@@ -95,12 +98,14 @@ export type PlaygroundModelStageOptions = {
 };
 
 export type PlaygroundModelOptions = {
-  stages: Record<"style" | "layout" | "html", PlaygroundModelStageOptions>;
+  stages: Record<ModelStage, PlaygroundModelStageOptions>;
 };
+
+export type ModelOptions = PlaygroundModelOptions;
 
 export type CreatePlaygroundLaneBody = {
   creator_prompt: string;
-  model_overrides?: Partial<Record<"style" | "layout" | "html", string>>;
+  model_overrides?: Partial<Record<ModelStage, string>>;
 };
 
 export type Masterpiece = {
@@ -177,6 +182,9 @@ export const api = {
 
   listPlaygroundModelOptions: () =>
     http<PlaygroundModelOptions>("GET", "/playground/model-options"),
+
+  listModelOptions: () =>
+    http<ModelOptions>("GET", "/playground/model-options"),
 
   createPlaygroundLaneStreamUrl: (id: string) =>
     `${STREAM_BASE}/decks/${id}/playground/lanes/stream`,

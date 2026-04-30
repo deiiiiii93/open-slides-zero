@@ -49,6 +49,21 @@ _CURATED_LANE_MODEL_OPTIONS: list[dict[str, str]] = [
         "label": "GPT-5.4 Mini",
         "description": "Faster option for lighter lane experiments.",
     },
+    {
+        "id": "deepseek/deepseek-v4-flash",
+        "label": "DeepSeek V4 Flash",
+        "description": "Fast DeepSeek option for lower-latency style, layout, and HTML trials.",
+    },
+    {
+        "id": "xiaomi/mimo-v2.5",
+        "label": "MiMo V2.5",
+        "description": "Xiaomi MiMo option for alternate reasoning and composition runs.",
+    },
+    {
+        "id": "moonshotai/kimi-k2.6",
+        "label": "Kimi K2.6",
+        "description": "Moonshot Kimi option for alternate long-context slide generation.",
+    },
 ]
 
 

@@ -6,7 +6,7 @@
 //   4. Deck canvas + comment overlay once slides are rendered
 //   5. History + regenerate controls
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DeckCanvas } from "./DeckCanvas";
 import { CommentLayer } from "./CommentLayer";
 import {
@@ -29,6 +29,8 @@ import {
   type ForkFromReviewBody,
   type Masterpiece,
   type Material,
+  type ModelOptions,
+  type ModelStage,
 } from "./api";
 import { streamSSE, type StreamEvent } from "./sse";
 import {
@@ -52,6 +54,8 @@ const SUPPORTED_UPLOAD_ACCEPT = ".txt,.md,.markdown,.pdf,.pptx,.jpg,.jpeg,.png,.
 const SUPPORTED_UPLOAD_EXTENSIONS = new Set(
   SUPPORTED_UPLOAD_ACCEPT.split(",").map((ext) => ext.toLowerCase()),
 );
+const MODEL_STAGE_ORDER: ModelStage[] = ["style", "layout", "html"];
+const RECENT_DECKS_PAGE_SIZE = 5;
 
 function isSupportedUpload(file: File): boolean {
   const dot = file.name.lastIndexOf(".");
@@ -71,6 +75,36 @@ function materialLabel(material: Material): string {
   return material.uri;
 }
 
+function selectedModelOverrides(
+  overrides: Partial<Record<ModelStage, string>>,
+): Partial<Record<ModelStage, string>> | undefined {
+  const entries = MODEL_STAGE_ORDER
+    .map((stage) => [stage, overrides[stage]?.trim()] as const)
+    .filter((entry): entry is readonly [ModelStage, string] => Boolean(entry[1]));
+  return entries.length ? Object.fromEntries(entries) : undefined;
+}
+
+function recentDeckDateText(createdAt: string | null): string {
+  if (!createdAt) return "";
+  return new Date(createdAt).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function recentDeckSearchText(deck: DeckListItem): string {
+  return [
+    deck.deck_name,
+    deck.thread_id,
+    deck.stage,
+    recentDeckDateText(deck.created_at),
+    deck.created_at,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
 export function App() {
   const [deck, setDeck] = useState<DeckState | null>(null);
   const [catalog, setCatalog] = useState<CatalogResponse | null>(null);
@@ -82,6 +116,7 @@ export function App() {
   const [showMasterpieces, setShowMasterpieces] = useState(false);
   const [exporting, setExporting] = useState<string | null>(null);
   const [deckList, setDeckList] = useState<DeckListItem[] | null>(null);
+  const [modelOptions, setModelOptions] = useState<ModelOptions | null>(null);
   const [selectedReviewStage, setSelectedReviewStage] = useState<ReviewStage>("ready");
 
   // Streaming state
@@ -119,6 +154,10 @@ export function App() {
   useEffect(() => {
     if (!catalog) void api.getCatalog("catalog").then(setCatalog).catch(() => undefined);
   }, [catalog]);
+
+  useEffect(() => {
+    if (!modelOptions) void api.listModelOptions().then(setModelOptions).catch(() => undefined);
+  }, [modelOptions]);
 
   useEffect(() => {
     if (!deck) void refreshDeckList();
@@ -297,8 +336,10 @@ export function App() {
     density: string;
     styleHint: string;
     visualStylePresetId: string | null;
+    modelOverrides: Partial<Record<ModelStage, string>>;
     files: File[];
   }) {
+    const modelOverrides = selectedModelOverrides(form.modelOverrides);
     if (form.files.length > 0) {
       const body = new FormData();
       if (form.deckName.trim()) body.append("deck_name", form.deckName.trim());
@@ -312,6 +353,9 @@ export function App() {
       }
       if (form.visualStylePresetId) {
         body.append("visual_style_preset_id", form.visualStylePresetId);
+      }
+      if (modelOverrides) {
+        body.append("model_overrides", JSON.stringify(modelOverrides));
       }
       for (const file of form.files) {
         body.append("files", file);
@@ -330,6 +374,7 @@ export function App() {
       language: "en",
       visual_style_preference: form.styleHint || null,
       visual_style_preset_id: form.visualStylePresetId,
+      model_overrides: modelOverrides,
       materials: mats,
     };
     await consumeStream(`${STREAM_BASE}/decks/stream`, body);
@@ -407,6 +452,7 @@ export function App() {
         busy={busy}
         err={err}
         catalog={catalog}
+        modelOptions={modelOptions}
         recentDecks={deckList}
         onLoadDeck={(id) => void refresh(id).catch((e) => setErr(String(e)))}
       />
@@ -1022,6 +1068,7 @@ function CreateForm({
   busy,
   err,
   catalog,
+  modelOptions,
   recentDecks,
   onLoadDeck,
 }: {
@@ -1033,11 +1080,13 @@ function CreateForm({
     density: string;
     styleHint: string;
     visualStylePresetId: string | null;
+    modelOverrides: Partial<Record<ModelStage, string>>;
     files: File[];
   }) => void;
   busy: boolean;
   err: string | null;
   catalog: CatalogResponse | null;
+  modelOptions: ModelOptions | null;
   recentDecks: DeckListItem[] | null;
   onLoadDeck: (id: string) => void;
 }) {
@@ -1048,10 +1097,34 @@ function CreateForm({
   const [density, setDensity] = useState("balanced");
   const [styleHint, setStyleHint] = useState("");
   const [visualPresetId, setVisualPresetId] = useState("");
+  const [modelOverrides, setModelOverrides] = useState<Partial<Record<ModelStage, string>>>({});
   const [files, setFiles] = useState<File[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [recentSearch, setRecentSearch] = useState("");
+  const [recentPage, setRecentPage] = useState(1);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const visualPresets = catalog?.visual_style_presets ?? [];
   const selectedPreset = visualPresets.find((preset) => preset.id === visualPresetId);
+  const filteredRecentDecks = useMemo(() => {
+    const decks = recentDecks ?? [];
+    const q = recentSearch.trim().toLowerCase();
+    if (!q) return decks;
+    return decks.filter((deck) => recentDeckSearchText(deck).includes(q));
+  }, [recentDecks, recentSearch]);
+  const recentPageCount = Math.max(1, Math.ceil(filteredRecentDecks.length / RECENT_DECKS_PAGE_SIZE));
+  const boundedRecentPage = Math.min(recentPage, recentPageCount);
+  const visibleRecentDecks = filteredRecentDecks.slice(
+    (boundedRecentPage - 1) * RECENT_DECKS_PAGE_SIZE,
+    boundedRecentPage * RECENT_DECKS_PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setRecentPage(1);
+  }, [recentSearch]);
+
+  useEffect(() => {
+    if (recentPage > recentPageCount) setRecentPage(recentPageCount);
+  }, [recentPage, recentPageCount]);
 
   function addFiles(nextFiles: File[]) {
     const accepted: File[] = [];
@@ -1073,10 +1146,37 @@ function CreateForm({
     );
   }
 
+  const sectionStyle = {
+    border: "1px solid #e5e7eb",
+    borderRadius: 8,
+    padding: 16,
+    marginTop: 16,
+    background: "#fff",
+  };
+  const sectionTitleStyle = {
+    margin: "0 0 12px",
+    fontSize: 18,
+    color: "#111827",
+  };
+  const labelStyle = {
+    display: "grid",
+    gap: 4,
+    color: "#111827",
+    fontSize: 14,
+    fontWeight: 600,
+  };
+  const controlStyle = {
+    width: "100%",
+    boxSizing: "border-box" as const,
+    fontFamily: "inherit",
+    fontSize: 14,
+    padding: "7px 8px",
+  };
+
   return (
-    <div style={{ maxWidth: 720, margin: "60px auto", fontFamily: "Georgia, serif" }}>
-      <h1>Open Slides Zero</h1>
-      <p style={{ color: "#555" }}>
+    <div style={{ maxWidth: 860, margin: "56px auto", fontFamily: "Georgia, serif" }}>
+      <h1 style={{ marginBottom: 12 }}>Open Slides Zero</h1>
+      <p style={{ color: "#555", maxWidth: 720, lineHeight: 1.45 }}>
         Paste your source material, set a page target, then the agent walks you through
         three review gates (structure → style → layout) before rendering the deck.
       </p>
@@ -1085,186 +1185,276 @@ function CreateForm({
           {err}
         </div>
       )}
-      <label style={{ display: "block", marginTop: 12 }}>
-        Deck name (optional):
-        <input
-          type="text"
-          value={deckName}
-          onChange={(e) => setDeckName(e.target.value)}
-          placeholder="e.g. Q3 Earnings Review"
-          style={{ display: "block", width: "100%", fontFamily: "inherit", padding: 8 }}
-        />
-      </label>
-      <label style={{ display: "block", marginTop: 12 }}>
-        Material (text, bullets, or pasted notes):
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          rows={10}
-          style={{ display: "block", width: "100%", fontFamily: "inherit", padding: 8 }}
-        />
-      </label>
-      <label style={{ display: "block", marginTop: 12 }}>
-        Upload source files:
-        <input
-          type="file"
-          multiple
-          accept={SUPPORTED_UPLOAD_ACCEPT}
-          onChange={(e) => {
-            addFiles(Array.from(e.target.files ?? []));
-            e.currentTarget.value = "";
-          }}
-          style={{ display: "block", width: "100%", marginTop: 6 }}
-        />
-      </label>
-      <p style={{ color: "#555", fontSize: 13, marginTop: 6 }}>
-        Supported: TXT, Markdown, PDF, PPTX, JPG, PNG, DOCX, XLSX.
-      </p>
-      {fileError && (
-        <div
-          style={{
-            color: "#92400e",
-            background: "#fffbeb",
-            border: "1px solid #fcd34d",
-            borderRadius: 6,
-            padding: 8,
-            marginTop: 8,
-          }}
-        >
-          {fileError}
+
+      <section style={sectionStyle}>
+        <h2 style={sectionTitleStyle}>Deck basic info</h2>
+        <div style={{ display: "grid", gap: 12 }}>
+          <label style={labelStyle}>
+            Deck name (optional)
+            <input
+              type="text"
+              value={deckName}
+              onChange={(e) => setDeckName(e.target.value)}
+              placeholder="e.g. Q3 Earnings Review"
+              style={controlStyle}
+            />
+          </label>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10 }}>
+            <label style={labelStyle}>
+              Pages
+              <input
+                type="number"
+                min={3}
+                max={30}
+                value={pages}
+                onChange={(e) => setPages(Number(e.target.value))}
+                style={controlStyle}
+              />
+            </label>
+            <label style={labelStyle}>
+              Aspect
+              <select value={aspect} onChange={(e) => setAspect(e.target.value)} style={controlStyle}>
+                <option>16:9</option>
+                <option>4:3</option>
+                <option>21:9</option>
+              </select>
+            </label>
+            <label style={labelStyle}>
+              Density
+              <select
+                value={density}
+                onChange={(e) => setDensity(e.target.value)}
+                style={controlStyle}
+              >
+                <option>minimal</option>
+                <option>balanced</option>
+                <option>dense</option>
+                <option>very_dense</option>
+              </select>
+            </label>
+            <label style={labelStyle}>
+              Visual direction
+              <select
+                value={visualPresetId}
+                onChange={(e) => setVisualPresetId(e.target.value)}
+                style={controlStyle}
+              >
+                <option value="">AI Decide</option>
+                {visualPresets.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label style={labelStyle}>
+              Style hint
+              <input
+                placeholder="e.g. MBB slate"
+                value={styleHint}
+                onChange={(e) => setStyleHint(e.target.value)}
+                style={controlStyle}
+              />
+            </label>
+          </div>
+          {selectedPreset && (
+            <div style={{ color: "#64748b", fontSize: 12, lineHeight: 1.45 }}>
+              {selectedPreset.description}
+            </div>
+          )}
         </div>
-      )}
-      {files.length > 0 && (
-        <div
-          style={{
-            marginTop: 10,
-            border: "1px solid #e5e5e5",
-            borderRadius: 8,
-            overflow: "hidden",
-          }}
-        >
-          {files.map((file, idx) => (
-            <div
-              key={`${file.name}-${file.size}-${idx}`}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
-                padding: "8px 10px",
-                borderBottom: idx === files.length - 1 ? "none" : "1px solid #f0f0f0",
-                background: "#fff",
+      </section>
+
+      <section style={sectionStyle}>
+        <h2 style={sectionTitleStyle}>Context</h2>
+        <div style={{ display: "grid", gap: 12 }}>
+          <label style={labelStyle}>
+            Material (text, bullets, or pasted notes)
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              rows={9}
+              style={{ ...controlStyle, resize: "vertical" }}
+            />
+          </label>
+          <div style={labelStyle}>
+            <span>Upload source files</span>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept={SUPPORTED_UPLOAD_ACCEPT}
+              onChange={(e) => {
+                addFiles(Array.from(e.target.files ?? []));
+                e.currentTarget.value = "";
               }}
-            >
-              <div style={{ minWidth: 0 }}>
-                <div
-                  style={{
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    fontSize: 14,
-                  }}
-                >
-                  {file.name}
-                </div>
-                <div style={{ fontSize: 12, color: "#666" }}>{formatFileSize(file.size)}</div>
-              </div>
+              style={{ display: "none" }}
+            />
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => setFiles((prev) => prev.filter((_, fileIdx) => fileIdx !== idx))}
+                onClick={() => fileInputRef.current?.click()}
+                style={{ padding: "7px 10px", fontFamily: "inherit", fontSize: 14 }}
               >
-                Remove
+                Choose files
               </button>
+              <span style={{ color: "#4b5563", fontSize: 13, fontWeight: 400 }}>
+                {files.length === 0
+                  ? "No files selected"
+                  : `${files.length} file${files.length === 1 ? "" : "s"} selected`}
+              </span>
             </div>
-          ))}
+          </div>
+          <p style={{ color: "#555", fontSize: 13, margin: 0 }}>
+            Supported: TXT, Markdown, PDF, PPTX, JPG, PNG, DOCX, XLSX.
+          </p>
+          {fileError && (
+            <div
+              style={{
+                color: "#92400e",
+                background: "#fffbeb",
+                border: "1px solid #fcd34d",
+                borderRadius: 6,
+                padding: 8,
+              }}
+            >
+              {fileError}
+            </div>
+          )}
+          {files.length > 0 && (
+            <div
+              style={{
+                border: "1px solid #e5e5e5",
+                borderRadius: 8,
+                overflow: "hidden",
+              }}
+            >
+              {files.map((file, idx) => (
+                <div
+                  key={`${file.name}-${file.size}-${idx}`}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    padding: "8px 10px",
+                    borderBottom: idx === files.length - 1 ? "none" : "1px solid #f0f0f0",
+                    background: "#fff",
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div
+                      style={{
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        fontSize: 14,
+                      }}
+                    >
+                      {file.name}
+                    </div>
+                    <div style={{ fontSize: 12, color: "#666" }}>{formatFileSize(file.size)}</div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => setFiles((prev) => prev.filter((_, fileIdx) => fileIdx !== idx))}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-      )}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8, marginTop: 12 }}>
-        <label>
-          Pages
-          <input
-            type="number"
-            min={3}
-            max={30}
-            value={pages}
-            onChange={(e) => setPages(Number(e.target.value))}
-            style={{ width: "100%" }}
-          />
-        </label>
-        <label>
-          Aspect
-          <select value={aspect} onChange={(e) => setAspect(e.target.value)} style={{ width: "100%" }}>
-            <option>16:9</option>
-            <option>4:3</option>
-            <option>21:9</option>
-          </select>
-        </label>
-        <label>
-          Density
-          <select
-            value={density}
-            onChange={(e) => setDensity(e.target.value)}
-            style={{ width: "100%" }}
-          >
-            <option>minimal</option>
-            <option>balanced</option>
-            <option>dense</option>
-            <option>very_dense</option>
-          </select>
-        </label>
-        <label>
-          Visual direction
-          <select
-            value={visualPresetId}
-            onChange={(e) => setVisualPresetId(e.target.value)}
-            style={{ width: "100%" }}
-          >
-            <option value="">AI Decide</option>
-            {visualPresets.map((preset) => (
-              <option key={preset.id} value={preset.id}>
-                {preset.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Style hint
-          <input
-            placeholder="e.g. MBB slate"
-            value={styleHint}
-            onChange={(e) => setStyleHint(e.target.value)}
-            style={{ width: "100%" }}
-          />
-        </label>
+      </section>
+
+      <section style={sectionStyle}>
+        <h2 style={sectionTitleStyle}>Models</h2>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+            gap: 10,
+          }}
+        >
+          {MODEL_STAGE_ORDER.map((stage) => {
+            const stageOptions = modelOptions?.stages[stage];
+            return (
+              <label key={stage} style={labelStyle}>
+                {stageOptions?.label ?? stage}
+                <select
+                  value={modelOverrides[stage] ?? ""}
+                  disabled={!stageOptions || busy}
+                  onChange={(e) =>
+                    setModelOverrides((prev) => ({
+                      ...prev,
+                      [stage]: e.target.value || undefined,
+                    }))
+                  }
+                  style={controlStyle}
+                >
+                  <option value="">Default routing</option>
+                  {stageOptions?.options.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            );
+          })}
+        </div>
+      </section>
+
+      <div style={{ display: "flex", justifyContent: "flex-start", marginTop: 16 }}>
+        <button
+          disabled={busy || (!text.trim() && files.length === 0)}
+          onClick={() =>
+            onSubmit({
+              deckName,
+              text,
+              pages,
+              aspect,
+              density,
+              styleHint,
+              visualStylePresetId: visualPresetId || null,
+              modelOverrides,
+              files,
+            })
+          }
+          style={{ padding: "8px 14px", fontFamily: "inherit", fontSize: 14 }}
+        >
+          {busy ? "Streaming…" : "Create deck"}
+        </button>
       </div>
-      {selectedPreset && (
-        <div style={{ color: "#64748b", fontSize: 12, lineHeight: 1.45, marginTop: 6 }}>
-          {selectedPreset.description}
-        </div>
-      )}
-      <button
-        style={{ marginTop: 16 }}
-        disabled={busy || (!text.trim() && files.length === 0)}
-        onClick={() =>
-          onSubmit({
-            deckName,
-            text,
-            pages,
-            aspect,
-            density,
-            styleHint,
-            visualStylePresetId: visualPresetId || null,
-            files,
-          })
-        }
-      >
-        {busy ? "Streaming…" : "Create deck"}
-      </button>
 
       {recentDecks && recentDecks.length > 0 && (
         <div style={{ marginTop: 40 }}>
-          <h2 style={{ fontSize: 16, marginBottom: 12, color: "#333" }}>Recent decks</h2>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              marginBottom: 12,
+            }}
+          >
+            <h2 style={{ fontSize: 16, margin: 0, color: "#333" }}>Recent decks</h2>
+            <input
+              type="search"
+              value={recentSearch}
+              onChange={(e) => setRecentSearch(e.target.value)}
+              placeholder="Search decks"
+              style={{
+                width: 220,
+                maxWidth: "50%",
+                fontFamily: "inherit",
+                padding: "6px 8px",
+              }}
+            />
+          </div>
           <div
             style={{
               border: "1px solid #e5e5e5",
@@ -1272,7 +1462,12 @@ function CreateForm({
               overflow: "hidden",
             }}
           >
-            {recentDecks.map((d) => (
+            {visibleRecentDecks.length === 0 && (
+              <div style={{ padding: "12px 14px", color: "#64748b", fontSize: 13 }}>
+                No decks match "{recentSearch.trim()}".
+              </div>
+            )}
+            {visibleRecentDecks.map((d, idx) => (
               <button
                 key={d.thread_id}
                 disabled={busy}
@@ -1284,7 +1479,7 @@ function CreateForm({
                   padding: "10px 14px",
                   background: "#fff",
                   border: "none",
-                  borderBottom: "1px solid #f0f0f0",
+                  borderBottom: idx === visibleRecentDecks.length - 1 ? "none" : "1px solid #f0f0f0",
                   cursor: busy ? "default" : "pointer",
                   fontFamily: "inherit",
                   fontSize: 14,
@@ -1324,15 +1519,46 @@ function CreateForm({
                   )}
                   {d.created_at && (
                     <span style={{ fontSize: 11, color: "#999" }}>
-                      {new Date(d.created_at).toLocaleDateString(undefined, {
-                        month: "short",
-                        day: "numeric",
-                      })}
+                      {recentDeckDateText(d.created_at)}
                     </span>
                   )}
                 </div>
               </button>
             ))}
+          </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              marginTop: 10,
+              color: "#64748b",
+              fontSize: 12,
+            }}
+          >
+            <span>
+              {filteredRecentDecks.length} deck{filteredRecentDecks.length === 1 ? "" : "s"}
+            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                type="button"
+                disabled={busy || boundedRecentPage <= 1}
+                onClick={() => setRecentPage((page) => Math.max(1, page - 1))}
+              >
+                Previous
+              </button>
+              <span>
+                page {boundedRecentPage} of {recentPageCount}
+              </span>
+              <button
+                type="button"
+                disabled={busy || boundedRecentPage >= recentPageCount}
+                onClick={() => setRecentPage((page) => Math.min(recentPageCount, page + 1))}
+              >
+                Next
+              </button>
+            </div>
           </div>
         </div>
       )}
