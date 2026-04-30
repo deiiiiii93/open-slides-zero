@@ -22,6 +22,15 @@ const CANVAS: Record<string, [number, number]> = {
 
 // PPI constant: 96 CSS pixels per inch (standard devtools assumption).
 const PPI = 96;
+const RASTER_IMAGE_INLINE_TIMEOUT_MS = 30000;
+const RASTER_IMAGE_LOAD_TIMEOUT_MS = 5000;
+const RASTER_PLACEHOLDER_DATA_URL = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
+  <rect width="640" height="360" fill="#f4f1ea"/>
+  <rect x="12" y="12" width="616" height="336" rx="14" fill="none" stroke="#b7b0a4" stroke-width="4" stroke-dasharray="16 12"/>
+  <text x="320" y="188" text-anchor="middle" font-family="Arial, sans-serif" font-size="28" fill="#6e665c">Image unavailable</text>
+</svg>
+`)}`;
 
 export type ExportArtifact = {
   filename: string;
@@ -371,24 +380,8 @@ async function waitForIframeImages(f: HTMLIFrameElement, timeoutMs = 10000): Pro
   const images = Array.from(doc.images);
   if (images.length === 0) return;
 
-  await Promise.race([
-    Promise.all(images.map(inlineRasterImage)),
-    new Promise((resolve) => setTimeout(resolve, timeoutMs)),
-  ]);
-
-  await Promise.race([
-    Promise.all(
-      images.map((img) => {
-        img.loading = "eager";
-        if (img.complete) return Promise.resolve();
-        return new Promise<void>((resolve) => {
-          img.addEventListener("load", () => resolve(), { once: true });
-          img.addEventListener("error", () => resolve(), { once: true });
-        });
-      }),
-    ),
-    new Promise((resolve) => setTimeout(resolve, timeoutMs)),
-  ]);
+  const inlineTimeoutMs = Math.max(timeoutMs, RASTER_IMAGE_INLINE_TIMEOUT_MS);
+  await Promise.all(images.map((img) => inlineRasterImage(img, inlineTimeoutMs)));
 }
 
 function canInlineRasterImageSrc(src: string): boolean {
@@ -416,18 +409,90 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
-async function inlineRasterImage(img: HTMLImageElement): Promise<void> {
-  const src = img.currentSrc || img.src || img.getAttribute("src") || "";
-  if (!canInlineRasterImageSrc(src)) return;
+function waitForImageLoad(img: HTMLImageElement, timeoutMs = RASTER_IMAGE_LOAD_TIMEOUT_MS): Promise<boolean> {
+  if (img.complete) return Promise.resolve(img.naturalWidth > 0);
+  return new Promise((resolve) => {
+    const done = (ok: boolean) => {
+      window.clearTimeout(timer);
+      img.removeEventListener("load", onLoad);
+      img.removeEventListener("error", onError);
+      resolve(ok);
+    };
+    const onLoad = () => done(img.naturalWidth > 0);
+    const onError = () => done(false);
+    const timer = window.setTimeout(() => done(false), timeoutMs);
+    img.addEventListener("load", onLoad, { once: true });
+    img.addEventListener("error", onError, { once: true });
+  });
+}
+
+async function fetchImageDataUrl(src: string, timeoutMs: number): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(src, { credentials: "same-origin" });
-    if (!res.ok) return;
+    const res = await fetch(src, {
+      credentials: "same-origin",
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
     const blob = await res.blob();
-    if (!blob.type.startsWith("image/")) return;
-    img.removeAttribute("srcset");
-    img.src = await blobToDataUrl(blob);
+    if (!blob.type.startsWith("image/")) return null;
+    return await blobToDataUrl(blob);
   } catch {
-    // If inlining fails, let html2canvas try the original URL.
+    return null;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+async function inlineRasterImage(img: HTMLImageElement, timeoutMs: number): Promise<void> {
+  img.loading = "eager";
+  const src = img.currentSrc || img.src || img.getAttribute("src") || "";
+  if (canInlineRasterImageSrc(src)) {
+    const inlined = await fetchImageDataUrl(src, timeoutMs);
+    if (inlined) {
+      img.removeAttribute("srcset");
+      img.src = inlined;
+    }
+  }
+
+  if (await waitForImageLoad(img)) return;
+
+  img.removeAttribute("srcset");
+  img.src = RASTER_PLACEHOLDER_DATA_URL;
+  await waitForImageLoad(img, 1000);
+}
+
+async function inlineRasterStyleBackgrounds(doc: Document, timeoutMs: number): Promise<void> {
+  const styled = Array.from(doc.querySelectorAll<HTMLElement>("[style]"));
+  await Promise.all(styled.map(async (el) => {
+    const raw = el.style.backgroundImage;
+    const match = raw.match(/^url\(["']?(.*?)["']?\)$/);
+    if (!match) return;
+    const src = match[1];
+    if (!canInlineRasterImageSrc(src)) return;
+    const inlined = await fetchImageDataUrl(src, timeoutMs);
+    if (inlined) {
+      el.style.backgroundImage = `url("${inlined.replace(/"/g, "%22")}")`;
+    }
+  }));
+}
+
+async function waitForIframeRasterAssets(f: HTMLIFrameElement, timeoutMs = 10000): Promise<void> {
+  const doc = f.contentDocument;
+  if (!doc) return;
+  const inlineTimeoutMs = Math.max(timeoutMs, RASTER_IMAGE_INLINE_TIMEOUT_MS);
+  await Promise.all([
+    waitForIframeImages(f, inlineTimeoutMs),
+    inlineRasterStyleBackgrounds(doc, inlineTimeoutMs),
+  ]);
+  try {
+    const fonts = doc.fonts;
+    if (fonts && "ready" in fonts) {
+      await Promise.race([fonts.ready, new Promise((res) => setTimeout(res, 3000))]);
+    }
+  } catch {
+    // Ignore font readiness errors from sandboxed iframe documents.
   }
 }
 
@@ -544,7 +609,7 @@ export async function buildPngZipArtifact(deck: DeckState, options: ExportNameOp
   try {
     await Promise.all(frames.map(async (frame) => {
       await waitForIframeReady(frame);
-      await waitForIframeImages(frame);
+      await waitForIframeRasterAssets(frame);
     }));
 
     const zip = new JSZip();
