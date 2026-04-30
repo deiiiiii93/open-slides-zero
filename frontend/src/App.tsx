@@ -994,8 +994,47 @@ export function App() {
   );
 }
 
+function cleanAssetName(value: string | null | undefined): string {
+  if (!value) return "";
+  const decoded = decodeURIComponent(value.split(/[?#]/)[0].split("/").pop() ?? value);
+  const stem = decoded.replace(/\.(jpe?g|png|webp|gif)$/i, "");
+  if (/^(original|proxyImageThumbnailLarge|image|photo|[0-9a-f-]{16,})$/i.test(stem)) {
+    return "";
+  }
+  return stem
+    .replace(/^ph[_-]/i, "")
+    .replace(/^photo[_-]/i, "")
+    .replace(/[_-]gbif\d+$/i, "")
+    .replace(/[_-]+/g, " ")
+    .trim();
+}
+
+function firstMatch(pattern: RegExp, value: string): string {
+  return value.match(pattern)?.[1] ?? "";
+}
+
 function assetLabel(asset: ImageAsset): string {
-  return asset.name || asset.uri || asset.asset_id;
+  if (asset.source === "generated") {
+    const text = (asset.prompt || asset.summary || "AI image").trim();
+    return `Generated · ${text.slice(0, 90)}`;
+  }
+
+  const haystack = `${asset.summary ?? ""} ${asset.uri ?? ""} ${asset.name ?? ""}`;
+  const gbif = firstMatch(/gbif\.org\/occurrence\/(\d+)/i, haystack) || firstMatch(/\bgbif[_-]?(\d{6,})\b/i, haystack);
+  const inat = firstMatch(/inaturalist[^/]*\/photos\/(\d+)/i, haystack);
+  const commons = firstMatch(/(?:Special:Redirect\/file\/|File:)([^?#\s]+)/i, haystack);
+  const readableName = cleanAssetName(asset.name) || cleanAssetName(asset.uri);
+  const refName = cleanAssetName(firstMatch(/Referenced in [^:]+:\s*(\S+)/i, asset.summary ?? ""));
+
+  const parts: string[] = [];
+  if (gbif) parts.push(`GBIF ${gbif}`);
+  if (inat) parts.push(`iNaturalist photo ${inat}`);
+  if (!gbif && commons) parts.push(`Wikimedia · ${cleanAssetName(commons) || decodeURIComponent(commons)}`);
+  const descriptive = refName || readableName;
+  if (descriptive && !parts.some((part) => part.toLowerCase().includes(descriptive.toLowerCase()))) {
+    parts.push(descriptive);
+  }
+  return parts.join(" · ") || asset.uri || asset.asset_id;
 }
 
 function assetThumbnailSrc(deck: DeckState, asset: ImageAsset): string {
@@ -1025,6 +1064,7 @@ function ImageInsertionPanel({
   const [generatingBySlot, setGeneratingBySlot] = useState<Record<string, string>>({});
   const [selectedBySlot, setSelectedBySlot] = useState<Record<string, string>>({});
   const [promptsBySlot, setPromptsBySlot] = useState<Record<string, string>>({});
+  const [openPickerSlot, setOpenPickerSlot] = useState<string | null>(null);
 
   useEffect(() => {
     if (!plan) return;
@@ -1181,24 +1221,127 @@ function ImageInsertionPanel({
                   <div style={{ fontSize: 12, color: "#64748b" }}>Slide {slot.slide_idx + 1}</div>
                   <div style={{ fontSize: 14, fontWeight: 600 }}>{slot.hint}</div>
                 </div>
-                <div style={{ display: "grid", gap: 8 }}>
-                  <select
-                    value={selectedBySlot[slot.slot_id] ?? ""}
-                    onChange={(e) =>
-                      setSelectedBySlot((prev) => ({
-                        ...prev,
-                        [slot.slot_id]: e.target.value,
-                      }))
-                    }
-                    style={{ fontFamily: "inherit", fontSize: 13, padding: "6px 8px" }}
+                <div style={{ display: "grid", gap: 8, position: "relative" }}>
+                  <button
+                    type="button"
+                    onClick={() => setOpenPickerSlot((open) => (open === slot.slot_id ? null : slot.slot_id))}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 10,
+                      width: "100%",
+                      padding: "7px 9px",
+                      border: "1px solid #94a3b8",
+                      borderRadius: 4,
+                      background: "#fff",
+                      fontFamily: "inherit",
+                      fontSize: 13,
+                      cursor: "pointer",
+                      textAlign: "left",
+                    }}
                   >
-                    <option value="">No user image</option>
-                    {assets.map((asset) => (
-                      <option key={asset.asset_id} value={asset.asset_id}>
-                        {assetLabel(asset)}
-                      </option>
-                    ))}
-                  </select>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {selectedAsset ? assetLabel(selectedAsset) : "No user image"}
+                    </span>
+                    <span aria-hidden="true" style={{ color: "#64748b" }}>▾</span>
+                  </button>
+                  {openPickerSlot === slot.slot_id && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: 40,
+                        right: 0,
+                        left: 0,
+                        zIndex: 20,
+                        maxHeight: 390,
+                        overflowY: "auto",
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))",
+                        gap: 8,
+                        padding: 10,
+                        border: "1px solid #cbd5e1",
+                        borderRadius: 8,
+                        background: "#fff",
+                        boxShadow: "0 14px 36px rgba(15, 23, 42, 0.18)",
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedBySlot((prev) => ({ ...prev, [slot.slot_id]: "" }));
+                          setOpenPickerSlot(null);
+                        }}
+                        style={{
+                          gridColumn: "1 / -1",
+                          padding: 8,
+                          border: selectedAsset ? "1px solid #e2e8f0" : "2px solid #2563eb",
+                          borderRadius: 6,
+                          background: selectedAsset ? "#fff" : "#eff6ff",
+                          textAlign: "left",
+                          fontFamily: "inherit",
+                          cursor: "pointer",
+                        }}
+                      >
+                        No user image
+                      </button>
+                      {assets.map((asset) => {
+                        const selected = selectedAsset?.asset_id === asset.asset_id;
+                        return (
+                          <button
+                            key={asset.asset_id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedBySlot((prev) => ({
+                                ...prev,
+                                [slot.slot_id]: asset.asset_id,
+                              }));
+                              setOpenPickerSlot(null);
+                            }}
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "70px minmax(0, 1fr)",
+                              gap: 8,
+                              alignItems: "center",
+                              minHeight: 72,
+                              padding: 7,
+                              border: selected ? "2px solid #2563eb" : "1px solid #e2e8f0",
+                              borderRadius: 6,
+                              background: selected ? "#eff6ff" : "#fff",
+                              cursor: "pointer",
+                              textAlign: "left",
+                              fontFamily: "inherit",
+                            }}
+                          >
+                            <img
+                              src={assetThumbnailSrc(deck, asset)}
+                              alt=""
+                              loading="lazy"
+                              style={{
+                                width: 70,
+                                height: 54,
+                                objectFit: "cover",
+                                borderRadius: 4,
+                                border: "1px solid #e2e8f0",
+                                background: "#f8fafc",
+                              }}
+                            />
+                            <span
+                              style={{
+                                minWidth: 0,
+                                fontSize: 12,
+                                lineHeight: 1.25,
+                                color: "#0f172a",
+                                overflowWrap: "anywhere",
+                              }}
+                            >
+                              {assetLabel(asset)}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                   {selectedAsset && (
                     <img
                       src={assetThumbnailSrc(deck, selectedAsset)}

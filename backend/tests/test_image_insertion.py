@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -260,3 +262,58 @@ def test_generate_batch_endpoint_serially_generates_multiple_slots(
     assert len(body["assets"]) == 2
     assert 'data-inserted-image="true"' in body["state"]["values"]["html_slides"]["0"]
     assert 'data-inserted-image="true"' in body["state"]["values"]["html_slides"]["1"]
+
+
+def test_parallel_generate_requests_are_serialized_by_thread(
+    isolated_graph, monkeypatch: pytest.MonkeyPatch
+):
+    calls: list[str] = []
+
+    def fake_generate(prompt: str, output_path: str | Path, **_kwargs):
+        calls.append(prompt)
+        time.sleep(0.05)
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(prompt.encode("utf-8"))
+        return {"path": str(path), "mime_type": "image/png", "model": "fake-image"}
+
+    monkeypatch.setattr(image_insert.image_gen, "generate_image", fake_generate)
+    client = TestClient(app)
+    thread_id = "thread-parallel"
+    graph_module.get_graph().update_state(
+        {"configurable": {"thread_id": thread_id}},
+        {
+            "thread_id": thread_id,
+            "current_stage": "ready",
+            "materials": [],
+            "html_slides": {0: _slide_html(), 1: _slide_html()},
+            "image_assets": [],
+            "image_insertion_plan": image_insert.create_image_insertion_plan({
+                "thread_id": thread_id,
+                "html_slides": {0: _slide_html(), 1: _slide_html()},
+                "image_assets": [],
+            }),
+        },
+    )
+
+    def post_generate(slot_id: str, slide_idx: int, prompt: str):
+        return client.post(
+            f"/decks/{thread_id}/images/generate",
+            json={"slide_idx": slide_idx, "slot_id": slot_id, "prompt": prompt},
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(
+            lambda args: post_generate(*args),
+            [
+                ("slide-0-slot-0", 0, "First image"),
+                ("slide-1-slot-0", 1, "Second image"),
+            ],
+        ))
+
+    assert [response.status_code for response in responses] == [200, 200]
+    assert calls == ["First image", "Second image"]
+    state = client.get(f"/decks/{thread_id}").json()["values"]
+    assert 'data-inserted-image="true"' in state["html_slides"]["0"]
+    assert 'data-inserted-image="true"' in state["html_slides"]["1"]
+    assert len(state["image_assets"]) == 2

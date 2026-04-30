@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import mimetypes
+import threading
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, RedirectResponse
@@ -20,6 +22,8 @@ from ..graph.nodes.image_insert import (
 from .common import config_for, current_state, graph, mirror_to_disk
 
 router = APIRouter()
+_GENERATION_LOCKS: dict[str, threading.Lock] = {}
+_GENERATION_LOCKS_GUARD = threading.Lock()
 
 
 class ImageMappingIn(BaseModel):
@@ -54,6 +58,25 @@ def _persist(thread_id: str, update: dict[str, Any]) -> dict[str, Any]:
     return current_state(thread_id)
 
 
+def _generation_lock(thread_id: str) -> threading.Lock:
+    with _GENERATION_LOCKS_GUARD:
+        lock = _GENERATION_LOCKS.get(thread_id)
+        if lock is None:
+            lock = threading.Lock()
+            _GENERATION_LOCKS[thread_id] = lock
+        return lock
+
+
+@contextmanager
+def _serial_image_generation(thread_id: str) -> Iterator[None]:
+    lock = _generation_lock(thread_id)
+    lock.acquire()
+    try:
+        yield
+    finally:
+        lock.release()
+
+
 @router.post("/decks/{thread_id}/images/plan")
 def plan_images(thread_id: str) -> dict[str, Any]:
     values = _snapshot_values(thread_id)
@@ -72,12 +95,13 @@ def plan_images(thread_id: str) -> dict[str, Any]:
 
 @router.post("/decks/{thread_id}/images/apply")
 def apply_images(thread_id: str, body: ApplyImagesBody) -> dict[str, Any]:
-    values = _snapshot_values(thread_id)
-    update = apply_image_mappings(
-        values,
-        [mapping.model_dump() for mapping in body.mappings],
-    )
-    state = _persist(thread_id, update)
+    with _serial_image_generation(thread_id):
+        values = _snapshot_values(thread_id)
+        update = apply_image_mappings(
+            values,
+            [mapping.model_dump() for mapping in body.mappings],
+        )
+        state = _persist(thread_id, update)
     return {
         "ok": True,
         "applied_mappings": update["image_insertion_plan"].get("applied_mappings", []),
@@ -87,82 +111,84 @@ def apply_images(thread_id: str, body: ApplyImagesBody) -> dict[str, Any]:
 
 @router.post("/decks/{thread_id}/images/generate")
 def generate_image(thread_id: str, body: GenerateImageBody) -> dict[str, Any]:
-    values = _snapshot_values(thread_id)
     if not body.prompt.strip():
         raise HTTPException(status_code=400, detail="Prompt is required.")
-    try:
-        update = generate_slot_image(
-            values,
-            slot_id=body.slot_id,
-            prompt=body.prompt.strip(),
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        graph().update_state(  # type: ignore[arg-type]
-            config_for(thread_id),
-            {
-                "image_generation_errors": [{
-                    "slot_id": body.slot_id,
-                    "slide_idx": body.slide_idx,
-                    "message": str(exc),
-                }]
-            },
-        )
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    generated_asset = update.pop("generated_asset")
-    state = _persist(thread_id, update)
+    with _serial_image_generation(thread_id):
+        values = _snapshot_values(thread_id)
+        try:
+            update = generate_slot_image(
+                values,
+                slot_id=body.slot_id,
+                prompt=body.prompt.strip(),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            graph().update_state(  # type: ignore[arg-type]
+                config_for(thread_id),
+                {
+                    "image_generation_errors": [{
+                        "slot_id": body.slot_id,
+                        "slide_idx": body.slide_idx,
+                        "message": str(exc),
+                    }]
+                },
+            )
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        generated_asset = update.pop("generated_asset")
+        state = _persist(thread_id, update)
     return {"ok": True, "asset": generated_asset, "state": state}
 
 
 @router.post("/decks/{thread_id}/images/generate_batch")
 def generate_images(thread_id: str, body: GenerateImagesBody) -> dict[str, Any]:
-    values = _snapshot_values(thread_id)
     if not body.items:
         raise HTTPException(status_code=400, detail="At least one image prompt is required.")
 
-    generated_assets: list[dict[str, Any]] = []
-    update: dict[str, Any] = {}
-    errors: list[dict[str, Any]] = []
-    for item in body.items:
-        prompt = item.prompt.strip()
-        if not prompt:
-            errors.append({
-                "slot_id": item.slot_id,
-                "slide_idx": item.slide_idx,
-                "message": "Prompt is required.",
-            })
-            continue
-        try:
-            update = generate_slot_image(values, slot_id=item.slot_id, prompt=prompt)
-        except ValueError as exc:
-            errors.append({
-                "slot_id": item.slot_id,
-                "slide_idx": item.slide_idx,
-                "message": str(exc),
-            })
-            continue
-        except Exception as exc:
-            errors.append({
-                "slot_id": item.slot_id,
-                "slide_idx": item.slide_idx,
-                "message": str(exc),
-            })
-            continue
-        generated_assets.append(update.pop("generated_asset"))
-        values.update(update)
+    with _serial_image_generation(thread_id):
+        values = _snapshot_values(thread_id)
+        generated_assets: list[dict[str, Any]] = []
+        update: dict[str, Any] = {}
+        errors: list[dict[str, Any]] = []
+        for item in body.items:
+            prompt = item.prompt.strip()
+            if not prompt:
+                errors.append({
+                    "slot_id": item.slot_id,
+                    "slide_idx": item.slide_idx,
+                    "message": "Prompt is required.",
+                })
+                continue
+            try:
+                update = generate_slot_image(values, slot_id=item.slot_id, prompt=prompt)
+            except ValueError as exc:
+                errors.append({
+                    "slot_id": item.slot_id,
+                    "slide_idx": item.slide_idx,
+                    "message": str(exc),
+                })
+                continue
+            except Exception as exc:
+                errors.append({
+                    "slot_id": item.slot_id,
+                    "slide_idx": item.slide_idx,
+                    "message": str(exc),
+                })
+                continue
+            generated_assets.append(update.pop("generated_asset"))
+            values.update(update)
 
-    if not generated_assets:
-        graph().update_state(  # type: ignore[arg-type]
-            config_for(thread_id),
-            {"image_generation_errors": errors},
-        )
-        detail = errors[0]["message"] if errors else "No images were generated."
-        raise HTTPException(status_code=502, detail=detail)
+        if not generated_assets:
+            graph().update_state(  # type: ignore[arg-type]
+                config_for(thread_id),
+                {"image_generation_errors": errors},
+            )
+            detail = errors[0]["message"] if errors else "No images were generated."
+            raise HTTPException(status_code=502, detail=detail)
 
-    if errors:
-        update["image_generation_errors"] = errors
-    state = _persist(thread_id, update)
+        if errors:
+            update["image_generation_errors"] = errors
+        state = _persist(thread_id, update)
     return {
         "ok": True,
         "assets": generated_assets,
