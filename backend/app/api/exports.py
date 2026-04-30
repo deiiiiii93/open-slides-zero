@@ -8,6 +8,7 @@ import zipfile
 from io import BytesIO
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
@@ -72,8 +73,10 @@ def _canvas_size(aspect_ratio: str) -> tuple[int, int]:
 
 def _content_disposition(filename: str) -> str:
     safe = _sanitize_filename(filename)
-    quoted = safe.replace("\\", "\\\\").replace('"', '\\"')
-    return f'attachment; filename="{quoted}"'
+    ascii_fallback = safe.encode("ascii", "replace").decode("ascii").replace("?", "_")
+    quoted = ascii_fallback.replace("\\", "\\\\").replace('"', '\\"')
+    encoded = quote(safe, safe="")
+    return f"attachment; filename=\"{quoted}\"; filename*=UTF-8''{encoded}"
 
 
 def _base_href(base_url: str | None, request: Request) -> str:
