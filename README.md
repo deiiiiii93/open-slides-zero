@@ -9,20 +9,32 @@ model routing. The frontend is a Vite + React app.
 
 ## Examples
 
-Open Slides Zero can produce dense analytical decks and more visual,
-design-led decks from plain source material.
+Open Slides Zero can produce dense analytical decks, product-explanation decks,
+and image-led reference decks from plain source material.
 
-### Snowball Risk Profile
+### Snowball — Strategic Prestige
 
-![Snowball Risk Profile cover](https://github.com/deiiiiii93/open-slides-zero/blob/main/docs/images/snowball-risk-profile-cover.png?raw=true)
+Full PNG export: [docs/images/snowball-strategic-prestige](docs/images/snowball-strategic-prestige)
 
-![Snowball Risk Profile pricing and loss probability slide](https://github.com/deiiiiii93/open-slides-zero/blob/main/docs/images/snowball-risk-profile-pricing.png?raw=true)
+![Snowball strategic prestige cover](docs/images/snowball-strategic-prestige/slide_01.png)
 
-### How to make your coffee bar attractive?
+![Snowball strategic prestige loss comparison slide](docs/images/snowball-strategic-prestige/slide_04.png)
 
-![Coffee bar design cover](https://github.com/deiiiiii93/open-slides-zero/blob/main/docs/images/coffee-bar-cover.png?raw=true)
+### Snowball — Product Clarity
 
-![Coffee bar six-principle framework slide](https://github.com/deiiiiii93/open-slides-zero/blob/main/docs/images/coffee-bar-framework.png?raw=true)
+Full PNG export: [docs/images/snowball-product-clarity](docs/images/snowball-product-clarity)
+
+![Snowball product clarity cover](docs/images/snowball-product-clarity/slide_01.png)
+
+![Snowball product clarity monitoring slide](docs/images/snowball-product-clarity/slide_04.png)
+
+### Bugs 2 (fork)
+
+Full PNG export: [docs/images/bugs-2-fork](docs/images/bugs-2-fork)
+
+![Bugs 2 fork cover](docs/images/bugs-2-fork/slide_01.png)
+
+![Bugs 2 fork species detail slide](docs/images/bugs-2-fork/slide_04.png)
 
 ## Architecture
 

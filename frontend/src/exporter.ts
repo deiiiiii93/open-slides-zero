@@ -22,6 +22,7 @@ const CANVAS: Record<string, [number, number]> = {
 
 // PPI constant: 96 CSS pixels per inch (standard devtools assumption).
 const PPI = 96;
+const PNG_EXPORT_SCALE = 2;
 const RASTER_IMAGE_INLINE_TIMEOUT_MS = 30000;
 const RASTER_IMAGE_LOAD_TIMEOUT_MS = 5000;
 const RASTER_PLACEHOLDER_DATA_URL = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`
@@ -564,7 +565,7 @@ async function renderFrameToPngBlob(
       foreignObjectRendering: true,
       height: h,
       logging: false,
-      scale: 1,
+      scale: PNG_EXPORT_SCALE,
       useCORS: true,
       width: w,
       windowHeight: h,
