@@ -19,6 +19,7 @@ import {
 import {
   exportHtmlSingle,
   exportHtmlZip,
+  exportPngZip,
   exportPlaygroundLanesPackage,
   exportPptx,
   hasExportableSlides,
@@ -869,6 +870,7 @@ function LaneDetail({
                 {[
                   { key: "html", label: "HTML (single file)", fn: exportHtmlSingle },
                   { key: "zip", label: "HTML (zip of slides)", fn: exportHtmlZip },
+                  { key: "pngs", label: "PNGs (zip of slides)", fn: exportPngZip },
                   { key: "pptx", label: "PPTX (editable)", fn: exportPptx },
                 ].map((opt) => (
                   <button

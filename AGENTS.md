@@ -102,20 +102,22 @@ Stage ordering (earliest→latest): `outline → style → layout → html → i
 ### Layout decision engine
 `app/catalog/scorer.py::pick_pattern` is a pure function implementing catalog §6 weighted heuristics + §7 tie-breaks. The **LLM proposes 3–5 candidate patterns**, the scorer ranks families and picks. Never move scoring into an LLM prompt; the determinism is load-bearing for HITL explainability and for the golden tests in `tests/test_scorer.py`.
 
-### PPTX export and remote images
-`frontend/src/exporter.ts` exports editable PPTX by walking each slide iframe DOM
-and translating elements to `pptxgenjs` shapes. Browser-rendered `<img>` nodes
-may contain public remote URLs from user-provided image assets, GBIF/iNaturalist,
-or other source material. Do not pass those external URLs directly to
-`slide.addImage(...)`: `pptxgenjs` fetch failures abort the entire PPTX write.
+### PNG/PPTX export and remote images
+`frontend/src/exporter.ts` exports PNG packages by rasterizing slide iframes with
+`html2canvas`, and exports editable PPTX by walking each slide iframe DOM and
+translating elements to `pptxgenjs` shapes. Browser-rendered `<img>` nodes may
+contain public remote URLs from user-provided image assets, GBIF/iNaturalist, or
+other source material. Do not pass those external URLs directly to
+`slide.addImage(...)`: `pptxgenjs` fetch failures abort the entire PPTX write,
+and direct cross-origin images can taint PNG export canvases.
 
 External HTTP(S) image sources should route through the same-origin
 `/images/proxy?url=...` backend endpoint in `app/api/images.py`. The proxy only
 allows public HTTP(S) destinations, follows a small redirect chain, enforces an
 image content type and size limit, and returns a lightweight placeholder image
-when the upstream fetch fails. Keep PPTX image insertion best-effort: a bad
-remote image should render an unavailable-image box for that slot, not fail the
-whole deck.
+when the upstream fetch fails. Keep PNG/PPTX image export best-effort: a bad
+remote image should render an unavailable-image box or be omitted for that slot,
+not fail the whole deck.
 
 ### Invariants — each of these has bitten us
 1. **Checkpointer is authoritative**. `./threads/{thread_id}/*.md` files are a derived mirror written after each commit; never read them back into state. If a file disappears, regenerate from checkpoint.
@@ -124,7 +126,7 @@ whole deck.
 4. **In LangGraph 1.x, `get_stream_writer()` raises `RuntimeError` outside a runnable context** — it does not return `None`. `_safe_writer()` in `stream.py` catches that.
 5. **Anti-slop HTML rules live in two places**: the system prompt in `app/graph/nodes/html_one.py::ANTI_SLOP_RULES`, and the post-generation check in `app/catalog/validator.py`. If you add a new "don't" rule (e.g. a newly overused font), update *both*.
 6. **Vision guard**: `app/llm/models.py::vision_capable()` + `VISION_FALLBACK`. When images are attached to a chat and the routed model doesn't declare image input, `zenmux.chat()` reroutes to the fallback and logs. Don't bypass — misrouted images produce cryptic upstream errors.
-7. **PPTX export is best-effort around images**. Remote image failures must not abort export; route public remote images through `/images/proxy` and keep the frontend fallback placeholder path intact.
+7. **PNG/PPTX export is best-effort around images**. Remote image failures must not abort export; route public remote images through `/images/proxy` and keep the frontend fallback placeholder path intact.
 8. **Image insertion must stay idempotent**. Keep `html_slides_base` as the pre-insertion source of truth for remapping image slots; `html_slides` is the current rendered deck and may already contain inserted image tags.
 
 ## Adding a new subagent (common extension)

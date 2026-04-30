@@ -5,6 +5,8 @@ from __future__ import annotations
 import mimetypes
 import socket
 import threading
+import urllib.error
+import urllib.request
 from contextlib import contextmanager
 from ipaddress import ip_address
 from pathlib import Path
@@ -28,7 +30,15 @@ from .common import config_for, current_state, graph, mirror_to_disk
 router = APIRouter()
 _GENERATION_LOCKS: dict[str, threading.Lock] = {}
 _GENERATION_LOCKS_GUARD = threading.Lock()
-_MAX_PROXY_IMAGE_BYTES = 12 * 1024 * 1024
+_MAX_PROXY_IMAGE_BYTES = 24 * 1024 * 1024
+_PROXY_REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+_PROXY_REQUEST_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"
+    ),
+    "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+}
 _PROXY_PLACEHOLDER_SVG = b"""\
 <svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
 <rect width="640" height="360" fill="#f4f1ea"/>
@@ -124,40 +134,114 @@ def _placeholder_image_response() -> Response:
     )
 
 
+def _ensure_public_proxy_url(url: str) -> None:
+    if not _is_public_http_url(url):
+        raise HTTPException(
+            status_code=400,
+            detail="Only public http(s) image URLs can be proxied.",
+        )
+
+
+def _sniff_image_media_type(content: bytes) -> str | None:
+    if content.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if content.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if content.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if content.startswith(b"RIFF") and content[8:12] == b"WEBP":
+        return "image/webp"
+    if content.lstrip()[:5].lower() == b"<svg " or content.lstrip()[:4].lower() == b"<svg":
+        return "image/svg+xml"
+    return None
+
+
+def _image_media_type(content_type: str | None, content: bytes) -> str | None:
+    media_type = (content_type or "").split(";", 1)[0].lower()
+    if media_type.startswith("image/"):
+        return media_type
+    return _sniff_image_media_type(content)
+
+
+def _proxy_response(content: bytes, content_type: str | None) -> Response:
+    media_type = _image_media_type(content_type, content)
+    if not media_type:
+        return _placeholder_image_response()
+    if len(content) > _MAX_PROXY_IMAGE_BYTES:
+        return _placeholder_image_response()
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+def _fetch_proxy_image_httpx(url: str) -> tuple[bytes, str | None]:
+    current_url = url
+    with httpx.Client(
+        timeout=20.0,
+        follow_redirects=False,
+        headers=_PROXY_REQUEST_HEADERS,
+    ) as client:
+        for _ in range(6):
+            _ensure_public_proxy_url(current_url)
+            resp = client.get(current_url)
+            if resp.status_code in _PROXY_REDIRECT_STATUSES:
+                location = resp.headers.get("location")
+                if not location:
+                    break
+                current_url = urljoin(current_url, location)
+                continue
+            resp.raise_for_status()
+            return resp.content, resp.headers.get("content-type")
+    raise httpx.TooManyRedirects("Too many image proxy redirects")
+
+
+class _NoProxyRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
+        return None
+
+
+def _fetch_proxy_image_urllib(url: str) -> tuple[bytes, str | None]:
+    current_url = url
+    opener = urllib.request.build_opener(_NoProxyRedirectHandler)
+    for _ in range(6):
+        _ensure_public_proxy_url(current_url)
+        req = urllib.request.Request(current_url, headers=_PROXY_REQUEST_HEADERS, method="GET")
+        try:
+            with opener.open(req, timeout=20.0) as resp:
+                content = resp.read(_MAX_PROXY_IMAGE_BYTES + 1)
+                return content, resp.headers.get("content-type")
+        except urllib.error.HTTPError as exc:
+            if exc.code in _PROXY_REDIRECT_STATUSES:
+                location = exc.headers.get("location")
+                if not location:
+                    break
+                current_url = urljoin(exc.url or current_url, location)
+                continue
+            raise
+    raise urllib.error.HTTPError(url, 508, "Too many image proxy redirects", {}, None)
+
+
 @router.get("/images/proxy")
 def proxy_image(url: str = Query(..., min_length=1, max_length=4096)) -> Response:
-    current_url = url
     try:
-        with httpx.Client(timeout=15.0, follow_redirects=False) as client:
-            for _ in range(4):
-                if not _is_public_http_url(current_url):
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Only public http(s) image URLs can be proxied.",
-                    )
-                resp = client.get(current_url)
-                if resp.status_code in {301, 302, 303, 307, 308}:
-                    location = resp.headers.get("location")
-                    if not location:
-                        break
-                    current_url = urljoin(current_url, location)
-                    continue
-                resp.raise_for_status()
-                content_type = resp.headers.get("content-type", "").split(";", 1)[0].lower()
-                if not content_type.startswith("image/"):
-                    raise HTTPException(status_code=415, detail="Proxied URL did not return an image.")
-                if len(resp.content) > _MAX_PROXY_IMAGE_BYTES:
-                    raise HTTPException(status_code=413, detail="Image is too large to proxy.")
-                return Response(
-                    content=resp.content,
-                    media_type=content_type or "image/jpeg",
-                    headers={"Cache-Control": "public, max-age=86400"},
-                )
+        content, content_type = _fetch_proxy_image_httpx(url)
+    except HTTPException:
+        raise
+    except Exception:
+        try:
+            content, content_type = _fetch_proxy_image_urllib(url)
+        except HTTPException:
+            raise
+        except Exception:
+            return _placeholder_image_response()
+    try:
+        return _proxy_response(content, content_type)
     except HTTPException:
         raise
     except Exception:
         return _placeholder_image_response()
-    return _placeholder_image_response()
 
 
 @router.post("/decks/{thread_id}/images/plan")

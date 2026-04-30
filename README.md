@@ -136,11 +136,13 @@ Creator Playground can branch from a shared outline into multiple lane threads,
 each with its own creator prompt, style/layout/html checkpoints, cutoff status,
 and slide-by-slide arena comparison.
 
-Decks can be exported as a single HTML file, an HTML zip, or an editable PPTX.
-PPTX export walks each slide DOM in the browser. Remote HTTP(S) images are
-fetched through the backend `/images/proxy` endpoint so public image URLs can be
-embedded same-origin; if a remote image cannot be loaded, export keeps going and
-uses an "Image unavailable" placeholder in that image slot.
+Decks can be exported as a single HTML file, an HTML zip, a PNG zip, or an
+editable PPTX. PNG export rasterizes each slide to `slide_XX.png` and packages
+the images with a small index page. PPTX export walks each slide DOM in the
+browser. Remote HTTP(S) images are fetched through the backend `/images/proxy`
+endpoint so public image URLs can be embedded or rasterized same-origin; if a
+remote image cannot be loaded, export keeps going and uses an "Image
+unavailable" placeholder in that image slot.
 
 Image insertion is an optional ready-time stage. During ingest, uploaded image
 files and image URLs become `image_assets`. During HTML rendering, empty visual
@@ -212,8 +214,8 @@ frontend/
 - Image insertion is a ready-time, API-driven stage. Preserve
   `html_slides_base` when replacing placeholders so mappings can be changed
   idempotently.
-- PPTX export must be best-effort around image loading. External image fetch
-  failures should not abort the whole deck export.
+- PNG and PPTX export must be best-effort around image loading. External image
+  fetch failures should not abort the whole deck export.
 
 ## License
 

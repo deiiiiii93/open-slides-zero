@@ -61,6 +61,27 @@ def test_proxy_image_returns_same_origin_image_bytes(monkeypatch: pytest.MonkeyP
     assert proxied.body == b"jpg-bytes"
 
 
+def test_proxy_image_falls_back_and_sniffs_image_bytes(monkeypatch: pytest.MonkeyPatch):
+    url = "https://images.example.org/photo"
+    request = httpx.Request("GET", url)
+    response = httpx.Response(403, request=request)
+
+    def blocked_httpx(_url: str):
+        raise httpx.HTTPStatusError("blocked", request=request, response=response)
+
+    monkeypatch.setattr(images, "_fetch_proxy_image_httpx", blocked_httpx)
+    monkeypatch.setattr(
+        images,
+        "_fetch_proxy_image_urllib",
+        lambda _url: (b"\xff\xd8\xffjpg-bytes", "application/octet-stream"),
+    )
+
+    proxied = images.proxy_image(url)
+
+    assert proxied.media_type == "image/jpeg"
+    assert proxied.body == b"\xff\xd8\xffjpg-bytes"
+
+
 def test_image_materials_populate_assets_without_dropping_ocr_text(tmp_path: Path):
     image_path = tmp_path / "product.png"
     image_path.write_bytes(b"fake")

@@ -39,6 +39,7 @@ import { streamSSE, type StreamEvent } from "./sse";
 import {
   exportHtmlSingle,
   exportHtmlZip,
+  exportPngZip,
   exportPptx,
   hasExportableSlides,
 } from "./exporter";
@@ -632,6 +633,7 @@ export function App() {
                 {[
                   { key: "html", label: "Current HTML (single file)", fn: exportHtmlSingle },
                   { key: "zip", label: "Current HTML (zip of slides)", fn: exportHtmlZip },
+                  { key: "pngs", label: "Current PNGs (zip of slides)", fn: exportPngZip },
                   { key: "pptx", label: "Current PPTX (editable)", fn: exportPptx },
                   ...(hasOriginalSlides(deck)
                     ? [
@@ -639,6 +641,11 @@ export function App() {
                           key: "html-original",
                           label: "Original HTML before images",
                           fn: (d: DeckState) => exportHtmlSingle(deckWithBaseSlides(d)),
+                        },
+                        {
+                          key: "pngs-original",
+                          label: "Original PNGs before images",
+                          fn: (d: DeckState) => exportPngZip(deckWithBaseSlides(d)),
                         },
                         {
                           key: "pptx-original",
