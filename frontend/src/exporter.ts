@@ -660,6 +660,13 @@ async function waitForIframeReady(f: HTMLIFrameElement, timeoutMs = 10000): Prom
 
 // --- Color helpers ---
 
+type PptxFillColor = { hex: string; transparency?: number };
+type RgbaColor = { r: number; g: number; b: number; a: number };
+
+function clamp(n: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, n));
+}
+
 function cssColorToHex(color: string): string {
   if (!color || color === "transparent" || color === "inherit" || color === "initial") return "";
   if (color.startsWith("#")) return color.replace("#", "").toUpperCase();
@@ -675,6 +682,70 @@ function cssColorToHex(color: string): string {
   return "";
 }
 
+function parseColorChannel(token: string): number {
+  const trimmed = token.trim();
+  const value = trimmed.endsWith("%") ? (parseFloat(trimmed) / 100) * 255 : parseFloat(trimmed);
+  return clamp(Math.round(Number.isFinite(value) ? value : 0), 0, 255);
+}
+
+function parseAlphaChannel(token: string | undefined): number {
+  if (!token) return 1;
+  const trimmed = token.trim();
+  const value = trimmed.endsWith("%") ? parseFloat(trimmed) / 100 : parseFloat(trimmed);
+  return clamp(Number.isFinite(value) ? value : 1, 0, 1);
+}
+
+function parseCssRgba(colorStr: string): RgbaColor | null {
+  const color = colorStr.trim().toLowerCase();
+  if (!color || color === "inherit" || color === "initial" || color === "none") return null;
+  if (color === "transparent") return { r: 0, g: 0, b: 0, a: 0 };
+  if (color === "black") return { r: 0, g: 0, b: 0, a: 1 };
+  if (color === "white") return { r: 255, g: 255, b: 255, a: 1 };
+
+  const hex = color.match(/^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i);
+  if (hex) {
+    const raw = hex[1];
+    const expand = (value: string) => value.length === 1 ? value + value : value;
+    const r = parseInt(expand(raw.length <= 4 ? raw[0] : raw.slice(0, 2)), 16);
+    const g = parseInt(expand(raw.length <= 4 ? raw[1] : raw.slice(2, 4)), 16);
+    const b = parseInt(expand(raw.length <= 4 ? raw[2] : raw.slice(4, 6)), 16);
+    const a = raw.length === 4
+      ? parseInt(expand(raw[3]), 16) / 255
+      : raw.length === 8
+        ? parseInt(raw.slice(6, 8), 16) / 255
+        : 1;
+    return { r, g, b, a };
+  }
+
+  const fn = color.match(/^rgba?\((.*)\)$/i);
+  if (!fn) return null;
+
+  const body = fn[1].trim();
+  let channels: string[] = [];
+  let alpha: string | undefined;
+  if (body.includes(",")) {
+    channels = body.split(",").map((part) => part.trim()).filter(Boolean);
+    alpha = channels[3];
+  } else {
+    const [rgbPart, alphaPart] = body.split("/").map((part) => part.trim());
+    channels = rgbPart.split(/\s+/).filter(Boolean);
+    alpha = alphaPart ?? channels[3];
+  }
+  if (channels.length < 3) return null;
+
+  return {
+    r: parseColorChannel(channels[0]),
+    g: parseColorChannel(channels[1]),
+    b: parseColorChannel(channels[2]),
+    a: parseAlphaChannel(alpha),
+  };
+}
+
+function rgbaToHex(color: RgbaColor): string {
+  const toHex = (n: number) => clamp(Math.round(n), 0, 255).toString(16).padStart(2, "0");
+  return `${toHex(color.r)}${toHex(color.g)}${toHex(color.b)}`.toUpperCase();
+}
+
 function isEffectivelyTransparent(colorStr: string): boolean {
   if (!colorStr || colorStr === "transparent" || colorStr === "inherit" || colorStr === "initial") return true;
   if (colorStr.startsWith("rgba")) {
@@ -686,25 +757,151 @@ function isEffectivelyTransparent(colorStr: string): boolean {
   return false;
 }
 
-function getMixedTransparency(colorStr: string, cssOpacity: string): number | undefined {
-  let alpha = 1;
+function fillFromRgba(color: RgbaColor, cssOpacity = "1"): PptxFillColor | null {
   const elementOpacity = parseFloat(cssOpacity);
-  if (!isNaN(elementOpacity)) alpha *= elementOpacity;
-  if (colorStr && colorStr.startsWith("rgba")) {
-    const rgba = colorStr.match(/(\d+(\.\d+)?)/g);
-    if (rgba && rgba.length >= 4) {
-      alpha *= parseFloat(rgba[3]);
-    }
-  }
-  if (alpha >= 1) return undefined;
-  return Math.round((1 - alpha) * 100);
+  const alpha = color.a * (Number.isFinite(elementOpacity) ? elementOpacity : 1);
+  if (alpha <= 0.01) return null;
+  return {
+    hex: rgbaToHex(color),
+    transparency: alpha >= 0.995 ? undefined : Math.round((1 - alpha) * 100),
+  };
 }
 
-function parseColor(colorStr: string, opacityStr = "1"): { hex: string; transparency?: number } | null {
-  const hex = cssColorToHex(colorStr);
-  if (!hex) return null;
-  const transparency = getMixedTransparency(colorStr, opacityStr);
-  return { hex, transparency };
+function parseColor(colorStr: string, opacityStr = "1"): PptxFillColor | null {
+  const rgba = parseCssRgba(colorStr);
+  if (!rgba) {
+    const hex = cssColorToHex(colorStr);
+    return hex ? { hex } : null;
+  }
+  return fillFromRgba(rgba, opacityStr);
+}
+
+function splitCssTopLevel(input: string, separator = ","): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  let depth = 0;
+  let quote: string | null = null;
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (quote) {
+      if (ch === quote && input[i - 1] !== "\\") quote = null;
+      continue;
+    }
+    if (ch === "\"" || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (ch === "(") depth++;
+    else if (ch === ")") depth = Math.max(0, depth - 1);
+    else if (ch === separator && depth === 0) {
+      parts.push(input.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  parts.push(input.slice(start).trim());
+  return parts.filter(Boolean);
+}
+
+function extractLeadingCssColor(stop: string): string | null {
+  const trimmed = stop.trim();
+  const fn = trimmed.match(/^(rgba?\([^)]*\))/i);
+  if (fn) return fn[1];
+  const hex = trimmed.match(/^(#[0-9a-f]{3,8})\b/i);
+  if (hex) return hex[1];
+  const named = trimmed.match(/^(transparent|black|white)\b/i);
+  return named ? named[1] : null;
+}
+
+function isSparseRuleGradientLayer(layer: string): boolean {
+  const match = layer.match(/^(?:repeating-)?(?:linear|radial)-gradient\((.*)\)$/i);
+  if (!match) return false;
+  const stops = splitCssTopLevel(match[1])
+    .map((stop) => ({ stop, color: extractLeadingCssColor(stop) }))
+    .filter((entry) => entry.color !== null);
+  if (stops.length < 4) return false;
+  const hasTransparent = stops.some((entry) => parseCssRgba(entry.color || "")?.a === 0);
+  const hasVisible = stops.some((entry) => {
+    const color = parseCssRgba(entry.color || "");
+    return color !== null && color.a > 0.01;
+  });
+  if (!hasTransparent || !hasVisible) return false;
+
+  const visiblePositions = stops
+    .filter((entry) => {
+      const color = parseCssRgba(entry.color || "");
+      return color !== null && color.a > 0.01;
+    })
+    .flatMap((entry) => {
+      const rest = entry.stop.slice((entry.color || "").length).trim();
+      return rest.match(/(?:calc\([^)]+\)|-?\d+(?:\.\d+)?(?:px|%))/g) || [];
+    });
+  if (visiblePositions.length < 2) return false;
+
+  const pxPositions = visiblePositions
+    .filter((pos) => /^-?\d+(?:\.\d+)?px$/i.test(pos))
+    .map((pos) => parseFloat(pos));
+  if (pxPositions.length >= 2 && Math.max(...pxPositions) - Math.min(...pxPositions) <= 3) return true;
+
+  const percentPositions = visiblePositions
+    .filter((pos) => /^-?\d+(?:\.\d+)?%$/i.test(pos))
+    .map((pos) => parseFloat(pos));
+  if (percentPositions.length >= 2 && Math.max(...percentPositions) - Math.min(...percentPositions) <= 1) return true;
+
+  return visiblePositions.some((pos) => pos.startsWith("calc("));
+}
+
+function parseGradientFill(backgroundImage: string, opacityStr = "1"): PptxFillColor | null {
+  if (!backgroundImage || backgroundImage === "none" || !backgroundImage.toLowerCase().includes("gradient(")) return null;
+
+  const layers = splitCssTopLevel(backgroundImage).filter((layer) => !isSparseRuleGradientLayer(layer));
+  if (layers.length === 0) return null;
+  const colors: RgbaColor[] = [];
+  for (const layer of layers) {
+    const match = layer.match(/^(?:repeating-)?(?:linear|radial)-gradient\((.*)\)$/i);
+    if (!match) continue;
+    const stops = splitCssTopLevel(match[1]);
+    stops.forEach((stop) => {
+      const colorToken = extractLeadingCssColor(stop);
+      if (!colorToken) return;
+      const parsed = parseCssRgba(colorToken);
+      if (parsed) colors.push(parsed);
+    });
+  }
+  if (colors.length === 0) return null;
+
+  const baseOpacity = parseFloat(opacityStr);
+  const elementOpacity = Number.isFinite(baseOpacity) ? baseOpacity : 1;
+  const avgAlpha = colors.reduce((sum, color) => sum + color.a, 0) / colors.length;
+  const effectiveAlpha = avgAlpha * elementOpacity;
+  if (effectiveAlpha <= 0.015) return null;
+
+  const weightedAlpha = colors.reduce((sum, color) => sum + color.a, 0);
+  const weighted = weightedAlpha > 0
+    ? colors.reduce((acc, color) => {
+        acc.r += color.r * color.a;
+        acc.g += color.g * color.a;
+        acc.b += color.b * color.a;
+        return acc;
+      }, { r: 0, g: 0, b: 0 })
+    : colors.reduce((acc, color) => {
+        acc.r += color.r;
+        acc.g += color.g;
+        acc.b += color.b;
+        return acc;
+      }, { r: 0, g: 0, b: 0 });
+  const denominator = weightedAlpha > 0 ? weightedAlpha : colors.length;
+  return fillFromRgba({
+    r: weighted.r / denominator,
+    g: weighted.g / denominator,
+    b: weighted.b / denominator,
+    a: effectiveAlpha,
+  });
+}
+
+function parseBackgroundFill(style: CSSStyleDeclaration): PptxFillColor | null {
+  const gradientFill = parseGradientFill(style.backgroundImage, style.opacity);
+  if (gradientFill) return gradientFill;
+  return parseColor(style.backgroundColor, style.opacity);
 }
 
 /** Render individual border-line shapes for each non-uniform side. */
@@ -759,12 +956,14 @@ function renderBorderLines(
 function hasVisiblePseudo(el: HTMLElement, pseudo: "::before" | "::after"): boolean {
   try {
     const s = window.getComputedStyle(el, pseudo);
-    if (!s || s.content === "none" || s.content === '""' || s.content === "''") return false;
+    if (!s || s.content === "none" || s.content === "normal") return false;
+    const bg = parseBackgroundFill(s);
+    const border = parseColor(s.borderTopColor, s.opacity);
     const hasVisual =
-      cssColorToHex(s.backgroundColor) !== "" ||
+      bg !== null ||
       parseFloat(s.width) > 0 ||
       parseFloat(s.height) > 0 ||
-      parseFloat(s.borderTopWidth) > 0;
+      (parseFloat(s.borderTopWidth) > 0 && border !== null);
     return hasVisual;
   } catch {
     return false;
@@ -781,7 +980,7 @@ function renderPseudoElement(
   try {
     const s = window.getComputedStyle(el, pseudo);
     if (!s) return;
-    const bg = parseColor(s.backgroundColor, s.opacity);
+    const bg = parseBackgroundFill(s);
     const borderW = parseFloat(s.borderTopWidth) || 0;
     const borderColor = parseColor(s.borderTopColor, s.opacity);
     if (!bg && borderW === 0) return;
@@ -1269,7 +1468,6 @@ function processElement(node: Element, ctx: PptxContext, depth = 0): void {
       const opacity = parseFloat(style.opacity);
       const objectFit = style.objectFit;
       const imgOpts: Record<string, unknown> = {
-        path: source,
         x: pos.x,
         y: pos.y,
         w: pos.w,
@@ -1277,6 +1475,11 @@ function processElement(node: Element, ctx: PptxContext, depth = 0): void {
         rotate: rotation,
         transparency: !isNaN(opacity) && opacity < 1 ? Math.round((1 - opacity) * 100) : undefined,
       };
+      if (source.startsWith("data:image/")) {
+        imgOpts.data = source;
+      } else {
+        imgOpts.path = source;
+      }
       if (objectFit === "cover") {
         imgOpts.sizing = { type: "cover", w: pos.w, h: pos.h };
       } else if (objectFit === "contain") {
@@ -1343,8 +1546,9 @@ function processElement(node: Element, ctx: PptxContext, depth = 0): void {
   }
 
   // --- TEXT + SHAPE handling for block elements ---
+  const bgColor = parseBackgroundFill(style);
   const hasBgImage = style.backgroundImage && style.backgroundImage !== "none";
-  const hasBg = cssColorToHex(style.backgroundColor) !== "" || hasBgImage;
+  const hasBg = bgColor !== null || hasBgImage;
   const hasBorder = parseFloat(style.borderWidth) > 0 && cssColorToHex(style.borderColor) !== "";
   const textRuns = collectTextRuns(node, style);
   const hasText = textRuns.length > 0 && textRuns.some((r) => r.text.trim().length > 0);
@@ -1365,8 +1569,6 @@ function processElement(node: Element, ctx: PptxContext, depth = 0): void {
   const rectRadius = shapeType === "roundRect"
     ? getRectRadius(box.widthPx, box.heightPx, style.borderRadius)
     : undefined;
-
-  const bgColor = parseColor(style.backgroundColor, style.opacity);
 
   // Read individual border sides to handle asymmetric borders correctly.
   const borderTopW = parseFloat(style.borderTopWidth) || 0;
@@ -1551,7 +1753,7 @@ function processList(
   rotation: number | undefined,
 ): void {
   const isOrdered = listNode.tagName === "OL";
-  const listBg = parseColor(listStyle.backgroundColor, listStyle.opacity);
+  const listBg = parseBackgroundFill(listStyle);
   const listBorderW = parseFloat(listStyle.borderWidth) || 0;
   const listBorderColor = parseColor(listStyle.borderColor, listStyle.opacity);
 
@@ -1713,7 +1915,7 @@ function processTable(table: HTMLTableElement, ctx: PptxContext, pos: { x: numbe
       if (cellStyle.verticalAlign === "middle") valign = "middle";
       else if (cellStyle.verticalAlign === "bottom") valign = "bottom";
 
-      const cellBg = parseColor(cellStyle.backgroundColor, cellStyle.opacity);
+      const cellBg = parseBackgroundFill(cellStyle);
       const cellBorderW = parseFloat(cellStyle.borderWidth) || 0;
       const cellBorderColor = parseColor(cellStyle.borderColor, cellStyle.opacity);
 
@@ -1763,7 +1965,7 @@ function processTable(table: HTMLTableElement, ctx: PptxContext, pos: { x: numbe
   });
 
   const tableStyle = window.getComputedStyle(table);
-  const tableBg = parseColor(tableStyle.backgroundColor, tableStyle.opacity);
+  const tableBg = parseBackgroundFill(tableStyle);
 
   ctx.slide.addTable(tableData, {
     x: pos.x,
@@ -1836,12 +2038,13 @@ export async function buildPptxArtifact(deck: DeckState, options: ExportNameOpti
         }
       }
       const rootRect = rootEl.getBoundingClientRect();
+      const ctx: PptxContext = { slide, rootRect, pptx };
 
       // Emit the root element's own background / border / radius so it's preserved.
       // We do this directly (not via processElement) to avoid double-processing children.
       if (rootEl !== body) {
         const rootStyle = window.getComputedStyle(rootEl);
-        const rootBg = parseColor(rootStyle.backgroundColor, rootStyle.opacity);
+        const rootBg = parseBackgroundFill(rootStyle);
         const rootBorderTopW = parseFloat(rootStyle.borderTopWidth) || 0;
         const rootBorderRightW = parseFloat(rootStyle.borderRightWidth) || 0;
         const rootBorderBottomW = parseFloat(rootStyle.borderBottomWidth) || 0;
@@ -1872,10 +2075,18 @@ export async function buildPptxArtifact(deck: DeckState, options: ExportNameOpti
         }
       }
 
+      if (hasVisiblePseudo(rootEl as HTMLElement, "::before")) {
+        renderPseudoElement(rootEl as HTMLElement, "::before", ctx, rootRect);
+      }
+
       // Process children of the root element.
       Array.from(rootEl.children).forEach((child) => {
-        processElement(child, { slide, rootRect, pptx });
+        processElement(child, ctx);
       });
+
+      if (hasVisiblePseudo(rootEl as HTMLElement, "::after")) {
+        renderPseudoElement(rootEl as HTMLElement, "::after", ctx, rootRect);
+      }
     });
 
     if (slidesAdded === 0) {
