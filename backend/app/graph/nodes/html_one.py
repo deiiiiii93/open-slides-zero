@@ -15,7 +15,7 @@ from typing import Any
 from ...catalog import layouts as L
 from ...catalog.validator import validate_slide_html
 from ...llm import zenmux
-from ...llm.models import get_model, html_overlay_for_preset
+from ...llm.models import get_lane_model, html_overlay_for_preset
 from ...llm.stream import push_event, tagged_stream
 
 
@@ -262,7 +262,8 @@ def html_one_node(state: dict[str, Any]) -> dict[str, Any]:
     preset_id = brief.get("visual_style_preset_id")
     overlay = html_overlay_for_preset(preset_id)
     overlay_model = overlay.get("model")
-    model = overlay_model if isinstance(overlay_model, str) and overlay_model else get_model("html")
+    fallback_model = overlay_model if isinstance(overlay_model, str) and overlay_model else None
+    model = get_lane_model(brief, "html", "html", fallback_model=fallback_model)
     overlay_temperature = overlay.get("temperature")
     temperature = float(overlay_temperature) if isinstance(overlay_temperature, (int, float)) else 0.4
     push_event({

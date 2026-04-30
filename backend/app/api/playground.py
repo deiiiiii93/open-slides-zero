@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from ..llm.models import lane_model_options, normalize_lane_model_overrides
 from . import playground_store
 from .common import config_for, current_state, graph
 from .history import _clone_checkpoint_lineage
@@ -24,6 +25,7 @@ router = APIRouter()
 
 class CreateLaneBody(BaseModel):
     creator_prompt: str = ""
+    model_overrides: dict[str, str] | None = None
 
 
 def _lane_response(row: dict[str, Any]) -> dict[str, Any]:
@@ -69,6 +71,10 @@ def _prepare_lane(thread_id: str, body: CreateLaneBody) -> tuple[dict[str, Any],
     target_cfg = _find_outline_interrupt_checkpoint(thread_id)
     if target_cfg is None:
         raise HTTPException(status_code=409, detail="No outline checkpoint found for playground.")
+    try:
+        model_overrides = normalize_lane_model_overrides(body.model_overrides)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     lane_thread_id = uuid.uuid4().hex[:12]
     creator_prompt = body.creator_prompt.strip()
@@ -91,6 +97,7 @@ def _prepare_lane(thread_id: str, body: CreateLaneBody) -> tuple[dict[str, Any],
                 "parent_thread_id": thread_id,
                 "lane_id": lane["lane_id"],
                 "creator_prompt": creator_prompt,
+                "lane_model_overrides": model_overrides or None,
                 "current_stage": "style",
             },
             as_node="await_outline",
@@ -100,6 +107,11 @@ def _prepare_lane(thread_id: str, body: CreateLaneBody) -> tuple[dict[str, Any],
         raise
 
     return lane, lane_cfg
+
+
+@router.get("/playground/model-options")
+def get_playground_model_options() -> dict[str, Any]:
+    return lane_model_options()
 
 
 @router.get("/decks/{thread_id}/playground/lanes")

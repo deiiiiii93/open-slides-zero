@@ -11,6 +11,7 @@ from app.api import common, decks, hitl, playground
 from app.artifacts import store
 from app.graph import graph as graph_module
 from app.graph.nodes import html_one, layout, outline, style
+from app.llm.models import get_model
 from app.llm.zenmux import CompletionResult
 from app.main import app
 
@@ -49,9 +50,12 @@ def isolated_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "style_messages": [],
         "layout_messages": [],
         "html_messages": [],
+        "style_model": None,
+        "layout_model": None,
+        "html_models": [],
     }
 
-    def fake_chat_structured(_model, messages, schema, **_kwargs):
+    def fake_chat_structured(model, messages, schema, **_kwargs):
         if schema is outline._ProposedChoices:
             return schema(
                 recommended_scenario_id="sales_pitch",
@@ -77,6 +81,7 @@ def isolated_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                 ],
             )
         if schema is style._VisualStyle:
+            calls["style_model"] = model
             calls["style_messages"] = messages
             return schema(
                 tone="editorial",
@@ -100,6 +105,7 @@ def isolated_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                 rationale="Consistent with the story.",
             )
         if schema is layout._BulkSignals:
+            calls["layout_model"] = model
             calls["layout_messages"] = messages
             return schema(
                 slides=[
@@ -129,7 +135,8 @@ def isolated_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             )
         raise AssertionError(f"Unexpected schema: {schema}")
 
-    def fake_html(_model, messages, **_kwargs):
+    def fake_html(model, messages, **_kwargs):
+        calls["html_models"] = [*list(calls["html_models"]), model]
         calls["html_messages"] = messages
         prompt = messages[-2]["content"] if len(messages) > 1 else ""
         title_line = next((line for line in str(prompt).splitlines() if line.startswith("Title: ")), "Title: Slide")
@@ -196,6 +203,17 @@ def test_playground_mode_stops_base_deck_after_outline(isolated_graph):
     assert base["next"] == []
 
 
+def test_playground_model_options_endpoint(isolated_graph):
+    client = TestClient(app)
+
+    response = client.get("/playground/model-options")
+
+    assert response.status_code == 200
+    stages = response.json()["stages"]
+    assert set(stages) == {"style", "layout", "html"}
+    assert all(stages[stage]["options"] for stage in stages)
+
+
 def test_lane_creation_clones_outline_and_applies_creator_prompt(isolated_graph):
     calls = isolated_graph
     base = _create_playground_base()
@@ -226,6 +244,84 @@ def test_lane_creation_clones_outline_and_applies_creator_prompt(isolated_graph)
     assert ready["values"]["current_stage"] == "ready"
     assert ready["values"]["brief"]["creator_prompt"] == prompt
     assert _has_prompt(calls["html_messages"], prompt)
+
+
+def test_lane_creation_applies_model_overrides_per_stage(isolated_graph):
+    calls = isolated_graph
+    base = _create_playground_base()
+    client = TestClient(app)
+    overrides = {
+        "style": "google/gemini-3.1-pro-preview",
+        "layout": "openai/gpt-5.4",
+        "html": "openai/gpt-5.4-mini",
+    }
+
+    response = client.post(
+        f"/decks/{base['thread_id']}/playground/lanes/stream",
+        json={"creator_prompt": "Try alternate models.", "model_overrides": overrides},
+    )
+
+    assert response.status_code == 200
+    events = _parse_sse_events(response.text)
+    done = next(event for event in events if event["type"] == "done")
+    lane_state = done["state"]
+
+    assert lane_state["values"]["lane_model_overrides"] == overrides
+    assert calls["style_model"] == overrides["style"]
+
+    laid_out = hitl.resume_deck(lane_state["thread_id"], {"approved": True})
+    assert _interrupt_gate(laid_out) == "layout"
+    assert calls["layout_model"] == overrides["layout"]
+
+    ready = hitl.resume_deck(lane_state["thread_id"], {"approved": True, "overrides": {}})
+    assert ready["values"]["current_stage"] == "ready"
+    assert ready["values"]["brief"]["lane_model_overrides"] == overrides
+    assert set(calls["html_models"]) == {overrides["html"]}
+
+
+def test_lane_creation_without_model_overrides_uses_defaults(isolated_graph):
+    calls = isolated_graph
+    base = _create_playground_base()
+    client = TestClient(app)
+
+    response = client.post(
+        f"/decks/{base['thread_id']}/playground/lanes/stream",
+        json={"creator_prompt": "Use default models."},
+    )
+
+    assert response.status_code == 200
+    done = next(event for event in _parse_sse_events(response.text) if event["type"] == "done")
+    lane_state = done["state"]
+
+    assert lane_state["values"].get("lane_model_overrides") is None
+    assert calls["style_model"] == get_model("style.text")
+
+    laid_out = hitl.resume_deck(lane_state["thread_id"], {"approved": True})
+    assert _interrupt_gate(laid_out) == "layout"
+    assert calls["layout_model"] == get_model("layout")
+
+    ready = hitl.resume_deck(lane_state["thread_id"], {"approved": True, "overrides": {}})
+    assert ready["values"]["current_stage"] == "ready"
+    assert set(calls["html_models"]) == {get_model("html")}
+
+
+def test_lane_creation_rejects_invalid_model_overrides(isolated_graph):
+    base = _create_playground_base()
+    client = TestClient(app)
+
+    bad_stage = client.post(
+        f"/decks/{base['thread_id']}/playground/lanes/stream",
+        json={"model_overrides": {"outline": "openai/gpt-5.4"}},
+    )
+    bad_model = client.post(
+        f"/decks/{base['thread_id']}/playground/lanes/stream",
+        json={"model_overrides": {"style": "unknown/provider-model"}},
+    )
+
+    assert bad_stage.status_code == 400
+    assert "Unknown model override stage" in bad_stage.json()["detail"]
+    assert bad_model.status_code == 400
+    assert "Unknown lane model id" in bad_model.json()["detail"]
 
 
 def test_stale_lane_layout_gate_can_resume_from_synthetic_interrupt(isolated_graph):

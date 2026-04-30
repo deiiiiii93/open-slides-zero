@@ -7,6 +7,7 @@ Kept as a simple dict so callers can introspect and the HITL UI can show what's 
 from __future__ import annotations
 
 import os
+from typing import Any
 
 # Defaults chosen from the ZenMux model catalog:
 #   - high-stakes reasoning / HTML composition → anthropic/claude-sonnet-4.6
@@ -25,6 +26,31 @@ _DEFAULTS: dict[str, str] = {
     "image_gen":      "sapiens-ai/agnes-image-1.2",
 }
 
+LANE_MODEL_STAGES = ("style", "layout", "html")
+
+_CURATED_LANE_MODEL_OPTIONS: list[dict[str, str]] = [
+    {
+        "id": "anthropic/claude-sonnet-4.6",
+        "label": "Claude Sonnet 4.6",
+        "description": "Strong default for creative slide reasoning and HTML composition.",
+    },
+    {
+        "id": "google/gemini-3.1-pro-preview",
+        "label": "Gemini 3.1 Pro Preview",
+        "description": "Vision-capable option for lanes that need image-aware styling.",
+    },
+    {
+        "id": "openai/gpt-5.4",
+        "label": "GPT-5.4",
+        "description": "General high-capability option for style, layout, and HTML stages.",
+    },
+    {
+        "id": "openai/gpt-5.4-mini",
+        "label": "GPT-5.4 Mini",
+        "description": "Faster option for lighter lane experiments.",
+    },
+]
+
 
 def _env_key(node: str) -> str:
     return "OSZ_MODEL_" + node.upper().replace(".", "_")
@@ -41,6 +67,73 @@ def get_model(node: str) -> str:
 
 def all_models() -> dict[str, str]:
     return {node: get_model(node) for node in _DEFAULTS}
+
+
+def lane_model_options() -> dict[str, Any]:
+    """Return the curated model choices supported by Creator Playground lanes."""
+    options = [dict(option) for option in _CURATED_LANE_MODEL_OPTIONS]
+    return {
+        "stages": {
+            "style": {
+                "label": "Style",
+                "default_model": get_model("style.text"),
+                "options": options,
+            },
+            "layout": {
+                "label": "Layout",
+                "default_model": get_model("layout"),
+                "options": options,
+            },
+            "html": {
+                "label": "HTML",
+                "default_model": get_model("html"),
+                "options": options,
+            },
+        }
+    }
+
+
+def normalize_lane_model_overrides(overrides: Any) -> dict[str, str]:
+    if overrides is None:
+        return {}
+    if not isinstance(overrides, dict):
+        raise ValueError("model_overrides must be an object.")
+    valid_models = {option["id"] for option in _CURATED_LANE_MODEL_OPTIONS}
+    normalized: dict[str, str] = {}
+    for raw_stage, raw_model in overrides.items():
+        stage = str(raw_stage)
+        if stage not in LANE_MODEL_STAGES:
+            allowed = ", ".join(LANE_MODEL_STAGES)
+            raise ValueError(f"Unknown model override stage '{stage}'. Allowed stages: {allowed}.")
+        model = str(raw_model).strip()
+        if not model:
+            continue
+        if model not in valid_models:
+            raise ValueError(f"Unknown lane model id '{model}'.")
+        normalized[stage] = model
+    return normalized
+
+
+def get_lane_model(
+    state: dict[str, Any],
+    stage: str,
+    default_node: str,
+    *,
+    fallback_model: str | None = None,
+) -> str:
+    """Resolve a model for a lane-aware stage.
+
+    Precedence is lane override, caller-provided fallback, then global node
+    routing. HTML passes the visual-preset overlay as the fallback.
+    """
+    overrides = state.get("lane_model_overrides") or {}
+    if isinstance(overrides, dict):
+        override = overrides.get(stage)
+        if isinstance(override, str) and override.strip():
+            return override.strip()
+    if fallback_model:
+        return fallback_model
+    return get_model(default_node)
 
 
 # Known vision-capable model prefixes — used by vision_capable() as a fast path.

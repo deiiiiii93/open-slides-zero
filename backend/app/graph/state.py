@@ -127,6 +127,7 @@ class SlideState(TypedDict, total=False):
     creator_prompt: str | None              # lane-specific extra instructions
     parent_thread_id: str | None            # playground base deck for a lane thread
     lane_id: str | None                     # playground lane id within parent
+    lane_model_overrides: dict[str, str] | None  # per-lane style/layout/html model ids
 
     # ---- C / D: structure choice ----
     scenario_id: str

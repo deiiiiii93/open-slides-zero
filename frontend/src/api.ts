@@ -82,6 +82,27 @@ export type PlaygroundLane = {
   state: DeckState | null;
 };
 
+export type PlaygroundModelOption = {
+  id: string;
+  label: string;
+  description: string;
+};
+
+export type PlaygroundModelStageOptions = {
+  label: string;
+  default_model: string;
+  options: PlaygroundModelOption[];
+};
+
+export type PlaygroundModelOptions = {
+  stages: Record<"style" | "layout" | "html", PlaygroundModelStageOptions>;
+};
+
+export type CreatePlaygroundLaneBody = {
+  creator_prompt: string;
+  model_overrides?: Partial<Record<"style" | "layout" | "html", string>>;
+};
+
 export type Masterpiece = {
   id: string;
   prompt: string;
@@ -153,6 +174,9 @@ export const api = {
 
   listPlaygroundLanes: (id: string) =>
     http<{ max_lanes: number; lanes: PlaygroundLane[] }>("GET", `/decks/${id}/playground/lanes`),
+
+  listPlaygroundModelOptions: () =>
+    http<PlaygroundModelOptions>("GET", "/playground/model-options"),
 
   createPlaygroundLaneStreamUrl: (id: string) =>
     `${STREAM_BASE}/decks/${id}/playground/lanes/stream`,

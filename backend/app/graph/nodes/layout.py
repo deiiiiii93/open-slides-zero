@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from ...catalog import layouts as L
 from ...catalog.scorer import ScoreBreakdown, SlideSignal, pick_pattern
 from ...llm import zenmux
-from ...llm.models import get_model
+from ...llm.models import get_lane_model
 from ...llm.stream import push_event, tagged_stream
 
 
@@ -229,7 +229,7 @@ def layout_node(state: dict[str, Any]) -> dict[str, Any]:
                 "Treat these as direct user instructions for this lane."
             ),
         })
-    model = get_model("layout")
+    model = get_lane_model(state, "layout", "layout")
     push_event({"node": "layout", "state": "started", "model": model})
     with tagged_stream("layout"):
         enriched = zenmux.chat_structured(

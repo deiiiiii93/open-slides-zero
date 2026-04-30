@@ -11,7 +11,9 @@ import {
   api,
   STREAM_BASE,
   type CatalogResponse,
+  type CreatePlaygroundLaneBody,
   type DeckState,
+  type PlaygroundModelOptions,
   type PlaygroundLane,
 } from "./api";
 import {
@@ -52,6 +54,8 @@ const CANVAS: Record<string, [number, number]> = {
   "4:3": [960, 720],
   "21:9": [960, 411],
 };
+const MODEL_STAGE_ORDER = ["style", "layout", "html"] as const;
+type ModelStage = (typeof MODEL_STAGE_ORDER)[number];
 
 function firstInterrupt(state: DeckState | null): any {
   const i = state?.interrupts?.[0];
@@ -127,11 +131,30 @@ function expectedSlideOrder(state: DeckState | null): number[] {
     .sort((a, b) => a - b);
 }
 
+function selectedModelOverrides(
+  overrides: Partial<Record<ModelStage, string>>,
+): CreatePlaygroundLaneBody["model_overrides"] | undefined {
+  const entries = MODEL_STAGE_ORDER
+    .map((stage) => [stage, overrides[stage]?.trim()] as const)
+    .filter((entry): entry is readonly [ModelStage, string] => Boolean(entry[1]));
+  return entries.length ? Object.fromEntries(entries) : undefined;
+}
+
+function modelLabel(modelOptions: PlaygroundModelOptions | null, modelId: string): string {
+  for (const stage of MODEL_STAGE_ORDER) {
+    const found = modelOptions?.stages[stage]?.options.find((option) => option.id === modelId);
+    if (found) return found.label;
+  }
+  return modelId;
+}
+
 export function PlaygroundPanel({ deck, catalog }: Props) {
   const [lanes, setLanes] = useState<PlaygroundLane[]>([]);
   const [maxLanes, setMaxLanes] = useState(5);
   const [activeLaneId, setActiveLaneId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
+  const [modelOptions, setModelOptions] = useState<PlaygroundModelOptions | null>(null);
+  const [modelOverrides, setModelOverrides] = useState<Partial<Record<ModelStage, string>>>({});
   const [creatingLane, setCreatingLane] = useState(false);
   const [exporting, setExporting] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -153,6 +176,12 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
   useEffect(() => {
     void refreshLanes().catch((e) => setErr(String(e)));
   }, [refreshLanes]);
+
+  useEffect(() => {
+    void api.listPlaygroundModelOptions()
+      .then(setModelOptions)
+      .catch((e) => setErr(String(e)));
+  }, []);
 
   const activeLane = useMemo(
     () => lanes.find((lane) => lane.lane_id === activeLaneId) ?? lanes[0] ?? null,
@@ -443,10 +472,13 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
 
   async function createLane(creatorPrompt: string) {
     if (lanes.length >= maxLanes) return;
-    await consumeLaneStream(api.createPlaygroundLaneStreamUrl(deck.thread_id), {
+    const body: CreatePlaygroundLaneBody = {
       creator_prompt: creatorPrompt,
-    });
+      model_overrides: selectedModelOverrides(modelOverrides),
+    };
+    await consumeLaneStream(api.createPlaygroundLaneStreamUrl(deck.thread_id), body);
     setPrompt("");
+    setModelOverrides({});
   }
 
   async function resumeLane(lane: PlaygroundLane, payload: Record<string, unknown>) {
@@ -594,6 +626,51 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
                 placeholder="Extra instructions for a new lane"
                 style={{ width: "100%", boxSizing: "border-box", fontFamily: "inherit", padding: 8 }}
               />
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+                  gap: 8,
+                  marginTop: 8,
+                }}
+              >
+                {MODEL_STAGE_ORDER.map((stage) => {
+                  const stageOptions = modelOptions?.stages[stage];
+                  return (
+                    <label
+                      key={stage}
+                      style={{ display: "grid", gap: 4, color: "#475569", fontSize: 12 }}
+                    >
+                      <span>{stageOptions?.label ?? stage}</span>
+                      <select
+                        value={modelOverrides[stage] ?? ""}
+                        disabled={!stageOptions}
+                        onChange={(e) =>
+                          setModelOverrides((prev) => ({
+                            ...prev,
+                            [stage]: e.target.value || undefined,
+                          }))
+                        }
+                        style={{
+                          width: "100%",
+                          minHeight: 34,
+                          border: "1px solid #d1d5db",
+                          borderRadius: 6,
+                          padding: "6px 8px",
+                          background: "#fff",
+                        }}
+                      >
+                        <option value="">Default routing</option>
+                        {stageOptions?.options.map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  );
+                })}
+              </div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
                 <span style={{ color: "#64748b", fontSize: 12 }}>
                   Blank lanes are allowed as a baseline.
@@ -627,6 +704,7 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
               <LaneDetail
                 lane={activeLane}
                 catalog={catalog}
+                modelOptions={modelOptions}
                 currentSlide={currentSlide}
                 setCurrentSlide={setCurrentSlide}
                 busy={Boolean(liveByLane[activeLane.lane_id]?.isRunning)}
@@ -681,6 +759,7 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
 function LaneDetail({
   lane,
   catalog,
+  modelOptions,
   currentSlide,
   setCurrentSlide,
   busy,
@@ -693,6 +772,7 @@ function LaneDetail({
 }: {
   lane: PlaygroundLane;
   catalog: CatalogResponse | null;
+  modelOptions: PlaygroundModelOptions | null;
   currentSlide: number;
   setCurrentSlide: (idx: number) => void;
   busy: boolean;
@@ -716,6 +796,14 @@ function LaneDetail({
   const slideOrder = expectedSlideOrder(state);
   const hasSlides = slideOrder.length > 0;
   const canExport = hasExportableSlides(state);
+  const laneModelOverrides =
+    (state?.values?.lane_model_overrides as Partial<Record<ModelStage, string>> | null | undefined) ?? null;
+  const modelOverrideEntries = MODEL_STAGE_ORDER
+    .map((stage) => {
+      const modelId = laneModelOverrides?.[stage];
+      return modelId ? { stage, modelId } : null;
+    })
+    .filter((entry): entry is { stage: ModelStage; modelId: string } => Boolean(entry));
   const aspectRatio = (state?.values?.aspect_ratio as keyof typeof CANVAS | undefined) ?? "16:9";
   const [, baseH] = CANVAS[aspectRatio] ?? CANVAS["16:9"];
   const overlayHeight = (baseH * LANE_CANVAS_WIDTH) / (CANVAS[aspectRatio]?.[0] ?? CANVAS["16:9"][0]);
@@ -730,6 +818,25 @@ function LaneDetail({
           <div style={{ color: "#64748b", fontSize: 12, marginTop: 4 }}>
             stage: <code>{stage}</code>
           </div>
+          {modelOverrideEntries.length > 0 && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+              {modelOverrideEntries.map(({ stage, modelId }) => (
+                <span
+                  key={stage}
+                  style={{
+                    border: "1px solid #dbeafe",
+                    borderRadius: 6,
+                    background: "#eff6ff",
+                    color: "#1e3a8a",
+                    fontSize: 12,
+                    padding: "3px 6px",
+                  }}
+                >
+                  {modelOptions?.stages[stage]?.label ?? stage}: {modelLabel(modelOptions, modelId)}
+                </span>
+              ))}
+            </div>
+          )}
           {lane.creator_prompt && (
             <div style={{ color: "#374151", fontSize: 13, marginTop: 8, whiteSpace: "pre-wrap" }}>
               {lane.creator_prompt}
