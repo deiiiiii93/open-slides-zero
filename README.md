@@ -30,7 +30,7 @@ design-led decks from plain source material.
 Frontend (Vite + React, :5174)
     | fetch -> /api/* (proxied)
     v
-FastAPI (:8765) -> app/api/{decks,hitl,comments,history,playground}
+FastAPI (:8765) -> app/api/{decks,hitl,comments,history,images,playground}
     |
     v
 LangGraph StateGraph
@@ -39,6 +39,7 @@ LangGraph StateGraph
            -> style -> [review: style]
            -> layout -> [review: layout]
            -> consolidate -> Send(html_one, i) x N -> ready
+           -> [optional image insertion: plan/apply/generate]
            <-> edit_intent on comments
     |
     v
@@ -127,11 +128,35 @@ backend/.venv/bin/python -c "import os; os.environ['ZENMUX_API_KEY']='probe'; fr
 4. Review or revise the generated outline.
 5. Review visual style, then layout choices.
 6. Render the deck slide by slide.
-7. Draw a box on any slide and leave a comment to trigger targeted edits.
+7. Optionally insert images into placeholder slots: match uploaded/linked image
+   assets, apply mappings, or generate missing slot images.
+8. Draw a box on any slide and leave a comment to trigger targeted edits.
 
 Creator Playground can branch from a shared outline into multiple lane threads,
 each with its own creator prompt, style/layout/html checkpoints, cutoff status,
 and slide-by-slide arena comparison.
+
+Decks can be exported as a single HTML file, an HTML zip, or an editable PPTX.
+PPTX export walks each slide DOM in the browser. Remote HTTP(S) images are
+fetched through the backend `/images/proxy` endpoint so public image URLs can be
+embedded same-origin; if a remote image cannot be loaded, export keeps going and
+uses an "Image unavailable" placeholder in that image slot.
+
+Image insertion is an optional ready-time stage. During ingest, uploaded image
+files and image URLs become `image_assets`. During HTML rendering, empty visual
+slots remain explicit `data-image-placeholder="true"` elements. Once all slides
+are rendered, `post_html` sets `image_insertion_status` to `available` when
+there are assets or placeholders; the ready screen can then call:
+
+- `POST /decks/{thread_id}/images/plan` to match assets to slots.
+- `POST /decks/{thread_id}/images/apply` to replace selected placeholders with
+  `<img data-inserted-image="true">` tags.
+- `POST /decks/{thread_id}/images/generate` or `generate_batch` to create new
+  images for unmatched slots.
+
+The first applied image pass preserves the original placeholder HTML in
+`html_slides_base`, so image mappings can be changed without compounding edits
+against already-inserted `<img>` tags.
 
 ## Model Routing
 
@@ -153,7 +178,7 @@ reroutes to the configured vision fallback.
 backend/
   app/
     main.py                 FastAPI entrypoint
-    api/                    HTTP endpoints and SSE streaming
+    api/                    HTTP endpoints, SSE streaming, image insertion
     graph/                  LangGraph state, wiring, and nodes
     llm/                    ZenMux adapter, streaming, model routing, vision
     catalog/                Structure, scenario, layout, scorer, validator
@@ -184,6 +209,11 @@ frontend/
   Python scorer logic ranks them.
 - Anti-slop HTML rules are enforced both in the slide prompt and in the
   catalog validator.
+- Image insertion is a ready-time, API-driven stage. Preserve
+  `html_slides_base` when replacing placeholders so mappings can be changed
+  idempotently.
+- PPTX export must be best-effort around image loading. External image fetch
+  failures should not abort the whole deck export.
 
 ## License
 

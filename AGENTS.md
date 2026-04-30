@@ -48,7 +48,7 @@ ingest_node → propose_structures_node → [interrupt: structure]
            → outline_node → style_node → [interrupt: style]
            → layout_node → [interrupt: layout]
            → consolidate_node → Send("html_one", {slide_idx, brief}) × N
-           → post_html → ready
+           → post_html → ready ⇄ optional image insertion API
                 ⇄ (comment → edit_intent_node → apply_edits)
 ```
 - `consolidate_node` produces the `brief: dict[str, Any]` field in state. Every `html_one` Send reads `brief["slides"][i]`. If `brief` is empty or missing, fan-out emits 0 Sends and the graph silently ends with 0 slides rendered — this is a real failure mode.
@@ -74,6 +74,26 @@ Do **not** use `graph.update_state(cfg, values, as_node=X)` to "regenerate from 
 
 Comments on a slide are grouped by `slide_idx` and passed as the `feedback` block in the html_one prompt — the model sees the user's literal words, not a classified summary.
 
+### Image insertion stage is ready-time API state, not graph fan-out
+`post_html` does not interrupt for images. It sets `current_stage: "ready"` and
+`image_insertion_status` to `"available"` when `has_image_insertion_opportunity`
+finds image placeholders or assets; otherwise the status is `"unavailable"`.
+The ready screen then uses `app/api/images.py` endpoints:
+
+- `POST /decks/{thread_id}/images/plan` builds `image_insertion_plan` by matching
+  `image_assets` to extracted `data-image-placeholder` slots.
+- `POST /decks/{thread_id}/images/apply` replaces approved placeholders with
+  `<img data-inserted-image="true" data-image-asset-id="...">`.
+- `POST /decks/{thread_id}/images/generate` and `generate_batch` create new
+  assets for unmatched slots, then apply those generated assets.
+
+`app/graph/nodes/image_insert.py::apply_image_mappings` is intentionally
+idempotent: it reads from `html_slides_base` when present, writes updated
+`html_slides`, and stores the original placeholder HTML in `html_slides_base`.
+Do not apply mappings against already-mutated `html_slides` unless there is no
+base HTML yet, or repeated image changes will compound against inserted `<img>`
+tags. Generated files live under `./threads/{thread_id}/images/`.
+
 ### Edit intent is a **list**, collapsed earliest-stage-wins
 `edit_intent_node` returns a list of `EditOp`s (one comment may produce multiple ops). `collapse_edit_ops` in `app/graph/nodes/edit.py` picks the **earliest** stage across all ops and merges their `patch_fragment`s. Don't try to apply multiple ops at different stages as separate forks — you'll lose changes to divergent branches.
 
@@ -82,6 +102,21 @@ Stage ordering (earliest→latest): `outline → style → layout → html → i
 ### Layout decision engine
 `app/catalog/scorer.py::pick_pattern` is a pure function implementing catalog §6 weighted heuristics + §7 tie-breaks. The **LLM proposes 3–5 candidate patterns**, the scorer ranks families and picks. Never move scoring into an LLM prompt; the determinism is load-bearing for HITL explainability and for the golden tests in `tests/test_scorer.py`.
 
+### PPTX export and remote images
+`frontend/src/exporter.ts` exports editable PPTX by walking each slide iframe DOM
+and translating elements to `pptxgenjs` shapes. Browser-rendered `<img>` nodes
+may contain public remote URLs from user-provided image assets, GBIF/iNaturalist,
+or other source material. Do not pass those external URLs directly to
+`slide.addImage(...)`: `pptxgenjs` fetch failures abort the entire PPTX write.
+
+External HTTP(S) image sources should route through the same-origin
+`/images/proxy?url=...` backend endpoint in `app/api/images.py`. The proxy only
+allows public HTTP(S) destinations, follows a small redirect chain, enforces an
+image content type and size limit, and returns a lightweight placeholder image
+when the upstream fetch fails. Keep PPTX image insertion best-effort: a bad
+remote image should render an unavailable-image box for that slot, not fail the
+whole deck.
+
 ### Invariants — each of these has bitten us
 1. **Checkpointer is authoritative**. `./threads/{thread_id}/*.md` files are a derived mirror written after each commit; never read them back into state. If a file disappears, regenerate from checkpoint.
 2. **Every field a node writes must be declared in `SlideState`** (`app/graph/state.py`). Undeclared keys are silently dropped by LangGraph's state merger. The `brief` field was added precisely because a previous `_brief` (with a leading underscore "for privacy") disappeared this way.
@@ -89,6 +124,8 @@ Stage ordering (earliest→latest): `outline → style → layout → html → i
 4. **In LangGraph 1.x, `get_stream_writer()` raises `RuntimeError` outside a runnable context** — it does not return `None`. `_safe_writer()` in `stream.py` catches that.
 5. **Anti-slop HTML rules live in two places**: the system prompt in `app/graph/nodes/html_one.py::ANTI_SLOP_RULES`, and the post-generation check in `app/catalog/validator.py`. If you add a new "don't" rule (e.g. a newly overused font), update *both*.
 6. **Vision guard**: `app/llm/models.py::vision_capable()` + `VISION_FALLBACK`. When images are attached to a chat and the routed model doesn't declare image input, `zenmux.chat()` reroutes to the fallback and logs. Don't bypass — misrouted images produce cryptic upstream errors.
+7. **PPTX export is best-effort around images**. Remote image failures must not abort export; route public remote images through `/images/proxy` and keep the frontend fallback placeholder path intact.
+8. **Image insertion must stay idempotent**. Keep `html_slides_base` as the pre-insertion source of truth for remapping image slots; `html_slides` is the current rendered deck and may already contain inserted image tags.
 
 ## Adding a new subagent (common extension)
 
