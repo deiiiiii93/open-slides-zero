@@ -13,7 +13,7 @@ from typing import Any
 #   - high-stakes reasoning / HTML composition → anthropic/claude-sonnet-4.6
 #   - merge / classification / cheap tasks     → openai/gpt-5.4-mini
 #   - vision / OCR                             → google/gemini-3.1-pro-preview
-#   - image generation                         → sapiens-ai/agnes-image-1.2
+#   - image generation                         → openai/gpt-image-2
 _DEFAULTS: dict[str, str] = {
     "ingest.ocr":     "google/gemini-3.1-pro-preview",
     "outline":        "anthropic/claude-sonnet-4.6",
@@ -22,8 +22,9 @@ _DEFAULTS: dict[str, str] = {
     "layout":         "anthropic/claude-sonnet-4.6",
     "consolidate":    "openai/gpt-5.4-mini",
     "html":           "anthropic/claude-sonnet-4.6",
+    "image_plan":     "openai/gpt-5.4-mini",
     "edit.intent":    "openai/gpt-5.4-mini",
-    "image_gen":      "sapiens-ai/agnes-image-1.2",
+    "image_gen":      "openai/gpt-image-2",
 }
 
 LANE_MODEL_STAGES = ("style", "layout", "html")

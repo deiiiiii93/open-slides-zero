@@ -103,7 +103,7 @@ Stage = Literal[
     "await_outline", "playground",
     "style", "await_style",
     "layout", "await_layout",
-    "consolidate", "html", "ready", "editing",
+    "consolidate", "html", "await_image_insertion", "ready", "editing",
 ]
 
 
@@ -124,6 +124,7 @@ class SlideState(TypedDict, total=False):
     visual_style_preset_layout_bias: dict[str, Any] | None
     visual_style_preset_html_rules: list[str] | None
     style_reference_image_uri: str | None
+    image_urls: list[str]
     creator_prompt: str | None              # lane-specific extra instructions
     parent_thread_id: str | None            # playground base deck for a lane thread
     lane_id: str | None                     # playground lane id within parent
@@ -151,8 +152,15 @@ class SlideState(TypedDict, total=False):
 
     # ---- I — fan-out reducer merges per-slide results ----
     html_slides: Annotated[dict[int, str], _merge_html]
+    html_slides_base: Annotated[dict[int, str], _merge_html]
     html_failures: Annotated[list[dict[str, Any]], _merge_html_failures]
     pending_html_retry_slides: list[int]
+
+    # ---- optional image insertion ----
+    image_assets: list[dict[str, Any]]
+    image_insertion_plan: dict[str, Any]
+    image_insertion_status: str
+    image_generation_errors: list[dict[str, Any]]
 
     # ---- edits ----
     comments: Annotated[list[dict[str, Any]], operator.add]

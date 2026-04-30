@@ -27,6 +27,9 @@ import {
   type DeckListItem,
   type DeckState,
   type ForkFromReviewBody,
+  type ImageAsset,
+  type ImageInsertionPlan,
+  type ImageMapping,
   type Masterpiece,
   type Material,
   type ModelOptions,
@@ -73,6 +76,30 @@ function materialLabel(material: Material): string {
   if (material.name) return material.name;
   if (material.kind === "text") return "Pasted text";
   return material.uri;
+}
+
+function splitImageUrls(raw: string): string[] {
+  return raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function deckWithBaseSlides(deck: DeckState): DeckState {
+  const base = deck.values?.html_slides_base as Record<number, string> | undefined;
+  if (!base || Object.keys(base).length === 0) return deck;
+  return {
+    ...deck,
+    values: {
+      ...deck.values,
+      html_slides: base,
+    },
+  };
+}
+
+function hasOriginalSlides(deck: DeckState | null): boolean {
+  const base = deck?.values?.html_slides_base as Record<string, string> | undefined;
+  return Boolean(base && Object.keys(base).length > 0);
 }
 
 function selectedModelOverrides(
@@ -336,6 +363,7 @@ export function App() {
     density: string;
     styleHint: string;
     visualStylePresetId: string | null;
+    imageUrls: string[];
     modelOverrides: Partial<Record<ModelStage, string>>;
     files: File[];
   }) {
@@ -353,6 +381,9 @@ export function App() {
       }
       if (form.visualStylePresetId) {
         body.append("visual_style_preset_id", form.visualStylePresetId);
+      }
+      if (form.imageUrls.length > 0) {
+        body.append("image_urls", JSON.stringify(form.imageUrls));
       }
       if (modelOverrides) {
         body.append("model_overrides", JSON.stringify(modelOverrides));
@@ -374,6 +405,7 @@ export function App() {
       language: "en",
       visual_style_preference: form.styleHint || null,
       visual_style_preset_id: form.visualStylePresetId,
+      image_urls: form.imageUrls,
       model_overrides: modelOverrides,
       materials: mats,
     };
@@ -488,6 +520,13 @@ export function App() {
   const showLive = busy || Object.keys(buffersByTag).length > 0;
   const readyReviewEnabled = stage === "ready" && !hasInterrupt;
   const reviewStepIndex = REVIEW_STAGES.findIndex((step) => step.id === selectedReviewStage);
+  const imagePlan = deck.values?.image_insertion_plan as ImageInsertionPlan | undefined;
+  const imageAssets = (deck.values?.image_assets as ImageAsset[] | undefined) ?? [];
+  const imageInsertionStatus = deck.values?.image_insertion_status as string | undefined;
+  const showImageInsertion =
+    readyReviewEnabled &&
+    hasSlides &&
+    (imageInsertionStatus !== "unavailable" || Boolean(imagePlan) || imageAssets.length > 0);
 
   return (
     <div style={{ fontFamily: "Georgia, serif", padding: 16, maxWidth: 1520, margin: "0 auto" }}>
@@ -591,9 +630,23 @@ export function App() {
                 }}
               >
                 {[
-                  { key: "html", label: "HTML (single file)", fn: exportHtmlSingle },
-                  { key: "zip", label: "HTML (zip of slides)", fn: exportHtmlZip },
-                  { key: "pptx", label: "PPTX (editable)", fn: exportPptx },
+                  { key: "html", label: "Current HTML (single file)", fn: exportHtmlSingle },
+                  { key: "zip", label: "Current HTML (zip of slides)", fn: exportHtmlZip },
+                  { key: "pptx", label: "Current PPTX (editable)", fn: exportPptx },
+                  ...(hasOriginalSlides(deck)
+                    ? [
+                        {
+                          key: "html-original",
+                          label: "Original HTML before images",
+                          fn: (d: DeckState) => exportHtmlSingle(deckWithBaseSlides(d)),
+                        },
+                        {
+                          key: "pptx-original",
+                          label: "Original PPTX before images",
+                          fn: (d: DeckState) => exportPptx(deckWithBaseSlides(d)),
+                        },
+                      ]
+                    : []),
                 ].map((opt) => (
                   <button
                     key={opt.key}
@@ -899,6 +952,14 @@ export function App() {
                 </details>
               )}
 
+              {showImageInsertion && (
+                <ImageInsertionPanel
+                  deck={deck}
+                  onDeck={setDeck}
+                  onError={setErr}
+                />
+              )}
+
               {hasSlides && (
                 <DeckCanvas
                   slides={slides}
@@ -930,6 +991,271 @@ export function App() {
         )}
       </div>
     </div>
+  );
+}
+
+function assetLabel(asset: ImageAsset): string {
+  return asset.name || asset.uri || asset.asset_id;
+}
+
+function assetThumbnailSrc(deck: DeckState, asset: ImageAsset): string {
+  if (asset.uri.startsWith("http") || asset.uri.startsWith("data:image/")) return asset.uri;
+  return api.imageAssetContentUrl(deck.thread_id, asset.asset_id);
+}
+
+function defaultImagePrompt(slot: { slide_idx: number; hint: string }): string {
+  return (
+    `Create a polished presentation image for slide ${slot.slide_idx + 1}: ${slot.hint}. ` +
+    "Use a clean editorial composition, no visible text, no watermarks, " +
+    "and enough negative space to sit inside a slide image slot."
+  );
+}
+
+function ImageInsertionPanel({
+  deck,
+  onDeck,
+  onError,
+}: {
+  deck: DeckState;
+  onDeck: (deck: DeckState) => void;
+  onError: (message: string | null) => void;
+}) {
+  const plan = deck.values?.image_insertion_plan as ImageInsertionPlan | undefined;
+  const [panelBusy, setPanelBusy] = useState<string | null>(null);
+  const [generatingBySlot, setGeneratingBySlot] = useState<Record<string, string>>({});
+  const [selectedBySlot, setSelectedBySlot] = useState<Record<string, string>>({});
+  const [promptsBySlot, setPromptsBySlot] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!plan) return;
+    const mappings = plan.applied_mappings?.length ? plan.applied_mappings : plan.mappings;
+    setSelectedBySlot(
+      Object.fromEntries(mappings.map((mapping) => [mapping.slot_id, mapping.asset_id])),
+    );
+    setPromptsBySlot((prev) => ({
+      ...Object.fromEntries(plan.unmatched_slots.map((slot) => [slot.slot_id, slot.prompt])),
+      ...prev,
+    }));
+  }, [plan?.status, plan?.slots?.length, plan?.assets?.length]);
+
+  const assets = plan?.assets ?? ((deck.values?.image_assets as ImageAsset[] | undefined) ?? []);
+  const slots = plan?.slots ?? [];
+  const promptBySlot = Object.fromEntries(
+    (plan?.unmatched_slots ?? []).map((slot) => [slot.slot_id, slot.prompt]),
+  );
+  const promptForSlot = (slot: { slot_id: string; slide_idx: number; hint: string }) =>
+    promptsBySlot[slot.slot_id] ?? promptBySlot[slot.slot_id] ?? defaultImagePrompt(slot);
+  const noUserImageSlots = slots.filter((slot) => !selectedBySlot[slot.slot_id]);
+  const generationActive = Object.keys(generatingBySlot).length > 0;
+
+  async function refreshPlan() {
+    setPanelBusy("Planning");
+    onError(null);
+    try {
+      const result = await api.planImages(deck.thread_id);
+      onDeck(result.state);
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setPanelBusy(null);
+    }
+  }
+
+  async function applyMappings() {
+    const mappings: ImageMapping[] = Object.entries(selectedBySlot)
+      .filter(([, assetId]) => Boolean(assetId))
+      .map(([slot_id, asset_id]) => ({ slot_id, asset_id }));
+    setPanelBusy("Applying");
+    onError(null);
+    try {
+      const result = await api.applyImages(deck.thread_id, mappings);
+      onDeck(result.state);
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setPanelBusy(null);
+    }
+  }
+
+  async function generateForSlot(slot: { slot_id: string; slide_idx: number; hint: string }) {
+    const prompt = promptForSlot(slot).trim();
+    if (!prompt) return;
+    setGeneratingBySlot((prev) => ({ ...prev, [slot.slot_id]: "Generating image..." }));
+    onError(null);
+    try {
+      const result = await api.generateImage(deck.thread_id, slot.slide_idx, slot.slot_id, prompt);
+      onDeck(result.state);
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setGeneratingBySlot((prev) => {
+        const next = { ...prev };
+        delete next[slot.slot_id];
+        return next;
+      });
+    }
+  }
+
+  async function generateAllNoUserImages() {
+    const items = noUserImageSlots
+      .map((slot) => ({
+        slide_idx: slot.slide_idx,
+        slot_id: slot.slot_id,
+        prompt: promptForSlot(slot).trim(),
+      }))
+      .filter((item) => item.prompt);
+    if (items.length === 0) return;
+    setGeneratingBySlot(
+      Object.fromEntries(items.map((item) => [item.slot_id, "Generating in batch..."])),
+    );
+    onError(null);
+    try {
+      const result = await api.generateImages(deck.thread_id, items);
+      onDeck(result.state);
+      if (result.errors.length > 0) {
+        onError(`${result.errors.length} image generation request(s) failed.`);
+      }
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setGeneratingBySlot({});
+    }
+  }
+
+  return (
+    <section
+      style={{
+        padding: 12,
+        marginBottom: 12,
+        border: "1px solid #dbe4ef",
+        borderRadius: 8,
+        background: "#f8fafc",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+        <div>
+          <h3 style={{ margin: "0 0 4px", fontSize: 16 }}>Insert images</h3>
+          <div style={{ fontSize: 13, color: "#475569" }}>
+            Keep exporting the placeholder deck, or review matches and apply real images.
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button type="button" disabled={Boolean(panelBusy) || generationActive} onClick={refreshPlan}>
+            {plan ? "Refresh matches" : "Review matches"}
+          </button>
+          {plan && (
+            <button type="button" disabled={Boolean(panelBusy) || generationActive} onClick={applyMappings}>
+              Apply selected images
+            </button>
+          )}
+          {plan && noUserImageSlots.length > 0 && (
+            <button type="button" disabled={Boolean(panelBusy) || generationActive} onClick={generateAllNoUserImages}>
+              Generate all no-user images
+            </button>
+          )}
+        </div>
+      </div>
+
+      {panelBusy && <div style={{ marginTop: 8, fontSize: 12, color: "#2563eb" }}>{panelBusy}...</div>}
+
+      {plan && (
+        <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
+          {slots.map((slot) => {
+            const selectedAsset = assets.find((asset) => asset.asset_id === selectedBySlot[slot.slot_id]);
+            const prompt = promptForSlot(slot);
+            const generatingHint = generatingBySlot[slot.slot_id];
+            return (
+              <div
+                key={slot.slot_id}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "minmax(160px, 1fr) minmax(220px, 1.2fr)",
+                  gap: 10,
+                  padding: 10,
+                  border: "1px solid #e2e8f0",
+                  borderRadius: 6,
+                  background: "#fff",
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 12, color: "#64748b" }}>Slide {slot.slide_idx + 1}</div>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>{slot.hint}</div>
+                </div>
+                <div style={{ display: "grid", gap: 8 }}>
+                  <select
+                    value={selectedBySlot[slot.slot_id] ?? ""}
+                    onChange={(e) =>
+                      setSelectedBySlot((prev) => ({
+                        ...prev,
+                        [slot.slot_id]: e.target.value,
+                      }))
+                    }
+                    style={{ fontFamily: "inherit", fontSize: 13, padding: "6px 8px" }}
+                  >
+                    <option value="">No user image</option>
+                    {assets.map((asset) => (
+                      <option key={asset.asset_id} value={asset.asset_id}>
+                        {assetLabel(asset)}
+                      </option>
+                    ))}
+                  </select>
+                  {selectedAsset && (
+                    <img
+                      src={assetThumbnailSrc(deck, selectedAsset)}
+                      alt=""
+                      style={{
+                        width: 96,
+                        height: 54,
+                        objectFit: "cover",
+                        border: "1px solid #e2e8f0",
+                        borderRadius: 4,
+                      }}
+                    />
+                  )}
+                  {!selectedAsset && (
+                    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 8, alignItems: "start" }}>
+                      <textarea
+                        value={prompt}
+                        onChange={(e) =>
+                          setPromptsBySlot((prev) => ({
+                            ...prev,
+                            [slot.slot_id]: e.target.value,
+                          }))
+                        }
+                        rows={3}
+                        style={{ width: "100%", boxSizing: "border-box", fontFamily: "inherit", fontSize: 13 }}
+                      />
+                      <button
+                        type="button"
+                        disabled={Boolean(panelBusy) || Boolean(generatingHint)}
+                        onClick={() => generateForSlot(slot)}
+                      >
+                        Generate
+                      </button>
+                      {generatingHint && (
+                        <div
+                          style={{
+                            gridColumn: "1 / -1",
+                            padding: "6px 8px",
+                            border: "1px solid #bfdbfe",
+                            borderRadius: 4,
+                            background: "#eff6ff",
+                            color: "#1d4ed8",
+                            fontSize: 12,
+                          }}
+                        >
+                          {generatingHint}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -1080,6 +1406,7 @@ function CreateForm({
     density: string;
     styleHint: string;
     visualStylePresetId: string | null;
+    imageUrls: string[];
     modelOverrides: Partial<Record<ModelStage, string>>;
     files: File[];
   }) => void;
@@ -1096,6 +1423,7 @@ function CreateForm({
   const [aspect, setAspect] = useState("16:9");
   const [density, setDensity] = useState("balanced");
   const [styleHint, setStyleHint] = useState("");
+  const [imageUrlText, setImageUrlText] = useState("");
   const [visualPresetId, setVisualPresetId] = useState("");
   const [modelOverrides, setModelOverrides] = useState<Partial<Record<ModelStage, string>>>({});
   const [files, setFiles] = useState<File[]>([]);
@@ -1105,6 +1433,7 @@ function CreateForm({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const visualPresets = catalog?.visual_style_presets ?? [];
   const selectedPreset = visualPresets.find((preset) => preset.id === visualPresetId);
+  const imageUrls = splitImageUrls(imageUrlText);
   const filteredRecentDecks = useMemo(() => {
     const decks = recentDecks ?? [];
     const q = recentSearch.trim().toLowerCase();
@@ -1309,6 +1638,16 @@ function CreateForm({
           <p style={{ color: "#555", fontSize: 13, margin: 0 }}>
             Supported: TXT, Markdown, PDF, PPTX, JPG, PNG, DOCX, XLSX.
           </p>
+          <label style={labelStyle}>
+            Image URLs for insertion
+            <textarea
+              value={imageUrlText}
+              onChange={(e) => setImageUrlText(e.target.value)}
+              rows={3}
+              placeholder="One image URL per line"
+              style={{ ...controlStyle, resize: "vertical" }}
+            />
+          </label>
           {fileError && (
             <div
               style={{
@@ -1410,7 +1749,7 @@ function CreateForm({
 
       <div style={{ display: "flex", justifyContent: "flex-start", marginTop: 16 }}>
         <button
-          disabled={busy || (!text.trim() && files.length === 0)}
+          disabled={busy || (!text.trim() && files.length === 0 && imageUrls.length === 0)}
           onClick={() =>
             onSubmit({
               deckName,
@@ -1420,6 +1759,7 @@ function CreateForm({
               density,
               styleHint,
               visualStylePresetId: visualPresetId || null,
+              imageUrls,
               modelOverrides,
               files,
             })

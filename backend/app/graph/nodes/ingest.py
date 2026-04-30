@@ -19,6 +19,7 @@ from typing import Any
 
 from ...llm import glm_ocr, zenmux
 from ...llm.models import get_model
+from .image_insert import build_image_assets
 
 log = logging.getLogger(__name__)
 
@@ -404,5 +405,6 @@ def ingest_node(state: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "materials": out,
+        "image_assets": build_image_assets(out, state.get("thread_id")),
         "current_stage": "outline",
     }

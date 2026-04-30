@@ -26,6 +26,47 @@ export type Material = {
   note?: string;
 };
 
+export type ImageAsset = {
+  asset_id: string;
+  uri: string;
+  name?: string | null;
+  source?: "user" | "generated" | string;
+  media_type?: string;
+  summary?: string;
+  prompt?: string;
+};
+
+export type ImageSlot = {
+  slot_id: string;
+  slide_idx: number;
+  slot_index: number;
+  hint: string;
+};
+
+export type ImageMapping = {
+  slot_id: string;
+  asset_id: string;
+  confidence?: number;
+  rationale?: string;
+};
+
+export type UnmatchedImageSlot = {
+  slot_id: string;
+  slide_idx: number;
+  hint: string;
+  prompt: string;
+  reason?: string;
+};
+
+export type ImageInsertionPlan = {
+  status: string;
+  slots: ImageSlot[];
+  assets: ImageAsset[];
+  mappings: ImageMapping[];
+  applied_mappings?: ImageMapping[];
+  unmatched_slots: UnmatchedImageSlot[];
+};
+
 export type DeckState = {
   thread_id: string;
   checkpoint_id?: string;
@@ -61,6 +102,7 @@ export type CreateDeckBody = {
   visual_style_preference?: string | null;
   visual_style_preset_id?: string | null;
   style_reference_image_uri?: string | null;
+  image_urls?: string[];
   model_overrides?: Partial<Record<ModelStage, string>>;
   materials: Material[];
 };
@@ -167,6 +209,33 @@ export const api = {
 
   forkFromReview: (id: string, body: ForkFromReviewBody) =>
     http<DeckState>("POST", `/decks/${id}/fork_from_review`, body),
+
+  planImages: (id: string) =>
+    http<{ ok: boolean; plan: ImageInsertionPlan; state: DeckState }>("POST", `/decks/${id}/images/plan`, {}),
+
+  applyImages: (id: string, mappings: ImageMapping[]) =>
+    http<{ ok: boolean; applied_mappings: ImageMapping[]; state: DeckState }>(
+      "POST",
+      `/decks/${id}/images/apply`,
+      { mappings },
+    ),
+
+  generateImage: (id: string, slide_idx: number, slot_id: string, prompt: string) =>
+    http<{ ok: boolean; asset: ImageAsset; state: DeckState }>(
+      "POST",
+      `/decks/${id}/images/generate`,
+      { slide_idx, slot_id, prompt },
+    ),
+
+  generateImages: (id: string, items: Array<{ slide_idx: number; slot_id: string; prompt: string }>) =>
+    http<{ ok: boolean; assets: ImageAsset[]; errors: Array<Record<string, any>>; state: DeckState }>(
+      "POST",
+      `/decks/${id}/images/generate_batch`,
+      { items },
+    ),
+
+  imageAssetContentUrl: (id: string, assetId: string) =>
+    `${API_BASE}/decks/${id}/images/assets/${encodeURIComponent(assetId)}/content`,
 
   history: (id: string) =>
     http<{ thread_id: string; history: Array<{ checkpoint_id: string; stage: string; created_at: string }> }>(

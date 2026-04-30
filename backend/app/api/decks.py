@@ -14,6 +14,7 @@ import sqlite3
 import uuid
 from pathlib import Path
 from typing import Any, Sequence
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
@@ -62,6 +63,7 @@ class CreateDeckBody(BaseModel):
     visual_style_preference: str | None = None
     visual_style_preset_id: str | None = None
     style_reference_image_uri: str | None = None
+    image_urls: list[str] = Field(default_factory=list)
     model_overrides: dict[str, str] | None = None
     materials: list[Material] = Field(default_factory=list)
 
@@ -83,6 +85,24 @@ def _material_name(material: Material | dict[str, Any]) -> str | None:
 
 def _coerce_text_material(text: str) -> Material:
     return Material(kind="text", uri=f"text:{text}")
+
+
+def _coerce_image_url_material(url: str) -> Material:
+    parsed = urlparse(url)
+    name = Path(parsed.path).name or parsed.netloc or "image-url"
+    return Material(kind="image", uri=url, name=name, note="User-provided image URL.")
+
+
+def _normalize_image_urls(image_urls: Sequence[str] | None) -> list[Material]:
+    materials: list[Material] = []
+    for raw in image_urls or []:
+        url = str(raw).strip()
+        if not url:
+            continue
+        if not url.startswith(("http://", "https://", "data:image/")):
+            raise ValueError(f"Image URL must be http(s) or data:image URI: {url}")
+        materials.append(_coerce_image_url_material(url))
+    return materials
 
 
 def _derive_deck_name_from_materials(
@@ -118,20 +138,23 @@ def _build_initial_state(
     visual_style_preset_id: str | None,
     style_reference_image_uri: str | None,
     model_overrides: dict[str, str] | None = None,
+    image_urls: Sequence[str] | None = None,
 ) -> dict[str, Any]:
-    if not materials:
+    all_materials = [*materials, *_normalize_image_urls(image_urls)]
+    if not all_materials:
         raise ValueError("Provide at least one file or paste text.")
     normalized_model_overrides = normalize_lane_model_overrides(model_overrides)
     initial = {
         "thread_id": thread_id,
-        "deck_name": _derive_deck_name_from_materials(deck_name, materials),
-        "materials": [_serialize_material(material) for material in materials],
+        "deck_name": _derive_deck_name_from_materials(deck_name, all_materials),
+        "materials": [_serialize_material(material) for material in all_materials],
         "expected_pages": expected_pages,
         "aspect_ratio": aspect_ratio,
         "density_preference": density_preference,
         "language": language,
         "visual_style_preference": visual_style_preference,
         "style_reference_image_uri": style_reference_image_uri,
+        "image_urls": list(image_urls or []),
         "lane_model_overrides": normalized_model_overrides or None,
         "current_stage": "ingest",
     }
@@ -285,6 +308,7 @@ def create_deck(body: CreateDeckBody) -> dict[str, Any]:
             visual_style_preset_id=body.visual_style_preset_id,
             style_reference_image_uri=body.style_reference_image_uri,
             model_overrides=body.model_overrides,
+            image_urls=body.image_urls,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

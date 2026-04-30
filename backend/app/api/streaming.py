@@ -149,6 +149,20 @@ def _parse_model_overrides(raw: str | None) -> dict[str, str] | None:
     return {str(k): str(v) for k, v in value.items()}
 
 
+def _parse_image_urls(raw: str | None) -> list[str]:
+    if raw is None or not raw.strip():
+        return []
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return [line.strip() for line in raw.splitlines() if line.strip()]
+    if isinstance(value, str):
+        return [line.strip() for line in value.splitlines() if line.strip()]
+    if not isinstance(value, list):
+        raise HTTPException(status_code=400, detail="image_urls must be a JSON list or newline list.")
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -171,6 +185,7 @@ def stream_create_deck(body: CreateDeckBody) -> StreamingResponse:
             visual_style_preset_id=body.visual_style_preset_id,
             style_reference_image_uri=body.style_reference_image_uri,
             model_overrides=body.model_overrides,
+            image_urls=body.image_urls,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -192,6 +207,7 @@ async def stream_create_deck_uploads(
     language: str = Form(default="en"),
     visual_style_preference: str | None = Form(default=None),
     visual_style_preset_id: str | None = Form(default=None),
+    image_urls: str | None = Form(default=None),
     model_overrides: str | None = Form(default=None),
     files: list[UploadFile] = File(...),
 ) -> StreamingResponse:
@@ -214,6 +230,7 @@ async def stream_create_deck_uploads(
             visual_style_preset_id=visual_style_preset_id,
             style_reference_image_uri=None,
             model_overrides=_parse_model_overrides(model_overrides),
+            image_urls=_parse_image_urls(image_urls),
         )
     except HTTPException:
         delete_thread(thread_id)

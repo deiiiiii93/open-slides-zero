@@ -34,15 +34,25 @@ router = APIRouter()
 _DOWNSTREAM_FIELDS: dict[str, list[str]] = {
     "outline":      ["outline_md", "outline_slides", "visual_style_md", "visual_style",
                      "layouts", "consolidated_brief_md", "brief", "html_slides",
-                     "html_failures", "pending_html_retry_slides"],
+                     "html_slides_base", "html_failures", "pending_html_retry_slides",
+                     "image_insertion_plan", "image_insertion_status",
+                     "image_generation_errors"],
     "style":        ["visual_style_md", "visual_style",
                      "layouts", "consolidated_brief_md", "brief", "html_slides",
-                     "html_failures", "pending_html_retry_slides"],
+                     "html_slides_base", "html_failures", "pending_html_retry_slides",
+                     "image_insertion_plan", "image_insertion_status",
+                     "image_generation_errors"],
     "layout":       ["layouts", "consolidated_brief_md", "brief", "html_slides",
-                     "html_failures", "pending_html_retry_slides"],
+                     "html_slides_base", "html_failures", "pending_html_retry_slides",
+                     "image_insertion_plan", "image_insertion_status",
+                     "image_generation_errors"],
     "consolidate":  ["consolidated_brief_md", "brief", "html_slides",
-                     "html_failures", "pending_html_retry_slides"],
-    "html":         ["html_slides", "html_failures", "pending_html_retry_slides"],
+                     "html_slides_base", "html_failures", "pending_html_retry_slides",
+                     "image_insertion_plan", "image_insertion_status",
+                     "image_generation_errors"],
+    "html":         ["html_slides", "html_slides_base", "html_failures",
+                     "pending_html_retry_slides", "image_insertion_plan",
+                     "image_insertion_status", "image_generation_errors"],
     "image_only":   [],  # no state invalidation; only prompt-hint change
 }
 
@@ -50,11 +60,13 @@ _DOWNSTREAM_FIELDS: dict[str, list[str]] = {
 def _empty_for(field: str) -> Any:
     if field.endswith("_md"):
         return ""
-    if field == "html_slides":
+    if field in ("html_slides", "html_slides_base"):
+        return {}
+    if field == "image_insertion_plan":
         return {}
     if field == "brief":
         return {}
-    if field == "html_failures" or field == "pending_html_retry_slides":
+    if field in ("html_failures", "pending_html_retry_slides", "image_generation_errors"):
         return []
     if field.endswith("_slides") or field == "layouts":
         return []

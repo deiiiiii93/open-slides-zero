@@ -37,6 +37,7 @@ from .layout_overrides import apply_layout_overrides
 from .nodes.consolidate import consolidate_node
 from .nodes.edit import edit_intent_node
 from .nodes.html_one import html_one_node
+from .nodes.image_insert import has_image_insertion_opportunity
 from .nodes.ingest import ingest_node
 from .nodes.layout import layout_node
 from .nodes.outline import outline_node, propose_structures_node
@@ -178,10 +179,14 @@ def post_html(state: SlideState) -> dict[str, Any]:
             }
 
     if len(rendered_slide_ids) == len(expected_slide_ids) and not failures:
+        image_status = (
+            "available" if has_image_insertion_opportunity(state) else "unavailable"
+        )
         return {
             "current_stage": "ready",
             "html_failures": [],
             "pending_html_retry_slides": [],
+            "image_insertion_status": image_status,
         }
 
     failed_slides = [failures[idx] for idx in sorted(failures)]
