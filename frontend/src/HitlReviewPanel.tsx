@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CatalogResponse, DeckState } from "./api";
 import { LayoutWireframe } from "./LayoutWireframe";
+import { layoutPatternInfo } from "./layoutPatternMetadata";
 import { Markdown } from "./Markdown";
 
 type StructureSubmit = { scenario_id: string; structure_id: string };
@@ -344,6 +345,177 @@ export function StyleStage({
   );
 }
 
+type LayoutPatternEntry = CatalogResponse["patterns"][string];
+
+const COMPACT_PATTERN_LIMIT = 6;
+
+function layoutZones(layout: Record<string, any>): string[] {
+  const zones = layout.zones;
+  return Array.isArray(zones) ? zones.map((zone) => String(zone)) : [];
+}
+
+function patternEntryFor(
+  patternId: string,
+  patterns: Record<string, LayoutPatternEntry>,
+  layout: Record<string, any>,
+): LayoutPatternEntry {
+  return (
+    patterns[patternId] ?? {
+      family: String(layout.family ?? "adaptive"),
+      kind: "content",
+      zones: layoutZones(layout),
+    }
+  );
+}
+
+function preferredKindsForLayout(
+  layout: Record<string, any>,
+  currentPattern: LayoutPatternEntry,
+): string[] {
+  const role = String(layout.story_role ?? "").toLowerCase();
+  const shape = String(layout.content_shape ?? "").toLowerCase();
+  const currentKind = String(currentPattern.kind ?? "content");
+  const sequentialHints = ["timeline", "step", "sequence", "flow", "roadmap", "journey"];
+
+  if (role === "cover" || currentKind === "cover") return ["cover"];
+  if (role === "closing" || role === "close" || currentKind === "closing") return ["closing"];
+  if (
+    currentKind === "timeline" ||
+    sequentialHints.some((hint) => role.includes(hint) || shape.includes(hint))
+  ) {
+    return ["timeline", "content"];
+  }
+  return ["content"];
+}
+
+function familyRanksForLayout(layout: Record<string, any>): Map<string, number> {
+  const ranks = new Map<string, number>();
+  const currentFamily = String(layout.family ?? "");
+  if (currentFamily) ranks.set(currentFamily, 0);
+  const ranking = (layout.ranking_top3 as Array<{ family?: string }> | undefined) ?? [];
+  ranking.forEach((entry, index) => {
+    const family = entry.family;
+    if (family && !ranks.has(family)) ranks.set(family, index + 1);
+  });
+  return ranks;
+}
+
+function uniquePatternIds(patternIds: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const patternId of patternIds) {
+    if (!patternId || seen.has(patternId)) continue;
+    out.push(patternId);
+    seen.add(patternId);
+  }
+  return out;
+}
+
+function sortedPatternIdsForLayout(
+  patternIds: string[],
+  patterns: Record<string, LayoutPatternEntry>,
+  layout: Record<string, any>,
+  currentPatternId: string,
+  selectedPatternId: string,
+): { compatible: string[]; incompatible: string[]; preferredKinds: string[] } {
+  const currentPattern = patternEntryFor(currentPatternId, patterns, layout);
+  const preferredKinds = preferredKindsForLayout(layout, currentPattern);
+  const familyRanks = familyRanksForLayout(layout);
+  const originalIndex = new Map(patternIds.map((patternId, index) => [patternId, index]));
+
+  const score = (patternId: string) => {
+    if (patternId === currentPatternId) return -1000;
+    if (patternId === selectedPatternId) return -900;
+    const pattern = patternEntryFor(patternId, patterns, layout);
+    const kindRank = preferredKinds.includes(pattern.kind) ? preferredKinds.indexOf(pattern.kind) : 20;
+    const familyRank = familyRanks.get(pattern.family) ?? 99;
+    return familyRank * 100 + kindRank * 10 + (originalIndex.get(patternId) ?? 999);
+  };
+
+  const compatible = patternIds
+    .filter((patternId) => preferredKinds.includes(patternEntryFor(patternId, patterns, layout).kind))
+    .sort((a, b) => score(a) - score(b));
+  const incompatible = patternIds
+    .filter((patternId) => !preferredKinds.includes(patternEntryFor(patternId, patterns, layout).kind))
+    .sort((a, b) => score(a) - score(b));
+
+  return { compatible, incompatible, preferredKinds };
+}
+
+function LayoutPatternCard({
+  patternId,
+  pattern,
+  selected,
+  current,
+  onSelect,
+}: {
+  patternId: string;
+  pattern: LayoutPatternEntry;
+  selected: boolean;
+  current: boolean;
+  onSelect: () => void;
+}) {
+  const info = layoutPatternInfo(patternId);
+
+  return (
+    <button
+      type="button"
+      aria-pressed={selected}
+      title={`${info.label}: ${info.bestFor}`}
+      onClick={onSelect}
+      style={{
+        minWidth: 0,
+        height: "100%",
+        border: current ? "1px solid #93c5fd" : "1px solid #d8dee8",
+        outline: selected ? "2px solid #2563eb" : "2px solid transparent",
+        outlineOffset: -2,
+        borderRadius: 6,
+        background: selected ? "#eff6ff" : "white",
+        padding: 8,
+        display: "grid",
+        gap: 7,
+        textAlign: "left",
+        cursor: "pointer",
+        boxShadow: selected ? "0 8px 18px rgba(37, 99, 235, 0.12)" : "0 1px 2px rgba(15, 23, 42, 0.04)",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "start" }}>
+        <div style={{ fontSize: 12, fontWeight: 700, lineHeight: 1.2 }}>{info.label}</div>
+        <span
+          style={{
+            flexShrink: 0,
+            border: "1px solid #cbd5e1",
+            borderRadius: 999,
+            padding: "1px 6px",
+            fontSize: 10,
+            color: current ? "#1d4ed8" : "#475569",
+            background: current ? "#dbeafe" : "#f8fafc",
+            lineHeight: 1.4,
+          }}
+        >
+          {current ? "AI" : pattern.kind}
+        </span>
+      </div>
+      <div style={{ display: "flex", justifyContent: "center", overflow: "hidden" }}>
+        <LayoutWireframe
+          pattern={patternId}
+          family={pattern.family}
+          zones={pattern.zones}
+          width={132}
+          aspectRatio="16:9"
+        />
+      </div>
+      <div style={{ fontSize: 11, color: "#334155", lineHeight: 1.35 }}>{info.bestFor}</div>
+      {info.caution && (
+        <div style={{ fontSize: 10, color: "#9a3412", lineHeight: 1.3 }}>{info.caution}</div>
+      )}
+      <code style={{ fontSize: 10, color: "#64748b", whiteSpace: "normal", wordBreak: "break-word" }}>
+        {patternId}
+      </code>
+    </button>
+  );
+}
+
 export function LayoutStage({
   catalog,
   layouts,
@@ -354,9 +526,11 @@ export function LayoutStage({
   selectedVisualStylePresetId = null,
 }: LayoutStageProps) {
   const [overrides, setOverrides] = useState<Record<number, string>>({});
+  const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>({});
   const [visualPresetId, setVisualPresetId] = useState(selectedVisualStylePresetId ?? "");
   const rows = layouts ?? [];
-  const patternIds = Object.keys(catalog?.patterns ?? {});
+  const patterns = catalog?.patterns ?? {};
+  const patternIds = useMemo(() => Object.keys(patterns), [patterns]);
   const visualPresets = catalog?.visual_style_presets ?? [];
   const selectedPreset = visualPresets.find((preset) => preset.id === visualPresetId);
   const hasOverrides = Object.values(overrides).some(Boolean);
@@ -392,68 +566,153 @@ export function LayoutStage({
           </div>
         </div>
       )}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
-        {rows.map((l) => (
-          <div
-            key={String(l.slide_idx)}
-            style={{
-              border: "1px solid #e5e5e5",
-              padding: 12,
-              borderRadius: 6,
-              display: "grid",
-              gridTemplateColumns: "320px 1fr",
-              gap: 12,
-              alignItems: "start",
-            }}
-          >
-            <LayoutWireframe
-              pattern={String(l.pattern)}
-              family={String(l.family)}
-              zones={(l.zones as string[]) ?? []}
-              width={320}
-              aspectRatio="16:9"
-            />
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 600, lineHeight: 1.3 }}>
-                {Number(l.slide_idx) + 1}. {String(l.title)}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 720px), 1fr))",
+          gap: 12,
+        }}
+      >
+        {rows.map((l) => {
+          const slideIdx = Number(l.slide_idx);
+          const currentPatternId = String(l.pattern);
+          const selectedPatternId = overrides[slideIdx] || currentPatternId;
+          const rowPatternIds = uniquePatternIds([currentPatternId, selectedPatternId, ...patternIds]);
+          const { compatible, incompatible, preferredKinds } = sortedPatternIdsForLayout(
+            rowPatternIds,
+            patterns,
+            l,
+            currentPatternId,
+            selectedPatternId,
+          );
+          const expanded = Boolean(expandedRows[slideIdx]);
+          const expandedPatternIds = uniquePatternIds([
+            currentPatternId,
+            selectedPatternId,
+            ...compatible,
+            ...incompatible,
+          ]);
+          const compactPatternIds = uniquePatternIds([
+            currentPatternId,
+            selectedPatternId,
+            ...compatible,
+          ]).slice(0, COMPACT_PATTERN_LIMIT);
+          const displayPatternIds = expanded ? expandedPatternIds : compactPatternIds;
+          const hiddenCount = Math.max(0, expandedPatternIds.length - compactPatternIds.length);
+          const currentPattern = patternEntryFor(currentPatternId, patterns, l);
+
+          return (
+            <div
+              key={String(l.slide_idx)}
+              style={{
+                border: "1px solid #e5e5e5",
+                padding: 12,
+                borderRadius: 6,
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))",
+                gap: 14,
+                alignItems: "start",
+                background: "#fff",
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <LayoutWireframe
+                  pattern={currentPatternId}
+                  family={currentPattern.family}
+                  zones={currentPattern.zones}
+                  width={280}
+                  aspectRatio="16:9"
+                />
+                <div style={{ fontWeight: 600, lineHeight: 1.3, marginTop: 10 }}>
+                  {slideIdx + 1}. {String(l.title)}
+                </div>
+                <div style={{ fontSize: 12, color: "#555", marginTop: 4 }}>
+                  AI selected <code>{currentPatternId}</code>
+                  <span style={{ color: "#999" }}> · {String(currentPattern.family)}</span>
+                </div>
+                {overrides[slideIdx] && (
+                  <div style={{ fontSize: 12, color: "#1d4ed8", marginTop: 6 }}>
+                    Override selected: <code>{overrides[slideIdx]}</code>
+                  </div>
+                )}
+                <details style={{ marginTop: 8 }}>
+                  <summary style={{ fontSize: 12, cursor: "pointer" }}>scores</summary>
+                  <ul style={{ fontSize: 11, margin: "4px 0 0 0", paddingLeft: 16 }}>
+                    {((l.ranking_top3 as Array<{ family: string; score: number }>) ?? []).map((r, i) => (
+                      <li key={i}>
+                        <code>{r.family}</code>: {Number(r.score).toFixed(2)}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
               </div>
-              <div style={{ fontSize: 12, color: "#555", marginTop: 4 }}>
-                <code>{String(l.pattern)}</code>
-                <span style={{ color: "#999" }}> · {String(l.family)}</span>
-              </div>
-              <details style={{ marginTop: 6 }}>
-                <summary style={{ fontSize: 12, cursor: "pointer" }}>scores</summary>
-                <ul style={{ fontSize: 11, margin: "4px 0 0 0", paddingLeft: 16 }}>
-                  {((l.ranking_top3 as Array<{ family: string; score: number }>) ?? []).map((r, i) => (
-                    <li key={i}>
-                      <code>{r.family}</code>: {Number(r.score).toFixed(2)}
-                    </li>
-                  ))}
-                </ul>
-              </details>
-              <label style={{ display: "block", marginTop: 8, fontSize: 12 }}>
-                Override:{" "}
-                <select
-                  value={overrides[Number(l.slide_idx)] ?? ""}
-                  onChange={(e) =>
-                    setOverrides((prev) => ({
-                      ...prev,
-                      [Number(l.slide_idx)]: e.target.value,
-                    }))
-                  }
-                  style={{ maxWidth: "100%" }}
+              <div style={{ minWidth: 0 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "baseline",
+                    justifyContent: "space-between",
+                    gap: 10,
+                    marginBottom: 8,
+                  }}
                 >
-                  <option value="">(keep)</option>
-                  {patternIds.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700 }}>Choose layout</div>
+                    <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
+                      Showing {preferredKinds.join(" / ")} layouts first. Pick the AI card to keep the original.
+                    </div>
+                  </div>
+                  {hiddenCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedRows((prev) => ({
+                          ...prev,
+                          [slideIdx]: !expanded,
+                        }))
+                      }
+                      style={{ flexShrink: 0, fontSize: 11 }}
+                    >
+                      {expanded ? "Show fewer" : `Show all (${expandedPatternIds.length})`}
+                    </button>
+                  )}
+                </div>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+                    gap: 8,
+                    alignItems: "stretch",
+                  }}
+                >
+                  {displayPatternIds.map((patternId) => {
+                    const pattern = patternEntryFor(patternId, patterns, l);
+                    return (
+                      <LayoutPatternCard
+                        key={patternId}
+                        patternId={patternId}
+                        pattern={pattern}
+                        selected={patternId === selectedPatternId}
+                        current={patternId === currentPatternId}
+                        onSelect={() =>
+                          setOverrides((prev) => {
+                            const next = { ...prev };
+                            if (patternId === currentPatternId) {
+                              delete next[slideIdx];
+                            } else {
+                              next[slideIdx] = patternId;
+                            }
+                            return next;
+                          })
+                        }
+                      />
+                    );
+                  })}
+                </div>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       <div style={{ marginTop: 12 }}>
         <button
