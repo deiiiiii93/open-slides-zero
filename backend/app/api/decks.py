@@ -13,7 +13,7 @@ import os
 import sqlite3
 import uuid
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Literal, Sequence
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
@@ -59,6 +59,7 @@ class CreateDeckBody(BaseModel):
     expected_pages: int = 10
     aspect_ratio: str = "16:9"
     density_preference: str = "balanced"
+    agent_mode: Literal["default", "advanced"] = "default"
     language: str = "en"
     visual_style_preference: str | None = None
     visual_style_preset_id: str | None = None
@@ -139,10 +140,13 @@ def _build_initial_state(
     style_reference_image_uri: str | None,
     model_overrides: dict[str, str] | None = None,
     image_urls: Sequence[str] | None = None,
+    agent_mode: str = "default",
 ) -> dict[str, Any]:
     all_materials = [*materials, *_normalize_image_urls(image_urls)]
     if not all_materials:
         raise ValueError("Provide at least one file or paste text.")
+    if agent_mode not in {"default", "advanced"}:
+        raise ValueError("agent_mode must be 'default' or 'advanced'.")
     normalized_model_overrides = normalize_lane_model_overrides(model_overrides)
     initial = {
         "thread_id": thread_id,
@@ -151,6 +155,7 @@ def _build_initial_state(
         "expected_pages": expected_pages,
         "aspect_ratio": aspect_ratio,
         "density_preference": density_preference,
+        "agent_mode": agent_mode,
         "language": language,
         "visual_style_preference": visual_style_preference,
         "style_reference_image_uri": style_reference_image_uri,
@@ -309,6 +314,7 @@ def create_deck(body: CreateDeckBody) -> dict[str, Any]:
             style_reference_image_uri=body.style_reference_image_uri,
             model_overrides=body.model_overrides,
             image_urls=body.image_urls,
+            agent_mode=body.agent_mode,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

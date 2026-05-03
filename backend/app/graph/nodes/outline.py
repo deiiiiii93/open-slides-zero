@@ -23,11 +23,28 @@ class _ProposedChoices(BaseModel):
     rationale: str
 
 
+def _digest_blob(state: dict[str, Any]) -> str:
+    """Build the materials view consumed by structure / outline.
+
+    Reads from the budgeted `materials_digest` produced by digest_materials_node.
+    Falls back to raw `materials` only if digest is missing (e.g., legacy
+    threads created before the digest node existed).
+    """
+    digest = state.get("materials_digest") or []
+    if digest:
+        return "\n\n---\n\n".join(
+            f"## {d.get('name') or d.get('kind') or 'material'}\n{d['retained_text']}"
+            for d in digest
+            if d.get("retained_text")
+        )
+    return "\n\n---\n\n".join(
+        (m.get("parsed") or "") for m in state.get("materials", [])
+    )
+
+
 def propose_structures_node(state: dict[str, Any]) -> dict[str, Any]:
     """Suggest scenario + shortlist of structures for the user to pick from."""
-    materials_blob = "\n\n---\n\n".join(
-        (m.get("parsed") or "") for m in state.get("materials", [])
-    )[:12000]
+    materials_blob = _digest_blob(state)
 
     scenario_catalog = "\n".join(
         f"- {s['id']}: {s['name_en']} ({s['name_zh']}) — structures={s['structures']}"
@@ -82,7 +99,15 @@ class _OutlineSlide(BaseModel):
     image_slots: list[str] = Field(
         default_factory=list,
         max_length=6,
-        description="Concise image placeholder prompt hints, especially for Gallery decks.",
+        description=(
+            "Concise image-placeholder prompt hints. ONLY populate when the chosen "
+            "structure is Gallery, or when the source materials explicitly include "
+            "images that must be displayed. For all other structures (hero_journey, "
+            "scqa, problem_solution, mece, comparison, timeline, narrative, etc.) "
+            "leave this list empty. Populating it forces the slide into image-grid "
+            "layout downstream, so do not use it as a generic 'this might benefit "
+            "from a visual' hint."
+        ),
     )
     speaker_notes: str = ""
 
@@ -105,12 +130,9 @@ def outline_node(state: dict[str, Any]) -> dict[str, Any]:
         # Allowed but warn via a speaker note; we don't block the user.
         pass
 
-    materials_blob = "\n\n---\n\n".join(
-        (m.get("parsed") or "") for m in state.get("materials", [])
-    )[:16000]
-    gallery_guidance = ""
+    materials_blob = _digest_blob(state)
     if structure_id == "gallery":
-        gallery_guidance = (
+        image_slot_guidance = (
             "\nGallery-specific requirements:\n"
             "- Build an image-led album/gallery outline, not a text-heavy report.\n"
             "- For every non-closing slide, populate image_slots with 1-4 concise "
@@ -118,6 +140,16 @@ def outline_node(state: dict[str, Any]) -> dict[str, Any]:
             "- Keep captions, scene context, dates, places, tags, and source notes in bullets.\n"
             "- Keep image-slot instructions out of bullets; put them only in image_slots.\n"
             "- Do not write placeholder copy such as 'Add image here' in bullets or titles.\n"
+        )
+    else:
+        image_slot_guidance = (
+            "\nimage_slots rule for this non-Gallery structure:\n"
+            "- Leave image_slots EMPTY for every slide. Do not invent image hints.\n"
+            "- Layouts here are text/data driven; populating image_slots forces the "
+            "slide into an image-grid layout, which is wrong for this structure.\n"
+            "- Exception: if the source material itself contains images that the "
+            "user clearly wants displayed verbatim, you may add a single concise "
+            "image_slot referencing them.\n"
         )
 
     messages = [
@@ -132,7 +164,7 @@ def outline_node(state: dict[str, Any]) -> dict[str, Any]:
                 f"Focus: {structure['focus_en']}\n"
                 f"Evidence: {structure['evidence_en']}\n"
                 f"Slide mix: {structure['slide_mix_en']}\n\n"
-                f"{gallery_guidance}"
+                f"{image_slot_guidance}"
                 "Keep bullets short and information-dense. Detect language from the material."
             ),
         },

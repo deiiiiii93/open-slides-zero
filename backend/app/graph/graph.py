@@ -34,7 +34,9 @@ from langgraph.types import Send, interrupt
 
 from ..catalog.visual_presets import normalize_visual_style_preset_id, visual_style_preset_state
 from .layout_overrides import apply_layout_overrides
+from .nodes.advanced_chat import commit_advanced_chat_draft, init_advanced_chat_node
 from .nodes.consolidate import consolidate_node
+from .nodes.digest import digest_materials_node
 from .nodes.edit import edit_intent_node
 from .nodes.html_one import html_one_node
 from .nodes.image_insert import has_image_insertion_opportunity
@@ -68,6 +70,23 @@ def await_structure(state: SlideState) -> dict[str, Any]:
         "structure_id": resume["structure_id"],
         "current_stage": "outline",
     }
+
+
+def await_advanced_chat(state: SlideState) -> dict[str, Any]:
+    resume = interrupt({
+        "gate": "advanced_chat",
+        "messages": state.get("advanced_chat_messages", []),
+        "draft": state.get("advanced_chat_draft", {}),
+        "hint": (
+            "Use /advanced_chat/stream to update the draft. Return "
+            "{approved: true, draft: {...}} to continue to layout."
+        ),
+    })
+    if not resume.get("approved"):
+        raise ValueError("Advanced chat must be approved before continuing to layout.")
+    return commit_advanced_chat_draft(
+        resume.get("draft") or state.get("advanced_chat_draft") or {}
+    )
 
 
 def await_style_review(state: SlideState) -> dict[str, Any]:
@@ -222,6 +241,9 @@ def build_graph(checkpointer: SqliteSaver | None = None):
     g: StateGraph[SlideState, SlideState, SlideState] = StateGraph(SlideState)
 
     g.add_node("ingest", ingest_node)
+    g.add_node("digest_materials", digest_materials_node)
+    g.add_node("advanced_chat", init_advanced_chat_node)
+    g.add_node("await_advanced_chat", await_advanced_chat)
     g.add_node("propose_structure", propose_structures_node)
     g.add_node("await_structure", await_structure)
     g.add_node("outline", outline_node)
@@ -237,7 +259,18 @@ def build_graph(checkpointer: SqliteSaver | None = None):
     g.add_node("edit_intent", edit_intent_node)
 
     g.add_edge(START, "ingest")
-    g.add_edge("ingest", "propose_structure")
+    g.add_edge("ingest", "digest_materials")
+
+    def after_digest(state: SlideState) -> str:
+        return "advanced_chat" if state.get("agent_mode") == "advanced" else "propose_structure"
+
+    g.add_conditional_edges(
+        "digest_materials",
+        after_digest,
+        {"advanced_chat": "advanced_chat", "propose_structure": "propose_structure"},
+    )
+    g.add_edge("advanced_chat", "await_advanced_chat")
+    g.add_edge("await_advanced_chat", "layout")
     g.add_edge("propose_structure", "await_structure")
     g.add_edge("await_structure", "outline")
     g.add_edge("outline", "await_outline")

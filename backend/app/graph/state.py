@@ -100,6 +100,7 @@ def _merge_html_failures(
 
 Stage = Literal[
     "ingest", "outline", "await_structure",
+    "advanced_chat",
     "await_outline", "playground",
     "style", "await_style",
     "layout", "await_layout",
@@ -111,6 +112,7 @@ class SlideState(TypedDict, total=False):
     # ---- inputs ----
     deck_name: str
     materials: list[dict[str, Any]]         # serialized Material list
+    agent_mode: Literal["default", "advanced"]   # "advanced" enables RAG digest + index
     expected_pages: int
     language: str                           # primary language code (e.g. "zh", "en")
     languages: list[str]                    # all detected languages
@@ -129,6 +131,14 @@ class SlideState(TypedDict, total=False):
     parent_thread_id: str | None            # playground base deck for a lane thread
     lane_id: str | None                     # playground lane id within parent
     lane_model_overrides: dict[str, str] | None  # per-run style/layout/html model ids
+
+    # ---- B': condensed materials (digest) ----
+    materials_digest: list[dict[str, Any]]  # per-material {name, kind, retained_text, ...}
+    materials_index: dict[str, Any] | None  # RAG manifest (advanced mode); None otherwise
+
+    # ---- C' / F': advanced chat planning ----
+    advanced_chat_messages: list[dict[str, Any]]
+    advanced_chat_draft: dict[str, Any]
 
     # ---- C / D: structure choice ----
     scenario_id: str

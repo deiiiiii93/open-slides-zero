@@ -20,7 +20,7 @@ if _env_path.exists():
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api import comments, decks, exports, history, hitl, images, playground, streaming
+from .api import advanced_chat, comments, decks, exports, history, hitl, images, playground, streaming
 
 logging.basicConfig(level=os.getenv("OSZ_LOG_LEVEL", "INFO"))
 
@@ -36,6 +36,7 @@ app.add_middleware(
 )
 
 app.include_router(decks.router, tags=["decks"])
+app.include_router(advanced_chat.router, tags=["advanced_chat"])
 app.include_router(hitl.router, tags=["hitl"])
 app.include_router(comments.router, tags=["comments"])
 app.include_router(images.router, tags=["images"])

@@ -24,6 +24,7 @@ from ..artifacts import store
 from ..catalog.visual_presets import normalize_visual_style_preset_id, visual_style_preset_state
 from ..graph import graph as graph_module
 from ..graph.layout_overrides import apply_layout_overrides
+from ..graph.nodes.style import style_node
 from .common import config_for, current_state, graph, mirror_to_disk
 
 router = APIRouter()
@@ -270,6 +271,26 @@ def _fork_from_review(
         "deck_name": fork_name,
     }
 
+    def fork_from_ready_via_style(style_patch: dict[str, Any]) -> dict[str, Any]:
+        """Advanced mode skips the graph's style node during initial creation.
+
+        Ready-time style forks still need the normal style review gate, so fork
+        from the current ready checkpoint, run the style node once, then pause
+        at await_style.
+        """
+        clear = _downstream_clear_patch("style")
+        update_seed = {**clear, **patch, **style_patch, "current_stage": "style"}
+        new_target_cfg = _clone_checkpoint_lineage(thread_id, snap.config, new_thread_id)
+        style_update = style_node({**snap.values, **update_seed})
+        new_cfg = g.update_state(  # type: ignore[arg-type]
+            new_target_cfg,
+            {**update_seed, **style_update},
+            as_node="style",
+        )
+        g.invoke(None, new_cfg)  # type: ignore[arg-type]
+        mirror_to_disk(new_thread_id)
+        return current_state(new_thread_id, source_thread_id=thread_id)
+
     if review_stage == "structure":
         if not scenario_id or not structure_id:
             raise HTTPException(status_code=400, detail="scenario_id and structure_id are required.")
@@ -292,6 +313,8 @@ def _fork_from_review(
         if preset_changed:
             source_target_cfg = _find_prestage_checkpoint(g, cfg, "style")
             if source_target_cfg is None:
+                if snap.values.get("agent_mode") == "advanced":
+                    return fork_from_ready_via_style(preset_update)
                 raise HTTPException(
                     status_code=409,
                     detail="No prior checkpoint found with node 'style' pending.",
@@ -326,6 +349,8 @@ def _fork_from_review(
 
     source_target_cfg = _find_prestage_checkpoint(g, cfg, target_stage)
     if source_target_cfg is None:
+        if review_stage == "style" and snap.values.get("agent_mode") == "advanced":
+            return fork_from_ready_via_style({"visual_style_preference": feedback.strip()})
         raise HTTPException(
             status_code=409,
             detail=f"No prior checkpoint found with node '{_STAGE_TO_NODE.get(target_stage)}' pending.",

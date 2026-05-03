@@ -76,6 +76,29 @@ export type DeckState = {
   interrupts: any[];
 };
 
+export type AdvancedChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+  choices?: AdvancedChatChoice[];
+};
+
+export type AdvancedChatChoice = {
+  label: string;
+  description?: string;
+  message: string;
+};
+
+export type AdvancedChatDraft = {
+  scenario_id?: string;
+  structure_id?: string;
+  language?: string;
+  summary?: string;
+  outline_md?: string;
+  outline_slides?: Array<Record<string, any>>;
+  visual_style_md?: string;
+  visual_style?: Record<string, any>;
+};
+
 export type CatalogResponse = {
   scenarios: Array<{ id: string; name_en: string; name_zh: string; structures: string[] }>;
   structures: Array<{ id: string; name_en: string; name_zh: string; description_en: string }>;
@@ -93,11 +116,14 @@ export type CatalogResponse = {
 
 // --- Endpoints ---
 
+export type AgentMode = "default" | "advanced";
+
 export type CreateDeckBody = {
   deck_name?: string | null;
   expected_pages: number;
   aspect_ratio?: string;
   density_preference?: string;
+  agent_mode?: AgentMode;
   language?: string;
   visual_style_preference?: string | null;
   visual_style_preset_id?: string | null;
@@ -203,6 +229,9 @@ export const api = {
 
   commentStreamUrl: (id: string, slideIdx: number) =>
     `${STREAM_BASE}/decks/${id}/slides/${slideIdx}/comments/stream`,
+
+  advancedChatStreamUrl: (id: string) =>
+    `${STREAM_BASE}/decks/${id}/advanced_chat/stream`,
 
   regenerate: (id: string, from_stage: string, patch?: Record<string, any>, affected_slides?: number[]) =>
     http<DeckState>("POST", `/decks/${id}/regenerate`, { from_stage, patch, affected_slides }),

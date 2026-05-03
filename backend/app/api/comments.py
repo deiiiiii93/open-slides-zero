@@ -31,6 +31,7 @@ from pydantic import BaseModel
 from ..artifacts import store
 from ..graph.nodes.edit import collapse_edit_ops, edit_intent_node
 from ..graph.nodes.html_one import html_one_node
+from ..graph.nodes.image_insert import apply_image_mappings
 from ..llm.stream import tagged_stream, writer_override
 from .common import config_for, current_state, graph, mirror_to_disk
 from .history import _regenerate_from
@@ -59,6 +60,11 @@ def _persist_comment(thread_id: str, slide_idx: int, body: CommentIn) -> dict[st
     snap = graph().get_state(config_for(thread_id))  # type: ignore[arg-type]
     if not snap or not snap.values:
         raise HTTPException(status_code=404, detail="Unknown deck")
+    if snap.values.get("current_stage") != "ready" or snap.interrupts:
+        raise HTTPException(
+            status_code=409,
+            detail="Comments can only be applied after the deck is ready.",
+        )
     now = datetime.now(timezone.utc).isoformat()
     comment = {
         "slide_idx": slide_idx,
@@ -67,7 +73,11 @@ def _persist_comment(thread_id: str, slide_idx: int, body: CommentIn) -> dict[st
         "resolved": False,
         "created_at": now,
     }
-    graph().update_state(config_for(thread_id), {"comments": [comment]})  # type: ignore[arg-type]
+    graph().update_state(  # type: ignore[arg-type]
+        config_for(thread_id),
+        {"comments": [comment], "current_stage": "ready"},
+        as_node="post_html",
+    )
     store.append_comment(thread_id, comment)
     return comment
 
@@ -116,7 +126,34 @@ def _regenerate_html_only(
             errors.append(e)
 
     if updates:
-        g.update_state(cfg, {"html_slides": updates})  # type: ignore[arg-type]
+        update: dict[str, Any] = {
+            "html_slides": updates,
+            "current_stage": "ready",
+            "html_failures": [],
+            "pending_html_retry_slides": [],
+        }
+        plan = snap.values.get("image_insertion_plan") or {}
+        applied_mappings = plan.get("applied_mappings") or []
+        if snap.values.get("image_insertion_status") == "applied" and applied_mappings:
+            base_html = {
+                int(k): v
+                for k, v in (
+                    snap.values.get("html_slides_base")
+                    or snap.values.get("html_slides")
+                    or {}
+                ).items()
+            }
+            base_html.update(updates)
+            image_update = apply_image_mappings(
+                {**snap.values, "html_slides_base": base_html},
+                applied_mappings,
+            )
+            update.update(image_update)
+        g.update_state(  # type: ignore[arg-type]
+            cfg,
+            update,
+            as_node="post_html",
+        )
     mirror_to_disk(thread_id)
     return {
         "ok": True,
@@ -132,6 +169,11 @@ def _run_apply_edits(thread_id: str) -> dict[str, Any]:
     snap = graph().get_state(config_for(thread_id))  # type: ignore[arg-type]
     if not snap or not snap.values:
         raise HTTPException(status_code=404, detail="Unknown deck")
+    if snap.values.get("current_stage") != "ready" or snap.interrupts:
+        raise HTTPException(
+            status_code=409,
+            detail="Edits can only be applied after the deck is ready.",
+        )
     open_comments = [
         c for c in snap.values.get("comments", []) if not c.get("resolved")
     ]
@@ -150,15 +192,31 @@ def _run_apply_edits(thread_id: str) -> dict[str, Any]:
         idx = int(c.get("slide_idx", 0))
         comments_by_slide.setdefault(idx, []).append(c.get("text", ""))
 
-    if earliest in ("html", "image_only") and affected:
+    comment_slide_ids = sorted({
+        int(c.get("slide_idx", 0)) for c in open_comments
+    })
+    if not affected:
+        affected = comment_slide_ids
+
+    if (
+        snap.values.get("agent_mode") == "advanced"
+        and earliest not in ("html", "image_only")
+        and affected
+    ):
         regen_result = _regenerate_html_only(thread_id, affected, comments_by_slide)
+        coerced_stage = "html"
+    elif earliest in ("html", "image_only") and affected:
+        regen_result = _regenerate_html_only(thread_id, affected, comments_by_slide)
+        coerced_stage = None
     else:
         regen_result = _regenerate_from(
             thread_id, earliest, patch, affected_slides=affected
         )
+        coerced_stage = None
     return {
         "ok": True,
         "earliest_stage": earliest,
+        "coerced_stage": coerced_stage,
         "merged_patch": patch,
         "affected_slides": affected,
         "ops": ops,

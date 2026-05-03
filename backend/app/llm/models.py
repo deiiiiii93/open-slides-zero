@@ -16,6 +16,9 @@ from typing import Any
 #   - image generation                         → openai/gpt-image-2
 _DEFAULTS: dict[str, str] = {
     "ingest.ocr":     "google/gemini-3.1-pro-preview",
+    "digest":         "openai/gpt-5.4-mini",
+    "embeddings":     "openai/text-embedding-3-small",
+    "advanced_chat":  "anthropic/claude-sonnet-4.6",
     "outline":        "anthropic/claude-sonnet-4.6",
     "style.text":     "anthropic/claude-sonnet-4.6",
     "style.vision":   "google/gemini-3.1-pro-preview",

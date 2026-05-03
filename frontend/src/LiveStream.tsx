@@ -16,6 +16,8 @@ type Props = {
 };
 
 const NODE_LABELS: Record<string, string> = {
+  digest_materials: "· Digesting materials",
+  advanced_chat: "Advanced planning chat",
   propose_structure: "① Scenario & structure candidates",
   outline: "② Outline",
   style: "③ Visual style",
@@ -44,7 +46,7 @@ export function LiveStream({
   isActive = false,
   maxHeight = "calc(100vh - 120px)",
 }: Props) {
-  const tagsInOrder = ["propose_structure", "outline", "style", "layout"];
+  const tagsInOrder = ["advanced_chat", "propose_structure", "outline", "style", "layout"];
   const htmlTags = Object.keys(buffersByTag)
     .filter((t) => t.startsWith("html:"))
     .sort((a, b) => Number(a.split(":")[1]) - Number(b.split(":")[1]));

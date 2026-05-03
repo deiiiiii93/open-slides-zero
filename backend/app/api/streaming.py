@@ -186,6 +186,7 @@ def stream_create_deck(body: CreateDeckBody) -> StreamingResponse:
             style_reference_image_uri=body.style_reference_image_uri,
             model_overrides=body.model_overrides,
             image_urls=body.image_urls,
+            agent_mode=body.agent_mode,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -204,6 +205,7 @@ async def stream_create_deck_uploads(
     expected_pages: int = Form(default=10),
     aspect_ratio: str = Form(default="16:9"),
     density_preference: str = Form(default="balanced"),
+    agent_mode: str = Form(default="default"),
     language: str = Form(default="en"),
     visual_style_preference: str | None = Form(default=None),
     visual_style_preset_id: str | None = Form(default=None),
@@ -231,6 +233,7 @@ async def stream_create_deck_uploads(
             style_reference_image_uri=None,
             model_overrides=_parse_model_overrides(model_overrides),
             image_urls=_parse_image_urls(image_urls),
+            agent_mode=agent_mode,
         )
     except HTTPException:
         delete_thread(thread_id)

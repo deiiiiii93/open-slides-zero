@@ -7,6 +7,7 @@
 //   5. History + regenerate controls
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AdvancedChatPanel } from "./AdvancedChatPanel";
 import { DeckCanvas } from "./DeckCanvas";
 import { CommentLayer } from "./CommentLayer";
 import {
@@ -22,6 +23,8 @@ import { PlaygroundPanel } from "./PlaygroundPanel";
 import {
   api,
   STREAM_BASE,
+  type AgentMode,
+  type AdvancedChatDraft,
   type CatalogResponse,
   type CreateDeckBody,
   type DeckListItem,
@@ -101,6 +104,12 @@ function deckWithBaseSlides(deck: DeckState): DeckState {
 function hasOriginalSlides(deck: DeckState | null): boolean {
   const base = deck?.values?.html_slides_base as Record<string, string> | undefined;
   return Boolean(base && Object.keys(base).length > 0);
+}
+
+function firstInterruptPayload(deck: DeckState | null): any {
+  const interrupt = deck?.interrupts?.[0];
+  if (!interrupt) return null;
+  return typeof interrupt === "object" && "value" in interrupt ? (interrupt as any).value : interrupt;
 }
 
 function selectedModelOverrides(
@@ -290,6 +299,14 @@ export function App() {
       }
       case "done": {
         setDeck(ev.state);
+        if ((ev.state?.values?.current_stage as string | undefined) === "advanced_chat") {
+          setBuffersByTag((prev) => {
+            if (!prev.advanced_chat) return prev;
+            const next = { ...prev };
+            delete next.advanced_chat;
+            return next;
+          });
+        }
         // Finalize elapsed for any tags that didn't hit </html>
         setElapsedByTag((prev) => {
           const next = { ...prev };
@@ -362,6 +379,7 @@ export function App() {
     pages: number;
     aspect: string;
     density: string;
+    agentMode: AgentMode;
     styleHint: string;
     visualStylePresetId: string | null;
     imageUrls: string[];
@@ -376,6 +394,7 @@ export function App() {
       body.append("expected_pages", String(form.pages));
       body.append("aspect_ratio", form.aspect);
       body.append("density_preference", form.density);
+      body.append("agent_mode", form.agentMode);
       body.append("language", "en");
       if (form.styleHint.trim()) {
         body.append("visual_style_preference", form.styleHint.trim());
@@ -403,6 +422,7 @@ export function App() {
       expected_pages: form.pages,
       aspect_ratio: form.aspect,
       density_preference: form.density,
+      agent_mode: form.agentMode,
       language: "en",
       visual_style_preference: form.styleHint || null,
       visual_style_preset_id: form.visualStylePresetId,
@@ -421,8 +441,21 @@ export function App() {
     );
   }
 
+  async function onAdvancedChat(message: string) {
+    if (!deck) return;
+    await consumeStream(api.advancedChatStreamUrl(deck.thread_id), { message });
+  }
+
+  async function onAdvancedChatContinue(draft: AdvancedChatDraft) {
+    await onResume({ approved: true, draft });
+  }
+
   async function onComment(text: string, box: { x: number; y: number; w: number; h: number }) {
     if (!deck) return;
+    if (busy || deck.values?.current_stage !== "ready" || (deck.interrupts?.length ?? 0) > 0) {
+      setErr("Comments can be applied after the deck is ready.");
+      return;
+    }
     // Stream the combined add-comment + apply-edits so the LiveStream pane
     // shows live token output while the LLM regenerates affected slides.
     await consumeStream(api.commentStreamUrl(deck.thread_id, currentSlide), { text, box });
@@ -494,6 +527,9 @@ export function App() {
 
   const stage = (deck.values?.current_stage as string) ?? "";
   const hasInterrupt = (deck.interrupts?.length ?? 0) > 0;
+  const interruptPayload = firstInterruptPayload(deck);
+  const interruptGate = interruptPayload?.gate as string | undefined;
+  const isAdvancedChatGate = interruptGate === "advanced_chat";
   const hasPendingTasks = (deck.next?.length ?? 0) > 0;
   const materialWarnings = Array.isArray(deck.values?.materials)
     ? (deck.values.materials as Material[]).filter((material) => Boolean(material.note))
@@ -518,7 +554,13 @@ export function App() {
   const outlineMd = deck.values?.outline_md as string | undefined;
   const briefMd = deck.values?.consolidated_brief_md as string | undefined;
 
-  const showLive = busy || Object.keys(buffersByTag).length > 0;
+  const bufferTags = Object.keys(buffersByTag);
+  const advancedChatOnlyLive =
+    isAdvancedChatGate &&
+    ((busy && bufferTags.length === 0 && activeNode == null) ||
+      activeNode === "advanced_chat" ||
+      (bufferTags.length > 0 && bufferTags.every((tag) => tag === "advanced_chat")));
+  const showLive = (busy || bufferTags.length > 0) && !advancedChatOnlyLive;
   const readyReviewEnabled = stage === "ready" && !hasInterrupt;
   const reviewStepIndex = REVIEW_STAGES.findIndex((step) => step.id === selectedReviewStage);
   const imagePlan = deck.values?.image_insertion_plan as ImageInsertionPlan | undefined;
@@ -849,7 +891,15 @@ export function App() {
             </section>
           )}
 
-          {hasInterrupt && (
+          {hasInterrupt && isAdvancedChatGate ? (
+            <AdvancedChatPanel
+              deck={deck}
+              busy={busy}
+              streamingText={buffersByTag.advanced_chat ?? ""}
+              onSend={onAdvancedChat}
+              onContinue={onAdvancedChatContinue}
+            />
+          ) : hasInterrupt && (
             <HitlReviewPanel deck={deck} catalog={catalog} onResume={onResume} />
           )}
 
@@ -976,7 +1026,9 @@ export function App() {
                   aspectRatio={(deck.values?.aspect_ratio as any) ?? "16:9"}
                   width={CANVAS_W}
                 >
-                  <CommentLayer width={CANVAS_W} height={CANVAS_H} onSubmit={onComment} />
+                  {readyReviewEnabled && !busy && (
+                    <CommentLayer width={CANVAS_W} height={CANVAS_H} onSubmit={onComment} />
+                  )}
                 </DeckCanvas>
               )}
               </>
@@ -1075,12 +1127,17 @@ function ImageInsertionPanel({
 
   useEffect(() => {
     if (!plan) return;
-    const mappings = plan.applied_mappings?.length ? plan.applied_mappings : plan.mappings;
+    // After a regenerate-from-stage rewind, image_insertion_plan is cleared
+    // to {} server-side, so the typed fields may be undefined here.
+    const mappings =
+      (plan.applied_mappings?.length ? plan.applied_mappings : plan.mappings) ?? [];
     setSelectedBySlot(
       Object.fromEntries(mappings.map((mapping) => [mapping.slot_id, mapping.asset_id])),
     );
     setPromptsBySlot((prev) => ({
-      ...Object.fromEntries(plan.unmatched_slots.map((slot) => [slot.slot_id, slot.prompt])),
+      ...Object.fromEntries(
+        (plan.unmatched_slots ?? []).map((slot) => [slot.slot_id, slot.prompt]),
+      ),
       ...prev,
     }));
   }, [plan?.status, plan?.slots?.length, plan?.assets?.length]);
@@ -1554,6 +1611,7 @@ function CreateForm({
     pages: number;
     aspect: string;
     density: string;
+    agentMode: AgentMode;
     styleHint: string;
     visualStylePresetId: string | null;
     imageUrls: string[];
@@ -1572,6 +1630,7 @@ function CreateForm({
   const [pages, setPages] = useState(8);
   const [aspect, setAspect] = useState("16:9");
   const [density, setDensity] = useState("balanced");
+  const [agentMode, setAgentMode] = useState<AgentMode>("default");
   const [styleHint, setStyleHint] = useState("");
   const [imageUrlText, setImageUrlText] = useState("");
   const [visualPresetId, setVisualPresetId] = useState("");
@@ -1709,6 +1768,17 @@ function CreateForm({
                 <option>balanced</option>
                 <option>dense</option>
                 <option>very_dense</option>
+              </select>
+            </label>
+            <label style={labelStyle} title="Advanced opens a chat-first planning workflow and keeps the per-thread RAG index.">
+              Agent
+              <select
+                value={agentMode}
+                onChange={(e) => setAgentMode(e.target.value as AgentMode)}
+                style={controlStyle}
+              >
+                <option value="default">default</option>
+                <option value="advanced">advanced chat</option>
               </select>
             </label>
             <label style={labelStyle}>
@@ -1907,6 +1977,7 @@ function CreateForm({
               pages,
               aspect,
               density,
+              agentMode,
               styleHint,
               visualStylePresetId: visualPresetId || null,
               imageUrls,

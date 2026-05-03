@@ -13,6 +13,7 @@ from ..artifacts import store
 from ..catalog.visual_presets import normalize_visual_style_preset_id, visual_style_preset_state
 from ..graph.graph import get_graph
 from ..graph.layout_overrides import apply_layout_overrides
+from ..graph.nodes.advanced_chat import commit_advanced_chat_draft
 
 log = logging.getLogger(__name__)
 
@@ -79,6 +80,16 @@ def synthetic_interrupt(values: dict[str, Any] | None) -> dict[str, Any] | None:
             "candidates": values.get("structure_candidates", []),
             "hint": "Pick scenario_id + structure_id to proceed.",
         }
+    if stage == "advanced_chat":
+        return {
+            "gate": "advanced_chat",
+            "messages": values.get("advanced_chat_messages", []),
+            "draft": values.get("advanced_chat_draft", {}),
+            "hint": (
+                "Use /advanced_chat/stream to update the draft. Return "
+                "{approved: true, draft: {...}} to continue to layout."
+            ),
+        }
     if stage == "await_outline":
         return {
             "gate": "outline",
@@ -120,6 +131,7 @@ def _synthetic_gate_node(values: dict[str, Any] | None) -> str | None:
     stage = values.get("current_stage")
     return {
         "await_structure": "await_structure",
+        "advanced_chat": "await_advanced_chat",
         "await_outline": "await_outline",
         "await_style": "await_style",
         "await_layout": "await_layout",
@@ -140,6 +152,15 @@ def _resume_patch_for_synthetic_gate(
                 "structure_id": resume["structure_id"],
                 "current_stage": "outline",
             },
+        )
+    if stage == "advanced_chat":
+        if not resume.get("approved"):
+            raise ValueError("Advanced chat must be approved before continuing to layout.")
+        return (
+            "await_advanced_chat",
+            commit_advanced_chat_draft(
+                resume.get("draft") or values.get("advanced_chat_draft") or {}
+            ),
         )
     if stage == "await_outline":
         return (
@@ -255,15 +276,27 @@ def current_state(thread_id: str, *, source_thread_id: str | None = None) -> dic
     snap = g.get_state(config_for(thread_id))
     next_nodes = list(snap.next)
     interrupts = [i.value if hasattr(i, "value") else i for i in (snap.interrupts or [])]
-    gate_node = _synthetic_gate_node(snap.values)
+    values = dict(snap.values or {})
+    if (
+        next_nodes == ["await_advanced_chat"]
+        and (
+            values.get("agent_mode") == "advanced"
+            or any(
+                isinstance(item, dict) and item.get("gate") == "advanced_chat"
+                for item in interrupts
+            )
+        )
+    ):
+        values["current_stage"] = "advanced_chat"
+    gate_node = _synthetic_gate_node(values)
     if not interrupts and (not next_nodes or next_nodes == [gate_node]):
-        rebuilt = synthetic_interrupt(snap.values)
+        rebuilt = synthetic_interrupt(values)
         if rebuilt is not None:
             interrupts = [rebuilt]
     state = {
         "thread_id": thread_id,
         "checkpoint_id": snap.config["configurable"].get("checkpoint_id"),
-        "values": snap.values,
+        "values": values,
         "next": next_nodes,
         "interrupts": interrupts,
         "created_at": getattr(snap, "created_at", None),

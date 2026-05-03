@@ -204,6 +204,7 @@ def chat_structured(
     images: list[str | Path] | None = None,
     temperature: float = 0.2,
     max_tokens: int | None = None,
+    timeout: float | None = None,
     max_attempts: int = 2,
     stream: bool = False,
 ) -> T:
@@ -233,6 +234,7 @@ def chat_structured(
             images=images,
             temperature=temperature,
             max_tokens=max_tokens,
+            timeout=timeout,
             json_object=True,
             stream=stream,
         )
@@ -274,6 +276,41 @@ def chat_structured(
         max_attempts, schema.__name__, last_raw,
     )
     raise last_err
+
+
+# ---------------------------------------------------------------------------
+# Embeddings
+# ---------------------------------------------------------------------------
+
+@_retry
+def _embeddings_call(model: str, inputs: list[str]) -> list[list[float]]:
+    try:
+        resp = _client().embeddings.create(model=model, input=inputs)
+    except Exception as e:
+        if _is_retriable(e):
+            raise RetriableError from e
+        raise
+    return [list(item.embedding) for item in resp.data]
+
+
+def embeddings(
+    model: str,
+    inputs: list[str],
+    *,
+    batch_size: int = 96,
+) -> list[list[float]]:
+    """Return one embedding vector per input string.
+
+    Batches at `batch_size` to stay under typical provider per-request input caps.
+    Empty input list returns an empty list without making a network call.
+    """
+    if not inputs:
+        return []
+    out: list[list[float]] = []
+    for start in range(0, len(inputs), batch_size):
+        chunk = inputs[start : start + batch_size]
+        out.extend(_embeddings_call(model, chunk))
+    return out
 
 
 # ---------------------------------------------------------------------------

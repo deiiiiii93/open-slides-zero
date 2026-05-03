@@ -181,6 +181,14 @@ def _signal_from_outline_slide(
     )
 
 
+def _materials_have_images(state: dict[str, Any]) -> bool:
+    """True iff the user attached at least one image-kind material."""
+    for m in state.get("materials") or []:
+        if (m.get("kind") or "").lower() == "image":
+            return True
+    return False
+
+
 def layout_node(state: dict[str, Any]) -> dict[str, Any]:
     outline_slides = state.get("outline_slides") or []
     if not outline_slides:
@@ -194,6 +202,15 @@ def layout_node(state: dict[str, Any]) -> dict[str, Any]:
     layout_bias = state.get("visual_style_preset_layout_bias") or {}
     preferred_patterns = [p for p in (layout_bias.get("prefer") or []) if p in L.PATTERNS]
     preset_layout_bias_for_scorer = layout_bias if layout_bias else None
+    # image_slots only force gallery mode when the deck is actually image-led:
+    # either the user picked the Gallery structure, or they uploaded image
+    # materials. Otherwise the LLM may have populated stray slots ("a chart of
+    # X", "a portrait of Y") that should not flip a text-driven slide into an
+    # image-grid layout.
+    structure_id = (state.get("structure_id") or "").lower()
+    image_slots_are_authoritative = (
+        structure_id == "gallery" or _materials_have_images(state)
+    )
 
     pattern_catalog = "\n".join(
         f"- {pid} (family={p['family']}, kind={p['kind']}, zones={p['zones']})"
@@ -253,7 +270,7 @@ def layout_node(state: dict[str, Any]) -> dict[str, Any]:
             sig.text_length = max(sig.text_length, enrich.text_length)
             sig.story_role = enrich.story_role or sig.story_role
             candidates = [c for c in enrich.candidate_patterns if c in L.PATTERNS]
-        if image_slots and not is_closing:
+        if image_slots and not is_closing and image_slots_are_authoritative:
             sig.content_type = "gallery"
             sig.semantic_family = "gallery"
             sig.content_shape = "image_gallery"
