@@ -17,7 +17,6 @@ slide are fed to the prompt as `feedback`.
 from __future__ import annotations
 
 import contextvars
-import json
 import logging
 import queue as _queue
 import threading
@@ -165,6 +164,15 @@ def _regenerate_html_only(
     }
 
 
+def _comments_should_stay_html_only(values: dict[str, Any]) -> bool:
+    """Comment edits on non-linear deck modes should not rewind earlier stages."""
+    return bool(
+        values.get("agent_mode") == "advanced"
+        or values.get("parent_thread_id")
+        or values.get("lane_id")
+    )
+
+
 def _run_apply_edits(thread_id: str) -> dict[str, Any]:
     snap = graph().get_state(config_for(thread_id))  # type: ignore[arg-type]
     if not snap or not snap.values:
@@ -198,11 +206,7 @@ def _run_apply_edits(thread_id: str) -> dict[str, Any]:
     if not affected:
         affected = comment_slide_ids
 
-    if (
-        snap.values.get("agent_mode") == "advanced"
-        and earliest not in ("html", "image_only")
-        and affected
-    ):
+    if _comments_should_stay_html_only(snap.values) and earliest not in ("html", "image_only") and affected:
         regen_result = _regenerate_html_only(thread_id, affected, comments_by_slide)
         coerced_stage = "html"
     elif earliest in ("html", "image_only") and affected:

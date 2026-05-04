@@ -58,10 +58,34 @@ const CANVAS: Record<string, [number, number]> = {
 const MODEL_STAGE_ORDER = ["style", "layout", "html"] as const;
 type ModelStage = (typeof MODEL_STAGE_ORDER)[number];
 
+function useElementWidth(fallback: number) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [width, setWidth] = useState(fallback);
+
+  useEffect(() => {
+    const node = ref.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      const nextWidth = entry.contentRect.width;
+      if (nextWidth > 0) setWidth(nextWidth);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  return [ref, width] as const;
+}
+
 function firstInterrupt(state: DeckState | null): any {
   const i = state?.interrupts?.[0];
   if (!i) return null;
   return typeof i === "object" && "value" in i ? (i as any).value : i;
+}
+
+function firstTaskError(state: DeckState | null): string | null {
+  const task = state?.tasks?.find((item) => item.error);
+  if (!task?.error) return null;
+  return task.name ? `${task.name}: ${task.error}` : task.error;
 }
 
 function mergeValues(prevValues: Record<string, any>, patch: Record<string, any>): Record<string, any> {
@@ -362,6 +386,7 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
       }
       case "done": {
         if (ev.state?.thread_id) updateLaneState(ev.state.thread_id, ev.state as DeckState);
+        const stateError = firstTaskError(ev.state as DeckState | null);
         const laneId =
           ctx.laneId ??
           (ev.state?.values?.lane_id as string | undefined) ??
@@ -381,6 +406,7 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
                 ...live,
                 laneThreadId: ev.state?.thread_id ?? live.laneThreadId,
                 elapsedByTag,
+                error: stateError ?? live.error,
                 isRunning: false,
                 activeNode: null,
                 activeSlide: null,
@@ -795,6 +821,7 @@ function LaneDetail({
   const stage = (state?.values?.current_stage as string | undefined) ?? "pending";
   const slides = (state?.values?.html_slides as Record<number, string>) ?? {};
   const slideOrder = expectedSlideOrder(state);
+  const taskError = firstTaskError(state);
   const hasSlides = slideOrder.length > 0;
   const canExport = hasExportableSlides(state);
   const laneModelOverrides =
@@ -810,6 +837,7 @@ function LaneDetail({
   const overlayHeight = (baseH * LANE_CANVAS_WIDTH) / (CANVAS[aspectRatio]?.[0] ?? CANVAS["16:9"][0]);
   const canComment = hasSlides && stage === "ready" && !busy && !lane.cutoff;
   const canContinue = Boolean(state && !gate && stage !== "ready" && !lane.cutoff && state.next.length > 0);
+  const continueDisabled = busy && !taskError;
 
   return (
     <div style={{ border: "1px solid #e5e5e5", borderRadius: 6, background: "#fff", padding: 12 }}>
@@ -958,12 +986,18 @@ function LaneDetail({
         />
       )}
 
+      {taskError && !lane.cutoff && (
+        <div style={{ color: "crimson", border: "1px solid crimson", borderRadius: 6, padding: 8, marginBottom: 12 }}>
+          {taskError}
+        </div>
+      )}
+
       {state && !gate && stage !== "ready" && !lane.cutoff && (
         <div style={{ color: "#64748b", display: "flex", alignItems: "center", gap: 10 }}>
-          <span>Lane generation is between steps.</span>
+          <span>{taskError ? "Lane stopped before the next step." : "Lane generation is between steps."}</span>
           {canContinue && (
-            <button disabled={busy} onClick={() => void onResume(lane, {})}>
-              Continue lane
+            <button disabled={continueDisabled} onClick={() => void onResume(lane, {})}>
+              {taskError ? "Retry lane" : "Continue lane"}
             </button>
           )}
         </div>
@@ -1039,7 +1073,7 @@ function ArenaView({
           </button>
         ))}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 360px), 1fr))", gap: 12 }}>
         {lanes.map((lane) => (
           <ArenaLane key={lane.lane_id} lane={lane} slideIdx={currentSlide} />
         ))}
@@ -1049,15 +1083,20 @@ function ArenaView({
 }
 
 function ArenaLane({ lane, slideIdx }: { lane: PlaygroundLane; slideIdx: number }) {
+  const [cardRef, cardWidth] = useElementWidth(ARENA_WIDTH);
   const state = lane.state;
   const slides = (state?.values?.html_slides as Record<number, string>) ?? {};
   const html = slides[slideIdx] ? normalizeImagePlaceholders(slides[slideIdx]) : undefined;
   const aspect = (state?.values?.aspect_ratio as string | undefined) ?? "16:9";
   const [baseW, baseH] = CANVAS[aspect] ?? CANVAS["16:9"];
-  const scale = ARENA_WIDTH / baseW;
+  const frameBorder = 1;
+  const frameWidth = Math.max(0, cardWidth);
+  const innerWidth = Math.max(0, frameWidth - frameBorder * 2);
+  const scale = innerWidth / baseW;
+  const frameHeight = baseH * scale + frameBorder * 2;
 
   return (
-    <div style={{ border: "1px solid #e5e5e5", borderRadius: 6, padding: 10, background: "#fafafa" }}>
+    <div ref={cardRef} style={{ border: "1px solid #e5e5e5", borderRadius: 6, padding: 10, background: "#fafafa", minWidth: 0 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
         <strong>{laneLabel(lane)}</strong>
         <span style={{ color: lane.cutoff ? "#92400e" : "#64748b", fontSize: 12 }}>
@@ -1065,13 +1104,22 @@ function ArenaLane({ lane, slideIdx }: { lane: PlaygroundLane; slideIdx: number 
         </span>
       </div>
       {html ? (
-        <div style={{ width: ARENA_WIDTH, height: baseH * scale, overflow: "hidden", background: "white" }}>
+        <div
+          style={{
+            width: "100%",
+            height: frameHeight,
+            overflow: "hidden",
+            background: "white",
+            border: `${frameBorder}px solid #111`,
+            boxSizing: "border-box",
+          }}
+        >
           <div style={{ transform: `scale(${scale})`, transformOrigin: "top left", width: baseW, height: baseH }}>
             <iframe
               title={`${lane.lane_id}-slide-${slideIdx}`}
               srcDoc={html}
               sandbox="allow-same-origin"
-              style={{ width: baseW, height: baseH, border: "1px solid #111", background: "white" }}
+              style={{ width: baseW, height: baseH, border: 0, display: "block", background: "white" }}
             />
           </div>
         </div>

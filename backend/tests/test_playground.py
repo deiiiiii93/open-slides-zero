@@ -7,6 +7,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from app.api import comments as comments_api
 from app.api import common, decks, hitl, playground
 from app.artifacts import store
 from app.graph import graph as graph_module
@@ -373,6 +374,95 @@ def test_stale_lane_layout_gate_can_resume_from_synthetic_interrupt(isolated_gra
     assert done["state"]["values"]["current_stage"] == "ready"
     assert len(done["state"]["values"]["html_slides"]) == 2
     assert done["state"]["values"].get("visual_style_preset_label") is None
+
+
+def test_failed_lane_resume_emits_recoverable_done_state(
+    isolated_graph,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    base = _create_playground_base()
+    client = TestClient(app)
+    response = client.post(
+        f"/decks/{base['thread_id']}/playground/lanes/stream",
+        json={"creator_prompt": "Use a Kimi lane."},
+    )
+    assert response.status_code == 200
+    done = next(event for event in _parse_sse_events(response.text) if event["type"] == "done")
+    lane_thread_id = done["state"]["thread_id"]
+
+    def fail_layout(_model, _messages, schema, **_kwargs):
+        if schema is layout._BulkSignals:
+            raise RuntimeError("provider rejected params")
+        raise AssertionError(f"Unexpected schema: {schema}")
+
+    monkeypatch.setattr(layout.zenmux, "chat_structured", fail_layout)
+
+    failed = client.post(
+        f"/decks/{lane_thread_id}/resume/stream",
+        json={"payload": {"approved": True}},
+    )
+
+    assert failed.status_code == 200
+    events = _parse_sse_events(failed.text)
+    error = next(event for event in events if event["type"] == "error")
+    failed_done = next(event for event in events if event["type"] == "done")
+    failed_state = failed_done["state"]
+
+    assert "provider rejected params" in error["message"]
+    assert failed_state["values"]["current_stage"] == "layout"
+    assert failed_state["next"] == ["layout"]
+    assert failed_state["tasks"][0]["name"] == "layout"
+    assert "provider rejected params" in failed_state["tasks"][0]["error"]
+
+
+def test_playground_lane_comment_stays_html_only_even_if_classifier_says_layout(
+    isolated_graph,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    base = _create_playground_base()
+    client = TestClient(app)
+    response = client.post(
+        f"/decks/{base['thread_id']}/playground/lanes/stream",
+        json={"creator_prompt": "Keep it visual."},
+    )
+    assert response.status_code == 200
+    done = next(event for event in _parse_sse_events(response.text) if event["type"] == "done")
+    lane_state = done["state"]
+    lane_thread_id = lane_state["thread_id"]
+
+    hitl.resume_deck(lane_thread_id, {"approved": True})
+    ready = hitl.resume_deck(lane_thread_id, {"approved": True, "overrides": {}})
+    original_count = len(ready["values"]["html_slides"])
+
+    def fake_edit_intent(_state):
+        return {
+            "pending_edit_ops": [{
+                "target_stage": "layout",
+                "rationale": "classifier overreached on a position-only comment",
+                "affected_slides": [0],
+                "patch_fragment": {},
+            }]
+        }
+
+    monkeypatch.setattr(comments_api, "edit_intent_node", fake_edit_intent)
+
+    response = client.post(
+        f"/decks/{lane_thread_id}/slides/0/comments/stream",
+        json={
+            "text": "move this visual block a little lower",
+            "box": {"x": 0, "y": 0, "w": 1, "h": 1},
+        },
+    )
+
+    assert response.status_code == 200
+    done = next(event for event in _parse_sse_events(response.text) if event["type"] == "done")
+    state = done["state"]
+    assert state["values"]["current_stage"] == "ready"
+    assert state["next"] == []
+    assert not state["interrupts"]
+    assert len(state["values"]["html_slides"]) == original_count
+    assert done["result"]["coerced_stage"] == "html"
+    assert done["result"]["regen"]["from_stage"] == "html"
 
 
 def test_playground_enforces_five_lane_limit(isolated_graph):

@@ -277,6 +277,15 @@ def current_state(thread_id: str, *, source_thread_id: str | None = None) -> dic
     next_nodes = list(snap.next)
     interrupts = [i.value if hasattr(i, "value") else i for i in (snap.interrupts or [])]
     values = dict(snap.values or {})
+    failed_tasks = [
+        {
+            "id": getattr(task, "id", None),
+            "name": getattr(task, "name", None),
+            "error": getattr(task, "error", None),
+        }
+        for task in (snap.tasks or [])
+        if getattr(task, "error", None)
+    ]
     if (
         next_nodes == ["await_advanced_chat"]
         and (
@@ -301,6 +310,8 @@ def current_state(thread_id: str, *, source_thread_id: str | None = None) -> dic
         "interrupts": interrupts,
         "created_at": getattr(snap, "created_at", None),
     }
+    if failed_tasks:
+        state["tasks"] = failed_tasks
     if source_thread_id is not None:
         state["source_thread_id"] = source_thread_id
     return state

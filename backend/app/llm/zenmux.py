@@ -41,6 +41,8 @@ log = logging.getLogger(__name__)
 
 ZENMUX_BASE_URL = os.getenv("ZENMUX_BASE_URL", "https://zenmux.ai/api/v1")
 ZENMUX_API_KEY_ENV = "ZENMUX_API_KEY"
+ZENMUX_CHAT_TIMEOUT_ENV = "ZENMUX_CHAT_TIMEOUT_SECONDS"
+_TEMPERATURE_ONE_MODEL_PARTS = ("kimi",)
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -138,6 +140,37 @@ def _resolve_vision_model(model: str, has_images: bool) -> str:
     return VISION_FALLBACK
 
 
+def _requires_temperature_one(model: str) -> bool:
+    """Return True for model families whose chat endpoint only accepts temp=1."""
+    model_id = model.lower()
+    parts = [part for part in model_id.replace(":", "/").split("/") if part]
+    return any(part.startswith(prefix) for part in parts for prefix in _TEMPERATURE_ONE_MODEL_PARTS)
+
+
+def _apply_model_param_compatibility(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Normalize OpenAI-style params for provider-specific ZenMux model quirks."""
+    model = str(kwargs.get("model") or "")
+    if _requires_temperature_one(model) and kwargs.get("temperature") != 1:
+        log.info(
+            "Model %s only accepts temperature=1; overriding requested temperature %r.",
+            model,
+            kwargs.get("temperature"),
+        )
+        kwargs = dict(kwargs)
+        kwargs["temperature"] = 1
+    return kwargs
+
+
+def _default_chat_timeout() -> float | None:
+    raw = os.getenv(ZENMUX_CHAT_TIMEOUT_ENV, "180").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        log.warning("Invalid %s=%r; using 180 seconds.", ZENMUX_CHAT_TIMEOUT_ENV, raw)
+        return 180.0
+    return value if value > 0 else None
+
+
 def chat(
     model: str,
     messages: list[dict[str, Any]],
@@ -186,10 +219,12 @@ def chat_with_metadata(
     }
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
-    if timeout is not None:
-        kwargs["timeout"] = timeout
+    effective_timeout = timeout if timeout is not None else _default_chat_timeout()
+    if effective_timeout is not None:
+        kwargs["timeout"] = effective_timeout
     if json_object:
         kwargs["response_format"] = {"type": "json_object"}
+    kwargs = _apply_model_param_compatibility(kwargs)
 
     if stream:
         return _stream_completion_with_metadata(**kwargs)

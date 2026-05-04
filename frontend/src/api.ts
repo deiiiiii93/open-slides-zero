@@ -74,6 +74,7 @@ export type DeckState = {
   values: Record<string, any>;
   next: string[];
   interrupts: any[];
+  tasks?: Array<{ id?: string | null; name?: string | null; error?: string | null }>;
 };
 
 export type AdvancedChatMessage = {

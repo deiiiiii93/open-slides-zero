@@ -108,6 +108,12 @@ def _stream_graph(
         yield _sse({"type": "error", "message": str(e)})
         if cleanup_on_error:
             delete_thread(thread_id)
+        else:
+            try:
+                yield _sse({"type": "done", "state": current_state(thread_id)})
+                mirror_to_disk(thread_id)
+            except Exception:
+                log.exception("failed to emit recovery state for %s", thread_id)
 
 
 def _safe_patch(patch: Any) -> dict[str, Any]:
