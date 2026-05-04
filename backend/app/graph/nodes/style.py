@@ -12,7 +12,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from ...llm import zenmux
-from ...llm.models import get_lane_model
+from ...llm.models import get_lane_model, get_lane_thinking_effort
 from ...llm.stream import push_event, tagged_stream
 
 
@@ -113,7 +113,11 @@ def style_node(state: dict[str, Any]) -> dict[str, Any]:
 
     default_node = "style.vision" if ref else "style.text"
     model = get_lane_model(state, "style", default_node)
-    push_event({"node": "style", "state": "started", "model": model})
+    reasoning_effort = get_lane_thinking_effort(state, "style")
+    event: dict[str, Any] = {"node": "style", "state": "started", "model": model}
+    if reasoning_effort:
+        event["reasoning_effort"] = reasoning_effort
+    push_event(event)
     with tagged_stream("style"):
         result = zenmux.chat_structured(
             model,
@@ -121,6 +125,7 @@ def style_node(state: dict[str, Any]) -> dict[str, Any]:
             _VisualStyle,
             images=[ref] if ref else None,
             temperature=0.4,
+            reasoning_effort=reasoning_effort,
             stream=True,
         )
     push_event({"node": "style", "state": "finished", "model": model})

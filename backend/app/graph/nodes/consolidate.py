@@ -48,6 +48,7 @@ def consolidate_node(state: dict[str, Any]) -> dict[str, Any]:
         "visual_style_preset_html_rules": state.get("visual_style_preset_html_rules"),
         "creator_prompt": state.get("creator_prompt") or "",
         "lane_model_overrides": state.get("lane_model_overrides"),
+        "lane_thinking_effort_overrides": state.get("lane_thinking_effort_overrides"),
         "slides": per_slide,
     }
 

@@ -37,6 +37,7 @@ import {
   type Material,
   type ModelOptions,
   type ModelStage,
+  type ThinkingEffort,
 } from "./api";
 import { streamSSE, type StreamEvent } from "./sse";
 import {
@@ -120,6 +121,15 @@ function selectedModelOverrides(
   const entries = MODEL_STAGE_ORDER
     .map((stage) => [stage, overrides[stage]?.trim()] as const)
     .filter((entry): entry is readonly [ModelStage, string] => Boolean(entry[1]));
+  return entries.length ? Object.fromEntries(entries) : undefined;
+}
+
+function selectedThinkingEffortOverrides(
+  overrides: Partial<Record<ModelStage, ThinkingEffort>>,
+): Partial<Record<ModelStage, ThinkingEffort>> | undefined {
+  const entries = MODEL_STAGE_ORDER
+    .map((stage) => [stage, overrides[stage]] as const)
+    .filter((entry): entry is readonly [ModelStage, ThinkingEffort] => Boolean(entry[1]));
   return entries.length ? Object.fromEntries(entries) : undefined;
 }
 
@@ -399,9 +409,11 @@ export function App() {
     visualStylePresetId: string | null;
     imageUrls: string[];
     modelOverrides: Partial<Record<ModelStage, string>>;
+    thinkingEffortOverrides: Partial<Record<ModelStage, ThinkingEffort>>;
     files: File[];
   }) {
     const modelOverrides = selectedModelOverrides(form.modelOverrides);
+    const thinkingEffortOverrides = selectedThinkingEffortOverrides(form.thinkingEffortOverrides);
     if (form.files.length > 0) {
       const body = new FormData();
       if (form.deckName.trim()) body.append("deck_name", form.deckName.trim());
@@ -423,6 +435,9 @@ export function App() {
       if (modelOverrides) {
         body.append("model_overrides", JSON.stringify(modelOverrides));
       }
+      if (thinkingEffortOverrides) {
+        body.append("thinking_effort_overrides", JSON.stringify(thinkingEffortOverrides));
+      }
       for (const file of form.files) {
         body.append("files", file);
       }
@@ -443,6 +458,7 @@ export function App() {
       visual_style_preset_id: form.visualStylePresetId,
       image_urls: form.imageUrls,
       model_overrides: modelOverrides,
+      thinking_effort_overrides: thinkingEffortOverrides,
       materials: mats,
     };
     await consumeStream(`${STREAM_BASE}/decks/stream`, body);
@@ -1711,6 +1727,7 @@ function CreateForm({
     visualStylePresetId: string | null;
     imageUrls: string[];
     modelOverrides: Partial<Record<ModelStage, string>>;
+    thinkingEffortOverrides: Partial<Record<ModelStage, ThinkingEffort>>;
     files: File[];
   }) => void;
   busy: boolean;
@@ -1732,6 +1749,9 @@ function CreateForm({
   const [imageUrlText, setImageUrlText] = useState("");
   const [visualPresetId, setVisualPresetId] = useState("");
   const [modelOverrides, setModelOverrides] = useState<Partial<Record<ModelStage, string>>>({});
+  const [thinkingEffortOverrides, setThinkingEffortOverrides] = useState<
+    Partial<Record<ModelStage, ThinkingEffort>>
+  >({});
   const [files, setFiles] = useState<File[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
   const [recentSearch, setRecentSearch] = useState("");
@@ -1739,6 +1759,7 @@ function CreateForm({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const visualPresets = catalog?.visual_style_presets ?? [];
   const selectedPreset = visualPresets.find((preset) => preset.id === visualPresetId);
+  const thinkingEffortOptions = modelOptions?.thinking_efforts?.options ?? [];
   const imageUrls = splitImageUrls(imageUrlText);
   const filteredRecentDecks = useMemo(() => {
     const decks = recentDecks ?? [];
@@ -2031,34 +2052,59 @@ function CreateForm({
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-            gap: 10,
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gap: 12,
           }}
         >
           {MODEL_STAGE_ORDER.map((stage) => {
             const stageOptions = modelOptions?.stages[stage];
+            const effortValue = thinkingEffortOverrides[stage] ?? "";
             return (
-              <label key={stage} style={labelStyle}>
-                {stageOptions?.label ?? stage}
-                <select
-                  value={modelOverrides[stage] ?? ""}
-                  disabled={!stageOptions || busy}
-                  onChange={(e) =>
-                    setModelOverrides((prev) => ({
-                      ...prev,
-                      [stage]: e.target.value || undefined,
-                    }))
-                  }
-                  style={controlStyle}
-                >
-                  <option value="">Default routing</option>
-                  {stageOptions?.options.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div key={stage} style={{ display: "grid", gap: 8 }}>
+                <label style={labelStyle}>
+                  {(stageOptions?.label ?? stage)} model
+                  <select
+                    value={modelOverrides[stage] ?? ""}
+                    disabled={!stageOptions || busy}
+                    onChange={(e) =>
+                      setModelOverrides((prev) => ({
+                        ...prev,
+                        [stage]: e.target.value || undefined,
+                      }))
+                    }
+                    style={controlStyle}
+                  >
+                    <option value="">Default routing</option>
+                    {stageOptions?.options.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label style={labelStyle}>
+                  {(stageOptions?.label ?? stage)} thinking effort
+                  <select
+                    value={effortValue}
+                    disabled={!modelOptions || busy}
+                    onChange={(e) => {
+                      const value = e.target.value as ThinkingEffort | "";
+                      setThinkingEffortOverrides((prev) => ({
+                        ...prev,
+                        [stage]: value || undefined,
+                      }));
+                    }}
+                    style={controlStyle}
+                  >
+                    <option value="">Provider default</option>
+                    {thinkingEffortOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
             );
           })}
         </div>
@@ -2079,6 +2125,7 @@ function CreateForm({
               visualStylePresetId: visualPresetId || null,
               imageUrls,
               modelOverrides,
+              thinkingEffortOverrides,
               files,
             })
           }

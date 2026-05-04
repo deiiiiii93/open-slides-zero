@@ -31,6 +31,7 @@ _DEFAULTS: dict[str, str] = {
 }
 
 LANE_MODEL_STAGES = ("style", "layout", "html")
+THINKING_EFFORT_VALUES = ("minimal", "low", "medium", "high")
 
 _CURATED_LANE_MODEL_OPTIONS: list[dict[str, str]] = [
     {
@@ -70,6 +71,29 @@ _CURATED_LANE_MODEL_OPTIONS: list[dict[str, str]] = [
     },
 ]
 
+_CURATED_THINKING_EFFORT_OPTIONS: list[dict[str, str]] = [
+    {
+        "id": "minimal",
+        "label": "Minimal",
+        "description": "Lowest thinking effort; useful for fast/lightweight trials.",
+    },
+    {
+        "id": "low",
+        "label": "Low",
+        "description": "Reduced thinking effort for routine slide generation.",
+    },
+    {
+        "id": "medium",
+        "label": "Medium",
+        "description": "Balanced thinking effort for normal deck work.",
+    },
+    {
+        "id": "high",
+        "label": "High",
+        "description": "More thinking effort for difficult layout and composition work.",
+    },
+]
+
 
 def _env_key(node: str) -> str:
     return "OSZ_MODEL_" + node.upper().replace(".", "_")
@@ -91,6 +115,7 @@ def all_models() -> dict[str, str]:
 def lane_model_options() -> dict[str, Any]:
     """Return the curated model choices supported by Creator Playground lanes."""
     options = [dict(option) for option in _CURATED_LANE_MODEL_OPTIONS]
+    effort_options = [dict(option) for option in _CURATED_THINKING_EFFORT_OPTIONS]
     return {
         "stages": {
             "style": {
@@ -108,7 +133,11 @@ def lane_model_options() -> dict[str, Any]:
                 "default_model": get_model("html"),
                 "options": options,
             },
-        }
+        },
+        "thinking_efforts": {
+            "default_effort": None,
+            "options": effort_options,
+        },
     }
 
 
@@ -133,6 +162,33 @@ def normalize_lane_model_overrides(overrides: Any) -> dict[str, str]:
     return normalized
 
 
+def normalize_lane_thinking_effort_overrides(overrides: Any) -> dict[str, str]:
+    if overrides is None:
+        return {}
+    if not isinstance(overrides, dict):
+        raise ValueError("thinking_effort_overrides must be an object.")
+    normalized: dict[str, str] = {}
+    for raw_stage, raw_effort in overrides.items():
+        stage = str(raw_stage)
+        if stage not in LANE_MODEL_STAGES:
+            allowed = ", ".join(LANE_MODEL_STAGES)
+            raise ValueError(
+                f"Unknown thinking effort override stage '{stage}'. Allowed stages: {allowed}."
+            )
+        if raw_effort is None:
+            continue
+        effort = str(raw_effort).strip().lower()
+        if not effort:
+            continue
+        if effort not in THINKING_EFFORT_VALUES:
+            allowed = ", ".join(THINKING_EFFORT_VALUES)
+            raise ValueError(
+                f"Unknown thinking effort '{effort}'. Allowed values: {allowed}."
+            )
+        normalized[stage] = effort
+    return normalized
+
+
 def get_lane_model(
     state: dict[str, Any],
     stage: str,
@@ -153,6 +209,16 @@ def get_lane_model(
     if fallback_model:
         return fallback_model
     return get_model(default_node)
+
+
+def get_lane_thinking_effort(state: dict[str, Any], stage: str) -> str | None:
+    """Resolve the per-run thinking effort override for a lane-aware stage."""
+    overrides = state.get("lane_thinking_effort_overrides") or {}
+    if isinstance(overrides, dict):
+        effort = overrides.get(stage)
+        if isinstance(effort, str) and effort.strip():
+            return effort.strip().lower()
+    return None
 
 
 # Known vision-capable model prefixes — used by vision_capable() as a fast path.

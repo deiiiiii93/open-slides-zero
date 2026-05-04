@@ -14,7 +14,11 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from ..llm.models import lane_model_options, normalize_lane_model_overrides
+from ..llm.models import (
+    lane_model_options,
+    normalize_lane_model_overrides,
+    normalize_lane_thinking_effort_overrides,
+)
 from . import playground_store
 from .common import config_for, current_state, delete_thread, graph
 from .history import _clone_checkpoint_lineage
@@ -26,6 +30,7 @@ router = APIRouter()
 class CreateLaneBody(BaseModel):
     creator_prompt: str = ""
     model_overrides: dict[str, str] | None = None
+    thinking_effort_overrides: dict[str, str] | None = None
 
 
 def _lane_response(row: dict[str, Any]) -> dict[str, Any]:
@@ -73,6 +78,9 @@ def _prepare_lane(thread_id: str, body: CreateLaneBody) -> tuple[dict[str, Any],
         raise HTTPException(status_code=409, detail="No outline checkpoint found for playground.")
     try:
         model_overrides = normalize_lane_model_overrides(body.model_overrides)
+        thinking_effort_overrides = normalize_lane_thinking_effort_overrides(
+            body.thinking_effort_overrides
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -98,6 +106,7 @@ def _prepare_lane(thread_id: str, body: CreateLaneBody) -> tuple[dict[str, Any],
                 "lane_id": lane["lane_id"],
                 "creator_prompt": creator_prompt,
                 "lane_model_overrides": model_overrides or None,
+                "lane_thinking_effort_overrides": thinking_effort_overrides or None,
                 "current_stage": "style",
             },
             as_node="await_outline",

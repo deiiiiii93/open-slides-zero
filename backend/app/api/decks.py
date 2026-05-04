@@ -25,7 +25,7 @@ from ..catalog.scenarios import SCENARIO_DEFINITIONS
 from ..catalog.structures import STRUCTURE_DEFINITIONS
 from ..catalog.visual_presets import list_visual_style_presets, visual_style_preset_state
 from ..graph.graph import DB_PATH
-from ..llm.models import normalize_lane_model_overrides
+from ..llm.models import normalize_lane_model_overrides, normalize_lane_thinking_effort_overrides
 from . import playground_store
 from .common import config_for, current_state, delete_thread, graph, mirror_to_disk
 
@@ -67,6 +67,7 @@ class CreateDeckBody(BaseModel):
     style_reference_image_uri: str | None = None
     image_urls: list[str] = Field(default_factory=list)
     model_overrides: dict[str, str] | None = None
+    thinking_effort_overrides: dict[str, str] | None = None
     materials: list[Material] = Field(default_factory=list)
 
 
@@ -140,6 +141,7 @@ def _build_initial_state(
     visual_style_preset_id: str | None,
     style_reference_image_uri: str | None,
     model_overrides: dict[str, str] | None = None,
+    thinking_effort_overrides: dict[str, str] | None = None,
     image_urls: Sequence[str] | None = None,
     agent_mode: str = "default",
 ) -> dict[str, Any]:
@@ -149,6 +151,9 @@ def _build_initial_state(
     if agent_mode not in {"default", "advanced"}:
         raise ValueError("agent_mode must be 'default' or 'advanced'.")
     normalized_model_overrides = normalize_lane_model_overrides(model_overrides)
+    normalized_effort_overrides = normalize_lane_thinking_effort_overrides(
+        thinking_effort_overrides
+    )
     initial = {
         "thread_id": thread_id,
         "deck_name": _derive_deck_name_from_materials(deck_name, all_materials),
@@ -162,6 +167,7 @@ def _build_initial_state(
         "style_reference_image_uri": style_reference_image_uri,
         "image_urls": list(image_urls or []),
         "lane_model_overrides": normalized_model_overrides or None,
+        "lane_thinking_effort_overrides": normalized_effort_overrides or None,
         "current_stage": "ingest",
     }
     initial.update(visual_style_preset_state(visual_style_preset_id))
@@ -314,6 +320,7 @@ def create_deck(body: CreateDeckBody) -> dict[str, Any]:
             visual_style_preset_id=body.visual_style_preset_id,
             style_reference_image_uri=body.style_reference_image_uri,
             model_overrides=body.model_overrides,
+            thinking_effort_overrides=body.thinking_effort_overrides,
             image_urls=body.image_urls,
             agent_mode=body.agent_mode,
         )

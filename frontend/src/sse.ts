@@ -12,6 +12,7 @@ export type StreamEvent =
       slide_idx?: number;
       error?: string;
       model?: string;
+      reasoning_effort?: string;
     }
   | { type: "update"; node: string; patch: Record<string, any> }
   | { type: "interrupt"; payload: any }

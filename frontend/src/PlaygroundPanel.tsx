@@ -15,6 +15,7 @@ import {
   type DeckState,
   type PlaygroundModelOptions,
   type PlaygroundLane,
+  type ThinkingEffort,
 } from "./api";
 import {
   exportHtmlSingle,
@@ -165,12 +166,28 @@ function selectedModelOverrides(
   return entries.length ? Object.fromEntries(entries) : undefined;
 }
 
+function selectedThinkingEffortOverrides(
+  overrides: Partial<Record<ModelStage, ThinkingEffort>>,
+): CreatePlaygroundLaneBody["thinking_effort_overrides"] | undefined {
+  const entries = MODEL_STAGE_ORDER
+    .map((stage) => [stage, overrides[stage]] as const)
+    .filter((entry): entry is readonly [ModelStage, ThinkingEffort] => Boolean(entry[1]));
+  return entries.length ? Object.fromEntries(entries) : undefined;
+}
+
 function modelLabel(modelOptions: PlaygroundModelOptions | null, modelId: string): string {
   for (const stage of MODEL_STAGE_ORDER) {
     const found = modelOptions?.stages[stage]?.options.find((option) => option.id === modelId);
     if (found) return found.label;
   }
   return modelId;
+}
+
+function thinkingEffortLabel(
+  modelOptions: PlaygroundModelOptions | null,
+  effort: string,
+): string {
+  return modelOptions?.thinking_efforts?.options.find((option) => option.id === effort)?.label ?? effort;
 }
 
 export function PlaygroundPanel({ deck, catalog }: Props) {
@@ -180,6 +197,9 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
   const [prompt, setPrompt] = useState("");
   const [modelOptions, setModelOptions] = useState<PlaygroundModelOptions | null>(null);
   const [modelOverrides, setModelOverrides] = useState<Partial<Record<ModelStage, string>>>({});
+  const [thinkingEffortOverrides, setThinkingEffortOverrides] = useState<
+    Partial<Record<ModelStage, ThinkingEffort>>
+  >({});
   const [creatingLane, setCreatingLane] = useState(false);
   const [deletingLaneId, setDeletingLaneId] = useState<string | null>(null);
   const [exporting, setExporting] = useState<string | null>(null);
@@ -507,10 +527,12 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
     const body: CreatePlaygroundLaneBody = {
       creator_prompt: creatorPrompt,
       model_overrides: selectedModelOverrides(modelOverrides),
+      thinking_effort_overrides: selectedThinkingEffortOverrides(thinkingEffortOverrides),
     };
     await consumeLaneStream(api.createPlaygroundLaneStreamUrl(deck.thread_id), body);
     setPrompt("");
     setModelOverrides({});
+    setThinkingEffortOverrides({});
   }
 
   async function resumeLane(lane: PlaygroundLane, payload: Record<string, unknown>) {
@@ -682,45 +704,77 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-                  gap: 8,
+                  gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
+                  gap: 10,
                   marginTop: 8,
                 }}
               >
                 {MODEL_STAGE_ORDER.map((stage) => {
                   const stageOptions = modelOptions?.stages[stage];
+                  const effortValue = thinkingEffortOverrides[stage] ?? "";
                   return (
-                    <label
+                    <div
                       key={stage}
-                      style={{ display: "grid", gap: 4, color: "#475569", fontSize: 12 }}
+                      style={{ display: "grid", gap: 6, color: "#475569", fontSize: 12 }}
                     >
-                      <span>{stageOptions?.label ?? stage}</span>
-                      <select
-                        value={modelOverrides[stage] ?? ""}
-                        disabled={!stageOptions}
-                        onChange={(e) =>
-                          setModelOverrides((prev) => ({
-                            ...prev,
-                            [stage]: e.target.value || undefined,
-                          }))
-                        }
-                        style={{
-                          width: "100%",
-                          minHeight: 34,
-                          border: "1px solid #d1d5db",
-                          borderRadius: 6,
-                          padding: "6px 8px",
-                          background: "#fff",
-                        }}
-                      >
-                        <option value="">Default routing</option>
-                        {stageOptions?.options.map((option) => (
-                          <option key={option.id} value={option.id}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                      <label style={{ display: "grid", gap: 4 }}>
+                        <span>{stageOptions?.label ?? stage} model</span>
+                        <select
+                          value={modelOverrides[stage] ?? ""}
+                          disabled={!stageOptions}
+                          onChange={(e) =>
+                            setModelOverrides((prev) => ({
+                              ...prev,
+                              [stage]: e.target.value || undefined,
+                            }))
+                          }
+                          style={{
+                            width: "100%",
+                            minHeight: 34,
+                            border: "1px solid #d1d5db",
+                            borderRadius: 6,
+                            padding: "6px 8px",
+                            background: "#fff",
+                          }}
+                        >
+                          <option value="">Default routing</option>
+                          {stageOptions?.options.map((option) => (
+                            <option key={option.id} value={option.id}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label style={{ display: "grid", gap: 4 }}>
+                        <span>{stageOptions?.label ?? stage} thinking effort</span>
+                        <select
+                          value={effortValue}
+                          disabled={!modelOptions}
+                          onChange={(e) => {
+                            const value = e.target.value as ThinkingEffort | "";
+                            setThinkingEffortOverrides((prev) => ({
+                              ...prev,
+                              [stage]: value || undefined,
+                            }));
+                          }}
+                          style={{
+                            width: "100%",
+                            minHeight: 34,
+                            border: "1px solid #d1d5db",
+                            borderRadius: 6,
+                            padding: "6px 8px",
+                            background: "#fff",
+                          }}
+                        >
+                          <option value="">Provider default</option>
+                          {modelOptions?.thinking_efforts?.options.map((option) => (
+                            <option key={option.id} value={option.id}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
                   );
                 })}
               </div>
@@ -858,12 +912,23 @@ function LaneDetail({
   const canExport = hasExportableSlides(state);
   const laneModelOverrides =
     (state?.values?.lane_model_overrides as Partial<Record<ModelStage, string>> | null | undefined) ?? null;
+  const laneThinkingEffortOverrides =
+    (state?.values?.lane_thinking_effort_overrides as
+      | Partial<Record<ModelStage, ThinkingEffort>>
+      | null
+      | undefined) ?? null;
   const modelOverrideEntries = MODEL_STAGE_ORDER
     .map((stage) => {
       const modelId = laneModelOverrides?.[stage];
       return modelId ? { stage, modelId } : null;
     })
     .filter((entry): entry is { stage: ModelStage; modelId: string } => Boolean(entry));
+  const thinkingEffortEntries = MODEL_STAGE_ORDER
+    .map((stage) => {
+      const effort = laneThinkingEffortOverrides?.[stage];
+      return effort ? { stage, effort } : null;
+    })
+    .filter((entry): entry is { stage: ModelStage; effort: ThinkingEffort } => Boolean(entry));
   const aspectRatio = (state?.values?.aspect_ratio as keyof typeof CANVAS | undefined) ?? "16:9";
   const [, baseH] = CANVAS[aspectRatio] ?? CANVAS["16:9"];
   const overlayHeight = (baseH * LANE_CANVAS_WIDTH) / (CANVAS[aspectRatio]?.[0] ?? CANVAS["16:9"][0]);
@@ -894,6 +959,26 @@ function LaneDetail({
                   }}
                 >
                   {modelOptions?.stages[stage]?.label ?? stage}: {modelLabel(modelOptions, modelId)}
+                </span>
+              ))}
+            </div>
+          )}
+          {thinkingEffortEntries.length > 0 && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+              {thinkingEffortEntries.map(({ stage, effort }) => (
+                <span
+                  key={stage}
+                  style={{
+                    border: "1px solid #e0e7ff",
+                    borderRadius: 6,
+                    background: "#eef2ff",
+                    color: "#3730a3",
+                    fontSize: 12,
+                    padding: "3px 6px",
+                  }}
+                >
+                  {modelOptions?.stages[stage]?.label ?? stage} effort:{" "}
+                  {thinkingEffortLabel(modelOptions, effort)}
                 </span>
               ))}
             </div>

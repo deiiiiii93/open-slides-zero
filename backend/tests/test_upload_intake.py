@@ -565,6 +565,28 @@ def test_stream_create_deck_accepts_model_overrides(isolated_graph):
     assert done["state"]["values"]["lane_model_overrides"] == overrides
 
 
+def test_stream_create_deck_accepts_thinking_effort_overrides(isolated_graph):
+    client = TestClient(app)
+    overrides = {
+        "style": "low",
+        "layout": "medium",
+        "html": "high",
+    }
+
+    response = client.post(
+        "/decks/stream",
+        json={
+            "materials": [{"kind": "text", "uri": "text:Quarterly review notes"}],
+            "expected_pages": 4,
+            "thinking_effort_overrides": overrides,
+        },
+    )
+
+    assert response.status_code == 200
+    done = next(event for event in _parse_sse_events(response.text) if event["type"] == "done")
+    assert done["state"]["values"]["lane_thinking_effort_overrides"] == overrides
+
+
 def test_stream_create_deck_rejects_invalid_model_overrides(isolated_graph):
     client = TestClient(app)
 
@@ -587,6 +609,30 @@ def test_stream_create_deck_rejects_invalid_model_overrides(isolated_graph):
     assert "Unknown model override stage" in bad_stage.json()["detail"]
     assert bad_model.status_code == 400
     assert "Unknown lane model id" in bad_model.json()["detail"]
+
+
+def test_stream_create_deck_rejects_invalid_thinking_effort_overrides(isolated_graph):
+    client = TestClient(app)
+
+    bad_stage = client.post(
+        "/decks/stream",
+        json={
+            "materials": [{"kind": "text", "uri": "text:Quarterly review notes"}],
+            "thinking_effort_overrides": {"outline": "high"},
+        },
+    )
+    bad_effort = client.post(
+        "/decks/stream",
+        json={
+            "materials": [{"kind": "text", "uri": "text:Quarterly review notes"}],
+            "thinking_effort_overrides": {"style": "extreme"},
+        },
+    )
+
+    assert bad_stage.status_code == 400
+    assert "Unknown thinking effort override stage" in bad_stage.json()["detail"]
+    assert bad_effort.status_code == 400
+    assert "Unknown thinking effort" in bad_effort.json()["detail"]
 
 
 def test_upload_stream_accepts_model_overrides(isolated_graph):
@@ -612,6 +658,31 @@ def test_upload_stream_accepts_model_overrides(isolated_graph):
     assert response.status_code == 200
     done = next(event for event in _parse_sse_events(response.text) if event["type"] == "done")
     assert done["state"]["values"]["lane_model_overrides"] == overrides
+
+
+def test_upload_stream_accepts_thinking_effort_overrides(isolated_graph):
+    client = TestClient(app)
+    overrides = {
+        "style": "minimal",
+        "layout": "low",
+        "html": "high",
+    }
+
+    response = client.post(
+        "/decks/upload/stream",
+        data={
+            "expected_pages": "4",
+            "aspect_ratio": "16:9",
+            "density_preference": "balanced",
+            "language": "en",
+            "thinking_effort_overrides": json.dumps(overrides),
+        },
+        files=[("files", ("notes.txt", b"Quarterly review notes", "text/plain"))],
+    )
+
+    assert response.status_code == 200
+    done = next(event for event in _parse_sse_events(response.text) if event["type"] == "done")
+    assert done["state"]["values"]["lane_thinking_effort_overrides"] == overrides
 
 
 def test_upload_stream_rejects_invalid_model_overrides(isolated_graph):
@@ -642,6 +713,38 @@ def test_upload_stream_rejects_invalid_model_overrides(isolated_graph):
 
     assert bad_stage.status_code == 400
     assert "Unknown model override stage" in bad_stage.json()["detail"]
+    assert bad_json.status_code == 400
+    assert "valid JSON" in bad_json.json()["detail"]
+
+
+def test_upload_stream_rejects_invalid_thinking_effort_overrides(isolated_graph):
+    client = TestClient(app)
+
+    bad_stage = client.post(
+        "/decks/upload/stream",
+        data={
+            "expected_pages": "4",
+            "aspect_ratio": "16:9",
+            "density_preference": "balanced",
+            "language": "en",
+            "thinking_effort_overrides": json.dumps({"outline": "high"}),
+        },
+        files=[("files", ("notes.txt", b"Quarterly review notes", "text/plain"))],
+    )
+    bad_json = client.post(
+        "/decks/upload/stream",
+        data={
+            "expected_pages": "4",
+            "aspect_ratio": "16:9",
+            "density_preference": "balanced",
+            "language": "en",
+            "thinking_effort_overrides": "{bad json",
+        },
+        files=[("files", ("notes.txt", b"Quarterly review notes", "text/plain"))],
+    )
+
+    assert bad_stage.status_code == 400
+    assert "Unknown thinking effort override stage" in bad_stage.json()["detail"]
     assert bad_json.status_code == 400
     assert "valid JSON" in bad_json.json()["detail"]
 

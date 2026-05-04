@@ -15,7 +15,7 @@ from typing import Any
 from ...catalog import layouts as L
 from ...catalog.validator import validate_slide_html
 from ...llm import zenmux
-from ...llm.models import get_lane_model, html_overlay_for_preset
+from ...llm.models import get_lane_model, get_lane_thinking_effort, html_overlay_for_preset
 from ...llm.stream import push_event, tagged_stream
 
 
@@ -311,16 +311,20 @@ def html_one_node(state: dict[str, Any]) -> dict[str, Any]:
     overlay_model = overlay.get("model")
     fallback_model = overlay_model if isinstance(overlay_model, str) and overlay_model else None
     model = get_lane_model(brief, "html", "html", fallback_model=fallback_model)
+    reasoning_effort = get_lane_thinking_effort(brief, "html")
     overlay_temperature = overlay.get("temperature")
     temperature = float(overlay_temperature) if isinstance(overlay_temperature, (int, float)) else 0.4
-    push_event({
+    event: dict[str, Any] = {
         "node": "html_one",
         "slide_idx": slide_idx,
         "state": "started",
         "model": model,
         "preset_id": preset_id,
         "temperature": temperature,
-    })
+    }
+    if reasoning_effort:
+        event["reasoning_effort"] = reasoning_effort
+    push_event(event)
     previous_html = ""
     last_reason = f"slide {slide_idx}: unknown html generation failure"
     last_finish_reason: str | None = None
@@ -344,6 +348,7 @@ def html_one_node(state: dict[str, Any]) -> dict[str, Any]:
                     temperature=temperature,
                     max_tokens=_html_max_tokens(),
                     timeout=_html_timeout_seconds(),
+                    reasoning_effort=reasoning_effort,
                     stream=True,
                 )
         except Exception as exc:

@@ -147,6 +147,11 @@ def _requires_temperature_one(model: str) -> bool:
     return any(part.startswith(prefix) for part in parts for prefix in _TEMPERATURE_ONE_MODEL_PARTS)
 
 
+def _is_openai_o_series_model(model: str) -> bool:
+    parts = [part for part in model.lower().replace(":", "/").split("/") if part]
+    return len(parts) >= 2 and parts[0] == "openai" and parts[1].startswith("o")
+
+
 def _apply_model_param_compatibility(kwargs: dict[str, Any]) -> dict[str, Any]:
     """Normalize OpenAI-style params for provider-specific ZenMux model quirks."""
     model = str(kwargs.get("model") or "")
@@ -158,6 +163,16 @@ def _apply_model_param_compatibility(kwargs: dict[str, Any]) -> dict[str, Any]:
         )
         kwargs = dict(kwargs)
         kwargs["temperature"] = 1
+    if kwargs.get("reasoning_effort") and _is_openai_o_series_model(model):
+        if "temperature" in kwargs:
+            log.info(
+                "Model %s does not accept temperature when reasoning_effort is set; "
+                "omitting requested temperature %r.",
+                model,
+                kwargs.get("temperature"),
+            )
+            kwargs = dict(kwargs)
+            kwargs.pop("temperature", None)
     return kwargs
 
 
@@ -181,6 +196,7 @@ def chat(
     timeout: float | None = None,
     stream: bool = False,
     json_object: bool = False,
+    reasoning_effort: str | None = None,
 ) -> str:
     """Plain-text completion. Returns assistant message content as string."""
     return chat_with_metadata(
@@ -192,6 +208,7 @@ def chat(
         timeout=timeout,
         stream=stream,
         json_object=json_object,
+        reasoning_effort=reasoning_effort,
     ).text
 
 
@@ -205,6 +222,7 @@ def chat_with_metadata(
     timeout: float | None = None,
     stream: bool = False,
     json_object: bool = False,
+    reasoning_effort: str | None = None,
 ) -> CompletionResult:
     """Plain-text completion plus terminal metadata such as finish_reason."""
     msgs = [dict(m) for m in messages]
@@ -224,6 +242,8 @@ def chat_with_metadata(
         kwargs["timeout"] = effective_timeout
     if json_object:
         kwargs["response_format"] = {"type": "json_object"}
+    if reasoning_effort:
+        kwargs["reasoning_effort"] = reasoning_effort
     kwargs = _apply_model_param_compatibility(kwargs)
 
     if stream:
@@ -242,6 +262,7 @@ def chat_structured(
     timeout: float | None = None,
     max_attempts: int = 2,
     stream: bool = False,
+    reasoning_effort: str | None = None,
 ) -> T:
     """Structured completion — returns a validated Pydantic model instance.
 
@@ -272,6 +293,7 @@ def chat_structured(
             timeout=timeout,
             json_object=True,
             stream=stream,
+            reasoning_effort=reasoning_effort,
         )
         last_raw = raw
         # 1. Strict parse

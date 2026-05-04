@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from ...catalog import layouts as L
 from ...catalog.scorer import ScoreBreakdown, SlideSignal, pick_pattern
 from ...llm import zenmux
-from ...llm.models import get_lane_model
+from ...llm.models import get_lane_model, get_lane_thinking_effort
 from ...llm.stream import push_event, tagged_stream
 
 
@@ -247,10 +247,19 @@ def layout_node(state: dict[str, Any]) -> dict[str, Any]:
             ),
         })
     model = get_lane_model(state, "layout", "layout")
-    push_event({"node": "layout", "state": "started", "model": model})
+    reasoning_effort = get_lane_thinking_effort(state, "layout")
+    event: dict[str, Any] = {"node": "layout", "state": "started", "model": model}
+    if reasoning_effort:
+        event["reasoning_effort"] = reasoning_effort
+    push_event(event)
     with tagged_stream("layout"):
         enriched = zenmux.chat_structured(
-            model, messages, _BulkSignals, temperature=0.2, stream=True
+            model,
+            messages,
+            _BulkSignals,
+            temperature=0.2,
+            reasoning_effort=reasoning_effort,
+            stream=True,
         )
     push_event({"node": "layout", "state": "finished", "model": model})
     signal_by_idx = {s.slide_idx: s for s in enriched.slides}

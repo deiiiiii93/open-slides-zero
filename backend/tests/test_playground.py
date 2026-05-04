@@ -54,6 +54,9 @@ def isolated_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "style_model": None,
         "layout_model": None,
         "html_models": [],
+        "style_kwargs": {},
+        "layout_kwargs": {},
+        "html_kwargs": [],
     }
 
     def fake_chat_structured(model, messages, schema, **_kwargs):
@@ -84,6 +87,7 @@ def isolated_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         if schema is style._VisualStyle:
             calls["style_model"] = model
             calls["style_messages"] = messages
+            calls["style_kwargs"] = _kwargs
             return schema(
                 tone="editorial",
                 density="balanced",
@@ -108,6 +112,7 @@ def isolated_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         if schema is layout._BulkSignals:
             calls["layout_model"] = model
             calls["layout_messages"] = messages
+            calls["layout_kwargs"] = _kwargs
             return schema(
                 slides=[
                     {
@@ -139,6 +144,7 @@ def isolated_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     def fake_html(model, messages, **_kwargs):
         calls["html_models"] = [*list(calls["html_models"]), model]
         calls["html_messages"] = messages
+        calls["html_kwargs"] = [*list(calls["html_kwargs"]), _kwargs]
         prompt = messages[-2]["content"] if len(messages) > 1 else ""
         title_line = next((line for line in str(prompt).splitlines() if line.startswith("Title: ")), "Title: Slide")
         title = title_line.removeprefix("Title: ")
@@ -415,6 +421,42 @@ def test_lane_creation_applies_model_overrides_per_stage(isolated_graph):
     assert set(calls["html_models"]) == {overrides["html"]}
 
 
+def test_lane_creation_applies_thinking_effort_overrides_per_stage(isolated_graph):
+    calls = isolated_graph
+    base = _create_playground_base()
+    client = TestClient(app)
+    overrides = {
+        "style": "low",
+        "layout": "medium",
+        "html": "high",
+    }
+
+    response = client.post(
+        f"/decks/{base['thread_id']}/playground/lanes/stream",
+        json={
+            "creator_prompt": "Use alternate effort.",
+            "thinking_effort_overrides": overrides,
+        },
+    )
+
+    assert response.status_code == 200
+    events = _parse_sse_events(response.text)
+    done = next(event for event in events if event["type"] == "done")
+    lane_state = done["state"]
+
+    assert lane_state["values"]["lane_thinking_effort_overrides"] == overrides
+    assert calls["style_kwargs"]["reasoning_effort"] == overrides["style"]
+
+    laid_out = hitl.resume_deck(lane_state["thread_id"], {"approved": True})
+    assert _interrupt_gate(laid_out) == "layout"
+    assert calls["layout_kwargs"]["reasoning_effort"] == overrides["layout"]
+
+    ready = hitl.resume_deck(lane_state["thread_id"], {"approved": True, "overrides": {}})
+    assert ready["values"]["current_stage"] == "ready"
+    assert ready["values"]["brief"]["lane_thinking_effort_overrides"] == overrides
+    assert {kw["reasoning_effort"] for kw in calls["html_kwargs"]} == {overrides["html"]}
+
+
 def test_lane_creation_without_model_overrides_uses_defaults(isolated_graph):
     calls = isolated_graph
     base = _create_playground_base()
@@ -458,6 +500,25 @@ def test_lane_creation_rejects_invalid_model_overrides(isolated_graph):
     assert "Unknown model override stage" in bad_stage.json()["detail"]
     assert bad_model.status_code == 400
     assert "Unknown lane model id" in bad_model.json()["detail"]
+
+
+def test_lane_creation_rejects_invalid_thinking_effort_overrides(isolated_graph):
+    base = _create_playground_base()
+    client = TestClient(app)
+
+    bad_stage = client.post(
+        f"/decks/{base['thread_id']}/playground/lanes/stream",
+        json={"thinking_effort_overrides": {"outline": "high"}},
+    )
+    bad_effort = client.post(
+        f"/decks/{base['thread_id']}/playground/lanes/stream",
+        json={"thinking_effort_overrides": {"style": "extreme"}},
+    )
+
+    assert bad_stage.status_code == 400
+    assert "Unknown thinking effort override stage" in bad_stage.json()["detail"]
+    assert bad_effort.status_code == 400
+    assert "Unknown thinking effort" in bad_effort.json()["detail"]
 
 
 def test_stale_lane_layout_gate_can_resume_from_synthetic_interrupt(isolated_graph):

@@ -155,6 +155,26 @@ def _parse_model_overrides(raw: str | None) -> dict[str, str] | None:
     return {str(k): str(v) for k, v in value.items()}
 
 
+def _parse_thinking_effort_overrides(raw: str | None) -> dict[str, str] | None:
+    if raw is None or not raw.strip():
+        return None
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="thinking_effort_overrides must be valid JSON.",
+        ) from exc
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise HTTPException(
+            status_code=400,
+            detail="thinking_effort_overrides must be a JSON object.",
+        )
+    return {str(k): str(v) for k, v in value.items()}
+
+
 def _parse_image_urls(raw: str | None) -> list[str]:
     if raw is None or not raw.strip():
         return []
@@ -191,6 +211,7 @@ def stream_create_deck(body: CreateDeckBody) -> StreamingResponse:
             visual_style_preset_id=body.visual_style_preset_id,
             style_reference_image_uri=body.style_reference_image_uri,
             model_overrides=body.model_overrides,
+            thinking_effort_overrides=body.thinking_effort_overrides,
             image_urls=body.image_urls,
             agent_mode=body.agent_mode,
         )
@@ -217,6 +238,7 @@ async def stream_create_deck_uploads(
     visual_style_preset_id: str | None = Form(default=None),
     image_urls: str | None = Form(default=None),
     model_overrides: str | None = Form(default=None),
+    thinking_effort_overrides: str | None = Form(default=None),
     files: list[UploadFile] = File(...),
 ) -> StreamingResponse:
     thread_id = uuid.uuid4().hex[:12]
@@ -238,6 +260,9 @@ async def stream_create_deck_uploads(
             visual_style_preset_id=visual_style_preset_id,
             style_reference_image_uri=None,
             model_overrides=_parse_model_overrides(model_overrides),
+            thinking_effort_overrides=_parse_thinking_effort_overrides(
+                thinking_effort_overrides
+            ),
             image_urls=_parse_image_urls(image_urls),
             agent_mode=agent_mode,
         )

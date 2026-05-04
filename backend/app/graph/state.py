@@ -131,6 +131,7 @@ class SlideState(TypedDict, total=False):
     parent_thread_id: str | None            # playground base deck for a lane thread
     lane_id: str | None                     # playground lane id within parent
     lane_model_overrides: dict[str, str] | None  # per-run style/layout/html model ids
+    lane_thinking_effort_overrides: dict[str, str] | None  # per-run style/layout/html effort
 
     # ---- B': condensed materials (digest) ----
     materials_digest: list[dict[str, Any]]  # per-material {name, kind, retained_text, ...}

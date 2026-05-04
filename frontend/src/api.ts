@@ -131,6 +131,7 @@ export type CreateDeckBody = {
   style_reference_image_uri?: string | null;
   image_urls?: string[];
   model_overrides?: Partial<Record<ModelStage, string>>;
+  thinking_effort_overrides?: Partial<Record<ModelStage, ThinkingEffort>>;
   materials: Material[];
 };
 
@@ -169,6 +170,7 @@ export type PlaygroundModelOption = {
 };
 
 export type ModelStage = "style" | "layout" | "html";
+export type ThinkingEffort = "minimal" | "low" | "medium" | "high";
 
 export type PlaygroundModelStageOptions = {
   label: string;
@@ -176,8 +178,18 @@ export type PlaygroundModelStageOptions = {
   options: PlaygroundModelOption[];
 };
 
+export type ThinkingEffortOption = {
+  id: ThinkingEffort;
+  label: string;
+  description: string;
+};
+
 export type PlaygroundModelOptions = {
   stages: Record<ModelStage, PlaygroundModelStageOptions>;
+  thinking_efforts: {
+    default_effort: ThinkingEffort | null;
+    options: ThinkingEffortOption[];
+  };
 };
 
 export type ModelOptions = PlaygroundModelOptions;
@@ -185,6 +197,7 @@ export type ModelOptions = PlaygroundModelOptions;
 export type CreatePlaygroundLaneBody = {
   creator_prompt: string;
   model_overrides?: Partial<Record<ModelStage, string>>;
+  thinking_effort_overrides?: Partial<Record<ModelStage, ThinkingEffort>>;
 };
 
 export type Masterpiece = {
