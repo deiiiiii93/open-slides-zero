@@ -149,6 +149,10 @@ export type DeleteDeckResponse = {
   deleted_thread_ids: string[];
 };
 
+export type DeletePlaygroundLaneResponse = DeleteDeckResponse & {
+  lane: PlaygroundLane;
+};
+
 export type PlaygroundLane = {
   lane_id: string;
   lane_thread_id: string;
@@ -296,8 +300,8 @@ export const api = {
   createPlaygroundLaneStreamUrl: (id: string) =>
     `${STREAM_BASE}/decks/${id}/playground/lanes/stream`,
 
-  cutoffPlaygroundLane: (id: string, laneId: string) =>
-    http<{ ok: boolean; lane: PlaygroundLane }>("POST", `/decks/${id}/playground/lanes/${laneId}/cutoff`, {}),
+  deletePlaygroundLane: (id: string, laneId: string) =>
+    http<DeletePlaygroundLaneResponse>("DELETE", `/decks/${id}/playground/lanes/${laneId}`),
 
   saveLaneMasterpiece: (id: string, laneId: string) =>
     http<{ ok: boolean; masterpiece: Masterpiece }>("POST", `/decks/${id}/playground/lanes/${laneId}/masterpiece`, {}),

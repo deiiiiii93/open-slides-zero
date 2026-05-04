@@ -274,6 +274,46 @@ def test_delete_playground_lane_preserves_parent_and_removes_lane_record(isolate
     assert not (store.ROOT / lane_thread_id).exists()
 
 
+def test_delete_playground_lane_endpoint_frees_selected_lane_slot(isolated_graph):
+    client = TestClient(app)
+    base = _create_playground_base()
+    parent_thread_id = base["thread_id"]
+    lanes: list[dict] = []
+
+    for idx in range(5):
+        response = client.post(
+            f"/decks/{parent_thread_id}/playground/lanes/stream",
+            json={"creator_prompt": f"Lane prompt {idx}"},
+        )
+        assert response.status_code == 200, response.text
+        lane_event = next(
+            event for event in _parse_sse_events(response.text) if event["type"] == "lane"
+        )
+        lanes.append(lane_event["lane"])
+
+    response = client.delete(f"/decks/{parent_thread_id}/playground/lanes/{lanes[0]['lane_id']}")
+
+    assert response.status_code == 200
+    assert response.json()["thread_id"] == lanes[0]["lane_thread_id"]
+    assert response.json()["deleted_thread_ids"] == [lanes[0]["lane_thread_id"]]
+    assert client.get(f"/decks/{parent_thread_id}").status_code == 200
+    assert client.get(f"/decks/{lanes[0]['lane_thread_id']}").status_code == 404
+    assert playground_store.get_lane(parent_thread_id, lanes[0]["lane_id"]) is None
+    assert len(playground_store.list_lanes(parent_thread_id)) == 4
+
+    replacement = client.post(
+        f"/decks/{parent_thread_id}/playground/lanes/stream",
+        json={"creator_prompt": "Replacement lane"},
+    )
+
+    assert replacement.status_code == 200, replacement.text
+    replacement_lane = next(
+        event for event in _parse_sse_events(replacement.text) if event["type"] == "lane"
+    )["lane"]
+    assert replacement_lane["lane_id"] == lanes[0]["lane_id"]
+    assert len(playground_store.list_lanes(parent_thread_id)) == 5
+
+
 def test_delete_unknown_deck_returns_404(isolated_graph):
     client = TestClient(app)
 

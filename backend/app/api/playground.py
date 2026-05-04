@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from ..llm.models import lane_model_options, normalize_lane_model_overrides
 from . import playground_store
-from .common import config_for, current_state, graph
+from .common import config_for, current_state, delete_thread, graph
 from .history import _clone_checkpoint_lineage
 from .streaming import SSE_HEADERS, _sse, _stream_graph
 
@@ -151,6 +151,24 @@ def cutoff_playground_lane(thread_id: str, lane_id: str) -> dict[str, Any]:
     if row is None:
         raise HTTPException(status_code=404, detail="Unknown playground lane")
     return {"ok": True, "lane": _lane_response(row)}
+
+
+@router.delete("/decks/{thread_id}/playground/lanes/{lane_id}")
+def delete_playground_lane(thread_id: str, lane_id: str) -> dict[str, Any]:
+    _require_playground_base(thread_id)
+    row = playground_store.get_lane(thread_id, lane_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Unknown playground lane")
+
+    deleted_lane = _lane_response(row)
+    playground_store.delete_lane_record(thread_id, lane_id)
+    delete_thread(row["lane_thread_id"])
+    return {
+        "ok": True,
+        "lane": deleted_lane,
+        "thread_id": row["lane_thread_id"],
+        "deleted_thread_ids": [row["lane_thread_id"]],
+    }
 
 
 @router.get("/masterpieces")

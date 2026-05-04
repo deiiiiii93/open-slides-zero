@@ -91,13 +91,23 @@ def create_lane_record(
     creator_prompt: str,
 ) -> dict[str, Any]:
     with _connect() as conn:
-        count = conn.execute(
-            "SELECT COUNT(*) FROM playground_lanes WHERE parent_thread_id = ?",
+        rows = conn.execute(
+            "SELECT lane_id FROM playground_lanes WHERE parent_thread_id = ?",
             (parent_thread_id,),
-        ).fetchone()[0]
-        if count >= MAX_LANES_PER_DECK:
+        ).fetchall()
+        if len(rows) >= MAX_LANES_PER_DECK:
             raise ValueError(f"Creator playground allows at most {MAX_LANES_PER_DECK} lanes.")
-        lane_id = f"lane-{count + 1}"
+        used_lane_ids = {str(row["lane_id"]) for row in rows}
+        lane_id = next(
+            (
+                f"lane-{idx}"
+                for idx in range(1, MAX_LANES_PER_DECK + 1)
+                if f"lane-{idx}" not in used_lane_ids
+            ),
+            None,
+        )
+        if lane_id is None:
+            raise ValueError(f"Creator playground allows at most {MAX_LANES_PER_DECK} lanes.")
         created_at = _now()
         conn.execute(
             """

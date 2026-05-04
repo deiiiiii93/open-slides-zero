@@ -181,6 +181,7 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
   const [modelOptions, setModelOptions] = useState<PlaygroundModelOptions | null>(null);
   const [modelOverrides, setModelOverrides] = useState<Partial<Record<ModelStage, string>>>({});
   const [creatingLane, setCreatingLane] = useState(false);
+  const [deletingLaneId, setDeletingLaneId] = useState<string | null>(null);
   const [exporting, setExporting] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [view, setView] = useState<"lanes" | "arena">("lanes");
@@ -195,7 +196,11 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
     const result = await api.listPlaygroundLanes(deck.thread_id);
     setLanes(result.lanes);
     setMaxLanes(result.max_lanes);
-    setActiveLaneId((current) => current ?? result.lanes[0]?.lane_id ?? null);
+    setActiveLaneId((current) =>
+      current && result.lanes.some((lane) => lane.lane_id === current)
+        ? current
+        : result.lanes[0]?.lane_id ?? null,
+    );
   }, [deck.thread_id]);
 
   useEffect(() => {
@@ -516,13 +521,34 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
     );
   }
 
-  async function cutoffLane(lane: PlaygroundLane) {
+  async function deleteLane(lane: PlaygroundLane) {
+    if (deletingLaneId) return;
+    const confirmed = window.confirm(
+      `Delete ${laneLabel(lane)}? This permanently removes its checkpoints and generated files.`,
+    );
+    if (!confirmed) return;
+
     setErr(null);
+    setDeletingLaneId(lane.lane_id);
     try {
-      const result = await api.cutoffPlaygroundLane(deck.thread_id, lane.lane_id);
-      upsertLane(result.lane);
+      abortByLaneRef.current[lane.lane_id]?.abort();
+      await api.deletePlaygroundLane(deck.thread_id, lane.lane_id);
+      setLiveByLane((prev) => {
+        const { [lane.lane_id]: _removed, ...rest } = prev;
+        void _removed;
+        return rest;
+      });
+      const { [lane.lane_id]: _removedTagStarts, ...tagStartRest } = tagStartByLaneRef.current;
+      void _removedTagStarts;
+      tagStartByLaneRef.current = tagStartRest;
+      const { [lane.lane_id]: _removedAbort, ...abortRest } = abortByLaneRef.current;
+      void _removedAbort;
+      abortByLaneRef.current = abortRest;
+      await refreshLanes();
     } catch (e) {
       setErr(String(e));
+    } finally {
+      setDeletingLaneId(null);
     }
   }
 
@@ -702,7 +728,10 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
                 <span style={{ color: "#64748b", fontSize: 12 }}>
                   Blank lanes are allowed as a baseline.
                 </span>
-                <button disabled={creatingLane || lanes.length >= maxLanes} onClick={() => void createLane(prompt)}>
+                <button
+                  disabled={creatingLane || deletingLaneId !== null || lanes.length >= maxLanes}
+                  onClick={() => void createLane(prompt)}
+                >
                   {creatingLane ? "Working..." : "Create lane"}
                 </button>
               </div>
@@ -735,10 +764,11 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
                 currentSlide={currentSlide}
                 setCurrentSlide={setCurrentSlide}
                 busy={Boolean(liveByLane[activeLane.lane_id]?.isRunning)}
+                deleting={deletingLaneId === activeLane.lane_id}
                 exporting={exporting}
                 onResume={resumeLane}
                 onComment={commentOnLane}
-                onCutoff={cutoffLane}
+                onDelete={deleteLane}
                 onSaveMasterpiece={saveMasterpiece}
                 onExport={runLaneExport}
               />
@@ -790,10 +820,11 @@ function LaneDetail({
   currentSlide,
   setCurrentSlide,
   busy,
+  deleting,
   exporting,
   onResume,
   onComment,
-  onCutoff,
+  onDelete,
   onSaveMasterpiece,
   onExport,
 }: {
@@ -803,6 +834,7 @@ function LaneDetail({
   currentSlide: number;
   setCurrentSlide: (idx: number) => void;
   busy: boolean;
+  deleting: boolean;
   exporting: string | null;
   onResume: (lane: PlaygroundLane, payload: Record<string, unknown>) => Promise<void>;
   onComment: (
@@ -811,7 +843,7 @@ function LaneDetail({
     text: string,
     box: { x: number; y: number; w: number; h: number },
   ) => Promise<void>;
-  onCutoff: (lane: PlaygroundLane) => Promise<void>;
+  onDelete: (lane: PlaygroundLane) => Promise<void>;
   onSaveMasterpiece: (lane: PlaygroundLane) => Promise<void>;
   onExport: (lane: PlaygroundLane, label: string, fn: (state: DeckState) => Promise<void>) => Promise<void>;
 }) {
@@ -928,10 +960,10 @@ function LaneDetail({
             )}
           </div>
           <button
-            disabled={busy || lane.cutoff}
-            onClick={() => void onCutoff(lane)}
+            disabled={busy || deleting || exporting !== null}
+            onClick={() => void onDelete(lane)}
           >
-            Cut off lane
+            {deleting ? "Deleting..." : "Delete lane"}
           </button>
           <button
             disabled={busy || !lane.creator_prompt.trim()}
