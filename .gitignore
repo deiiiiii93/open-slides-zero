@@ -14,3 +14,7 @@ dist/
 .pytest_cache/
 .ruff_cache/
 CLAUDE.md
+.DS_Store
+.playwright-mcp/
+.claude/
+osz-*.png
