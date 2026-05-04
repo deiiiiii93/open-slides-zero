@@ -286,6 +286,9 @@ class ResumeBody(BaseModel):
 
 @router.post("/decks/{thread_id}/resume/stream")
 def stream_resume(thread_id: str, body: ResumeBody) -> StreamingResponse:
+    # Resume does not re-accept thinking_effort_overrides: effort is frozen at
+    # lane/deck creation, persisted in lane_thinking_effort_overrides, and read
+    # from state by each subagent. To change effort, create a new lane.
     if is_cutoff_thread(thread_id):
         raise HTTPException(status_code=409, detail="Playground lane is cut off.")
     snap = graph().get_state(config_for(thread_id))  # type: ignore[arg-type]

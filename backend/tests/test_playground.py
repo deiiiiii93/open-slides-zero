@@ -457,6 +457,48 @@ def test_lane_creation_applies_thinking_effort_overrides_per_stage(isolated_grap
     assert {kw["reasoning_effort"] for kw in calls["html_kwargs"]} == {overrides["html"]}
 
 
+def test_lane_resume_preserves_thinking_effort(isolated_graph):
+    calls = isolated_graph
+    base = _create_playground_base()
+    client = TestClient(app)
+
+    response = client.post(
+        f"/decks/{base['thread_id']}/playground/lanes/stream",
+        json={"thinking_effort_overrides": {"layout": "low", "html": "high"}},
+    )
+    assert response.status_code == 200
+    done = next(event for event in _parse_sse_events(response.text) if event["type"] == "done")
+    lane_thread_id = done["state"]["thread_id"]
+    assert _interrupt_gate(done["state"]) == "style"
+
+    calls["layout_kwargs"] = {}
+    calls["html_kwargs"] = []
+
+    resumed_to_layout = client.post(
+        f"/decks/{lane_thread_id}/resume/stream",
+        json={"payload": {"approved": True}},
+    )
+    assert resumed_to_layout.status_code == 200
+    layout_done = next(
+        event for event in _parse_sse_events(resumed_to_layout.text)
+        if event["type"] == "done"
+    )
+    assert _interrupt_gate(layout_done["state"]) == "layout"
+    assert calls["layout_kwargs"]["reasoning_effort"] == "low"
+
+    resumed_to_ready = client.post(
+        f"/decks/{lane_thread_id}/resume/stream",
+        json={"payload": {"approved": True, "overrides": {}}},
+    )
+    assert resumed_to_ready.status_code == 200
+    ready_done = next(
+        event for event in _parse_sse_events(resumed_to_ready.text)
+        if event["type"] == "done"
+    )
+    assert ready_done["state"]["values"]["current_stage"] == "ready"
+    assert {kw["reasoning_effort"] for kw in calls["html_kwargs"]} == {"high"}
+
+
 def test_lane_creation_without_model_overrides_uses_defaults(isolated_graph):
     calls = isolated_graph
     base = _create_playground_base()

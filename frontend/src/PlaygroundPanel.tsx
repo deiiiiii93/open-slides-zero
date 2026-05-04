@@ -190,16 +190,49 @@ function thinkingEffortLabel(
   return modelOptions?.thinking_efforts?.options.find((option) => option.id === effort)?.label ?? effort;
 }
 
+function readJsonLocalStorage<T>(key: string, fallback: T): T {
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? (parsed as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJsonLocalStorage(key: string, value: unknown): void {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* quota or privacy mode — silent */
+  }
+}
+
 export function PlaygroundPanel({ deck, catalog }: Props) {
   const [lanes, setLanes] = useState<PlaygroundLane[]>([]);
   const [maxLanes, setMaxLanes] = useState(5);
   const [activeLaneId, setActiveLaneId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [modelOptions, setModelOptions] = useState<PlaygroundModelOptions | null>(null);
-  const [modelOverrides, setModelOverrides] = useState<Partial<Record<ModelStage, string>>>({});
+  const modelOverridesKey = `osz.playground.${deck.thread_id}.modelOverrides`;
+  const effortOverridesKey = `osz.playground.${deck.thread_id}.effortOverrides`;
+  const [modelOverrides, setModelOverrides] = useState<Partial<Record<ModelStage, string>>>(
+    () => readJsonLocalStorage(modelOverridesKey, {} as Partial<Record<ModelStage, string>>),
+  );
   const [thinkingEffortOverrides, setThinkingEffortOverrides] = useState<
     Partial<Record<ModelStage, ThinkingEffort>>
-  >({});
+  >(
+    () => readJsonLocalStorage(effortOverridesKey, {} as Partial<Record<ModelStage, ThinkingEffort>>),
+  );
+
+  useEffect(() => {
+    writeJsonLocalStorage(modelOverridesKey, modelOverrides);
+  }, [modelOverrides, modelOverridesKey]);
+
+  useEffect(() => {
+    writeJsonLocalStorage(effortOverridesKey, thinkingEffortOverrides);
+  }, [thinkingEffortOverrides, effortOverridesKey]);
   const [creatingLane, setCreatingLane] = useState(false);
   const [deletingLaneId, setDeletingLaneId] = useState<string | null>(null);
   const [exporting, setExporting] = useState<string | null>(null);
