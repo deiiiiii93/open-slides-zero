@@ -130,3 +130,85 @@ def test_image_placeholder_requires_visible_label():
     bad = GOOD_SLIDE.replace("Add image here", "Visual")
     r = validate_slide_html(bad)
     assert any(e.rule == "image_placeholder_label" for e in r.errors)
+
+
+def test_media_rule_warns():
+    bad = GOOD_SLIDE.replace(
+        "*{box-sizing:border-box}",
+        "*{box-sizing:border-box} @media (max-width: 600px){h1{font-size:20px}}",
+    )
+    r = validate_slide_html(bad)
+    assert any(w.rule == "responsive_css_in_canvas" for w in r.warnings)
+
+
+def test_hover_state_warns():
+    bad = GOOD_SLIDE.replace(
+        "*{box-sizing:border-box}",
+        "*{box-sizing:border-box} h1:hover{color:red}",
+    )
+    r = validate_slide_html(bad)
+    assert any(w.rule == "non_static_chrome" for w in r.warnings)
+
+
+def test_transition_warns():
+    bad = GOOD_SLIDE.replace(
+        "*{box-sizing:border-box}",
+        "*{box-sizing:border-box;transition:all 0.2s}",
+    )
+    r = validate_slide_html(bad)
+    assert any(w.rule == "non_static_chrome" for w in r.warnings)
+
+
+def test_keyframes_warns():
+    bad = GOOD_SLIDE.replace(
+        "*{box-sizing:border-box}",
+        "*{box-sizing:border-box} @keyframes pulse{from{opacity:0}to{opacity:1}}",
+    )
+    r = validate_slide_html(bad)
+    assert any(w.rule == "non_static_chrome" for w in r.warnings)
+
+
+def test_off_scale_font_weight_warns():
+    bad = GOOD_SLIDE.replace(
+        '<h1 style="font-size:28px">Title</h1>',
+        '<h1 style="font-size:28px;font-weight:550">Title</h1>',
+    )
+    r = validate_slide_html(bad)
+    assert any(w.rule == "font_weight_offscale" for w in r.warnings)
+
+
+def test_canonical_font_weights_pass():
+    ok = GOOD_SLIDE.replace(
+        '<h1 style="font-size:28px">Title</h1>',
+        '<h1 style="font-size:28px;font-weight:600">Title</h1>',
+    )
+    r = validate_slide_html(ok)
+    assert r.ok
+    assert not any(w.rule == "font_weight_offscale" for w in r.warnings)
+
+
+def test_external_stylesheet_link_errors():
+    bad = GOOD_SLIDE.replace(
+        "<head>",
+        '<head><link rel="stylesheet" href="https://example.com/style.css">',
+    )
+    r = validate_slide_html(bad)
+    assert any(e.rule == "external_resource_link" for e in r.errors)
+
+
+def test_google_fonts_link_errors():
+    bad = GOOD_SLIDE.replace(
+        "<head>",
+        '<head><link href="https://fonts.googleapis.com/css?family=Inter">',
+    )
+    r = validate_slide_html(bad)
+    assert any(e.rule == "external_resource_link" for e in r.errors)
+
+
+def test_at_import_errors():
+    bad = GOOD_SLIDE.replace(
+        "*{box-sizing:border-box}",
+        "@import url('https://fonts.googleapis.com/css?family=Inter'); *{box-sizing:border-box}",
+    )
+    r = validate_slide_html(bad)
+    assert any(e.rule == "external_resource_link" for e in r.errors)

@@ -229,6 +229,41 @@ def validate_slide_html(
         warnings.append(Issue("no_text_truncation", "warning",
                               "Avoid white-space:nowrap."))
 
+    if re.search(r"@media\b", html, flags=re.I):
+        warnings.append(Issue("responsive_css_in_canvas", "warning",
+                              "Avoid @media rules — slides compose for the exact canvas only."))
+    if re.search(r":\s*hover\b", html, flags=re.I):
+        warnings.append(Issue("non_static_chrome", "warning",
+                              "Avoid :hover states — slides are static."))
+    if re.search(r"\b(transition|animation)\s*:", html, flags=re.I):
+        warnings.append(Issue("non_static_chrome", "warning",
+                              "Avoid transitions/animations — slides are static."))
+    if re.search(r"@keyframes\b", html, flags=re.I):
+        warnings.append(Issue("non_static_chrome", "warning",
+                              "Avoid @keyframes — slides are static."))
+
+    weight_offscale = [
+        m.group(1)
+        for m in re.finditer(r"font-weight\s*:\s*(\d{3})\b", html, flags=re.I)
+        if m.group(1) not in {"300", "400", "600", "700"}
+    ]
+    if weight_offscale:
+        warnings.append(Issue("font_weight_offscale", "warning",
+                              f"Off-scale font-weight values: {sorted(set(weight_offscale))}. "
+                              "Prefer 300/400/600/700."))
+
+    for m in re.finditer(r"<link\b[^>]*>", html, flags=re.I):
+        tag = m.group(0)
+        rel = (_attr_value(tag, "rel") or "").lower()
+        href = (_attr_value(tag, "href") or "").lower()
+        if rel == "stylesheet" or "fonts" in href or href.startswith(("http://", "https://", "//")):
+            errors.append(Issue("external_resource_link", "error",
+                                "Remove external <link> tags — slides must be self-contained."))
+            break
+    if re.search(r"@import\s+url", html, flags=re.I):
+        errors.append(Issue("external_resource_link", "error",
+                            "Remove @import url() — slides must be self-contained."))
+
     # Banned fonts (anti-slop)
     for pat in BANNED_FONT_PATTERNS:
         if re.search(pat, html):

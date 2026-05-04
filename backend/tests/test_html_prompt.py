@@ -125,12 +125,15 @@ def test_html_prompt_includes_composition_quality_rules():
     assert "hover states, animations" in system_prompt
     assert "title hierarchy first" in system_prompt
 
-    user_prompt = messages[1]["content"]
-    assert "Before returning the HTML, silently review" in user_prompt
-    assert "exact canvas size" in user_prompt
-    assert "role-based" in user_prompt
-    assert "no external imports" in user_prompt
-    assert "If any check fails, revise" in user_prompt
+    assert "Before returning the HTML, silently review" in system_prompt
+    assert "exact canvas size" in system_prompt
+    assert "role-based" in system_prompt
+    assert "no external imports" in system_prompt
+    assert "If any check fails, revise" in system_prompt
+
+    assert "zone contents, not motifs" in system_prompt
+    assert "do not count toward the motif limit" in system_prompt
+    assert "substitute a near-equivalent system fallback" in system_prompt
 
 
 def test_html_prompt_omits_visual_direction_guidance_for_ai_decide():

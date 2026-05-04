@@ -303,10 +303,10 @@ CANVAS_SIZES = {
 SAFE_MARGIN = 30
 
 FONT_LIMITS = {
-    "very_dense": {"body": (9, 11),  "heading": (16, 20), "display": (24, 28)},
-    "dense":      {"body": (10, 12), "heading": (18, 22), "display": (26, 30)},
-    "balanced":   {"body": (11, 13), "heading": (20, 24), "display": (28, 32)},
-    "sparse":     {"body": (12, 14), "heading": (22, 26), "display": (30, 34)},
+    "very_dense": {"body": (9, 12),   "heading": (16, 22), "display": (28, 38)},
+    "dense":      {"body": (10, 13),  "heading": (18, 26), "display": (30, 42)},
+    "balanced":   {"body": (11, 15),  "heading": (20, 28), "display": (34, 48)},
+    "sparse":     {"body": (13, 17),  "heading": (22, 32), "display": (38, 52)},
 }
 
 

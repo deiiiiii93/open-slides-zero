@@ -43,18 +43,21 @@ Claude-quality composition discipline:
   visible element must belong to one zone.
 - Convert bullets into designed evidence: numbered keys, proof rows, micro-bars,
   split columns, quote blocks, or marked steps. Use a plain bullet list only when
-  it is the clearest structure.
+  it is the clearest structure. These are zone contents, not motifs.
 - Add at most one content-earned CSS-only motif when useful: thin rules, bands,
-  rings, simple bars, coordinate lines, counters, or typographic anchors. The
-  motif must explain the slide idea.
+  rings, simple bars, coordinate lines, counters, or typographic anchors. A motif
+  is a small decorative anchor, not a structural layout pattern. Proof rows,
+  split columns, and quote blocks do not count toward the motif limit.
 - Use at most two font-family roles per slide: one display/heading face and one
-  body/label face, derived from the supplied typography when possible. Do not use
-  external font imports or font <link> tags.
+  body/label face, derived from the supplied typography when it names a system or
+  already-loaded face. If the supplied typography names a font that would require
+  loading, substitute a near-equivalent system fallback instead. Do not use
+  external font imports, @import rules, or font <link> tags.
 - For a 960x540 slide, use a role-based type scale: cover/display 34-48px,
   normal titles 28-40px, section headings 18-26px, body/proof 11.5-15px for
   dense slides or 13-17px for balanced slides, and labels/meta 9-11px.
-- Only one decorative numeral or glyph may exceed 64px. Body/proof text must
-  stay at or below 20px.
+- Only one decorative numeral or glyph may exceed 64px (and never above ~120px
+  for a 540px-tall canvas). Body/proof text must stay at or below 20px.
 - Prefer font weights 400, 600, and 700, optionally 300. Avoid arbitrary weights
   like 350, 450, 550, or 650.
 - Use title line-height 1.1-1.35, body/proof line-height 1.45-1.7, and
@@ -74,6 +77,12 @@ Claude-quality composition discipline:
 - Make density intentional: title hierarchy first, proof second, captions or
   footers last. Fit all text at final pixel size with no truncation, scrolling,
   or hidden overflow.
+
+Before returning the HTML, silently review the slide against this prompt:
+exact canvas size, no overflow/truncation, clear 2-4 zone structure,
+role-based type scale, restrained colors/chrome, no external imports,
+no hover states, no animations, no responsive fallback CSS, and no unearned
+motif. If any check fails, revise the HTML before returning.
 """
 
 _TRUNCATION_REASONS = {"length", "max_tokens"}
@@ -178,12 +187,6 @@ Speaker notes (do NOT render verbatim, only for your reasoning): {brief_slide.ge
 {image_slot_user_guidance}
 ASCII layout wireframe for reference:
 {brief_slide.get('wireframe', '')}{feedback_block}
-
-Before returning the HTML, silently review the slide against the full prompt:
-exact canvas size, no overflow/truncation, clear 2-4 zone structure, role-based
-type scale, restrained colors/chrome, no external imports, no hover states, no
-animations, no responsive fallback CSS, and no unearned motif.
-If any check fails, revise the HTML before returning.
 
 Return ONLY the complete HTML document. Begin with <!DOCTYPE html>.
 """
