@@ -37,6 +37,45 @@ Avoid AI-slop tropes (these are non-negotiable):
 - Commit to a single bold aesthetic direction — do not hedge.
 """
 
+COMPOSITION_DISCIPLINE = """\
+Claude-quality composition discipline:
+- Choose 2-4 named zones from the requested pattern before writing HTML. Every
+  visible element must belong to one zone.
+- Convert bullets into designed evidence: numbered keys, proof rows, micro-bars,
+  split columns, quote blocks, or marked steps. Use a plain bullet list only when
+  it is the clearest structure.
+- Add at most one content-earned CSS-only motif when useful: thin rules, bands,
+  rings, simple bars, coordinate lines, counters, or typographic anchors. The
+  motif must explain the slide idea.
+- Use at most two font-family roles per slide: one display/heading face and one
+  body/label face, derived from the supplied typography when possible. Do not use
+  external font imports or font <link> tags.
+- For a 960x540 slide, use a role-based type scale: cover/display 34-48px,
+  normal titles 28-40px, section headings 18-26px, body/proof 11.5-15px for
+  dense slides or 13-17px for balanced slides, and labels/meta 9-11px.
+- Only one decorative numeral or glyph may exceed 64px. Body/proof text must
+  stay at or below 20px.
+- Prefer font weights 400, 600, and 700, optionally 300. Avoid arbitrary weights
+  like 350, 450, 550, or 650.
+- Use title line-height 1.1-1.35, body/proof line-height 1.45-1.7, and
+  label/meta line-height 1-1.25. Reserve letter-spacing 0.08em-0.18em for
+  labels and kickers, not body text.
+- Compose for the exact root canvas only. Do not add @media rules, print styles,
+  responsive fallback CSS, hover states, transitions, animations, or defensive
+  fit-guard sections.
+- Prefer editorial restraint: one background field, one text color family, one
+  accent family, flat fills, hairline rules, measured whitespace, square or
+  near-square edges, and near-zero shadows. Use circular radius only for dots,
+  rings, or markers.
+- Avoid decorative blobs, generic card piles, hover states, animations, SVG,
+  external CSS imports, and external font imports.
+- Use semantic, slide-specific class names and short CSS comments for major
+  regions. Keep the DOM shallow and purposeful.
+- Make density intentional: title hierarchy first, proof second, captions or
+  footers last. Fit all text at final pixel size with no truncation, scrolling,
+  or hidden overflow.
+"""
+
 _TRUNCATION_REASONS = {"length", "max_tokens"}
 
 
@@ -115,6 +154,8 @@ document for a single slide. Hard constraints:
 
 {ANTI_SLOP_RULES}
 
+{COMPOSITION_DISCIPLINE}
+
 Design system to apply:
 - Palette: {palette}
 - Typography: {typography}
@@ -137,6 +178,12 @@ Speaker notes (do NOT render verbatim, only for your reasoning): {brief_slide.ge
 {image_slot_user_guidance}
 ASCII layout wireframe for reference:
 {brief_slide.get('wireframe', '')}{feedback_block}
+
+Before returning the HTML, silently review the slide against the full prompt:
+exact canvas size, no overflow/truncation, clear 2-4 zone structure, role-based
+type scale, restrained colors/chrome, no external imports, no hover states, no
+animations, no responsive fallback CSS, and no unearned motif.
+If any check fails, revise the HTML before returning.
 
 Return ONLY the complete HTML document. Begin with <!DOCTYPE html>.
 """

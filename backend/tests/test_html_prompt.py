@@ -74,6 +74,65 @@ def test_html_prompt_includes_visual_preference_guidance():
     assert preset["html_rules"][0] in system_prompt
 
 
+def test_html_prompt_includes_composition_quality_rules():
+    messages = _slide_prompt(
+        {
+            "slide_idx": 0,
+            "title": "Title",
+            "role": "opener",
+            "bullets": ["Only real content"],
+            "pattern": "title_body",
+            "zones": ["title", "body"],
+        },
+        {
+            "aspect_ratio": "16:9",
+            "style": {
+                "palette": {"background": "#fff", "text": "#111"},
+                "typography": {"heading": "Aptos", "body": "Aptos"},
+                "tone": "editorial",
+            },
+            "density": "balanced",
+            "language": "en",
+        },
+    )
+
+    system_prompt = messages[0]["content"]
+    assert "Claude-quality composition discipline:" in system_prompt
+    assert "Choose 2-4 named zones" in system_prompt
+    assert "visible element must belong to one zone" in system_prompt
+    assert "content-earned CSS-only motif" in system_prompt
+    assert "thin rules, bands" in system_prompt
+    assert "rings, simple bars" in system_prompt
+    assert "at most two font-family roles" in system_prompt
+    assert "cover/display 34-48px" in system_prompt
+    assert "normal titles 28-40px" in system_prompt
+    assert "body/proof 11.5-15px" in system_prompt
+    assert "labels/meta 9-11px" in system_prompt
+    assert "decorative numeral or glyph may exceed 64px" in system_prompt
+    assert "Body/proof text must" in system_prompt
+    assert "400, 600, and 700" in system_prompt
+    assert "350, 450, 550, or 650" in system_prompt
+    assert "title line-height 1.1-1.35" in system_prompt
+    assert "body/proof line-height 1.45-1.7" in system_prompt
+    assert "letter-spacing 0.08em-0.18em" in system_prompt
+    assert "exact root canvas only" in system_prompt
+    assert "@media rules" in system_prompt
+    assert "responsive fallback CSS" in system_prompt
+    assert "transitions, animations" in system_prompt
+    assert "near-zero shadows" in system_prompt
+    assert "external CSS imports" in system_prompt
+    assert "external font imports" in system_prompt
+    assert "hover states, animations" in system_prompt
+    assert "title hierarchy first" in system_prompt
+
+    user_prompt = messages[1]["content"]
+    assert "Before returning the HTML, silently review" in user_prompt
+    assert "exact canvas size" in user_prompt
+    assert "role-based" in user_prompt
+    assert "no external imports" in user_prompt
+    assert "If any check fails, revise" in user_prompt
+
+
 def test_html_prompt_omits_visual_direction_guidance_for_ai_decide():
     messages = _slide_prompt(
         {
