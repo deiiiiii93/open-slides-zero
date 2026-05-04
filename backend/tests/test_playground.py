@@ -722,24 +722,6 @@ def test_playground_enforces_five_lane_limit(isolated_graph):
     assert "at most 5 lanes" in response.json()["detail"]
 
 
-def test_cutoff_lane_cannot_resume(isolated_graph):
-    base = _create_playground_base()
-    client = TestClient(app)
-    response = client.post(
-        f"/decks/{base['thread_id']}/playground/lanes/stream",
-        json={"creator_prompt": "Stop after style."},
-    )
-    lane_event = next(event for event in _parse_sse_events(response.text) if event["type"] == "lane")
-    lane = lane_event["lane"]
-
-    cutoff = playground.cutoff_playground_lane(base["thread_id"], lane["lane_id"])
-
-    assert cutoff["lane"]["cutoff"] is True
-    with pytest.raises(HTTPException) as exc_info:
-        hitl.resume_deck(lane["lane_thread_id"], {"approved": True})
-    assert exc_info.value.status_code == 409
-
-
 def test_masterpiece_save_list_delete_deduplicates_prompt(isolated_graph):
     base = _create_playground_base()
     client = TestClient(app)
@@ -766,3 +748,102 @@ def test_masterpiece_save_list_delete_deduplicates_prompt(isolated_graph):
     deleted = client.delete(f"/masterpieces/{first.json()['masterpiece']['id']}")
     assert deleted.status_code == 200
     assert client.get("/masterpieces").json()["masterpieces"] == []
+
+
+def test_concurrent_delete_resolves_to_single_winner(isolated_graph):
+    import threading
+
+    client = TestClient(app)
+    base = _create_playground_base()
+    parent_thread_id = base["thread_id"]
+    response = client.post(
+        f"/decks/{parent_thread_id}/playground/lanes/stream",
+        json={"creator_prompt": "lane to race"},
+    )
+    assert response.status_code == 200
+    lane = next(
+        event for event in _parse_sse_events(response.text) if event["type"] == "lane"
+    )["lane"]
+    lane_id = lane["lane_id"]
+
+    statuses: list[int] = []
+    barrier = threading.Barrier(2)
+
+    def delete_once() -> None:
+        local_client = TestClient(app)
+        barrier.wait()
+        result = local_client.delete(
+            f"/decks/{parent_thread_id}/playground/lanes/{lane_id}"
+        )
+        statuses.append(result.status_code)
+
+    threads = [threading.Thread(target=delete_once) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5.0)
+
+    assert sorted(statuses) == [200, 404]
+    assert playground_store.get_lane(parent_thread_id, lane_id) is None
+
+
+def test_delete_during_stream_emits_cancelled_event(
+    isolated_graph,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import threading
+    import time
+
+    client = TestClient(app)
+    base = _create_playground_base()
+    parent_thread_id = base["thread_id"]
+
+    response = client.post(
+        f"/decks/{parent_thread_id}/playground/lanes/stream",
+        json={"creator_prompt": "fast lane"},
+    )
+    assert response.status_code == 200
+    lane = next(
+        event for event in _parse_sse_events(response.text) if event["type"] == "lane"
+    )["lane"]
+    lane_thread_id = lane["lane_thread_id"]
+    lane_id = lane["lane_id"]
+
+    def slow_layout(_model, _messages, schema, **_kwargs):
+        if schema is layout._BulkSignals:
+            for _ in range(50):
+                if common.graph().get_state(  # type: ignore[arg-type]
+                    {"configurable": {"thread_id": lane_thread_id}}
+                ) is None:
+                    break
+                time.sleep(0.05)
+        return layout._BulkSignals(slides=[])
+
+    monkeypatch.setattr(layout.zenmux, "chat_structured", slow_layout)
+
+    body_chunks: list[str] = []
+
+    def consume() -> None:
+        with client.stream(
+            "POST",
+            f"/decks/{lane_thread_id}/resume/stream",
+            json={"payload": {"approved": True}},
+        ) as resp:
+            for chunk in resp.iter_text():
+                body_chunks.append(chunk)
+
+    consumer = threading.Thread(target=consume)
+    consumer.start()
+    time.sleep(0.3)
+
+    deleted = client.delete(
+        f"/decks/{parent_thread_id}/playground/lanes/{lane_id}"
+    )
+    consumer.join(timeout=10.0)
+
+    assert deleted.status_code == 200
+    body = "".join(body_chunks)
+    events = _parse_sse_events(body)
+    cancelled = [event for event in events if event["type"] == "cancelled"]
+    assert cancelled, f"no cancelled event in {[event['type'] for event in events]}"
+    assert cancelled[0]["thread_id"] == lane_thread_id

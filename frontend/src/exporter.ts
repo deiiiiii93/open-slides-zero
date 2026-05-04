@@ -38,7 +38,6 @@ export type ExportablePlaygroundLane = {
   lane_id: string;
   lane_thread_id: string;
   creator_prompt: string;
-  cutoff: boolean;
   state: DeckState | null;
 };
 
@@ -46,7 +45,6 @@ type PackageIndexRow = {
   laneId: string;
   laneName: string;
   stage: string;
-  cutoff: boolean;
   prompt: string;
   singleHtmlHref: string;
   slideIndexHref: string;
@@ -1835,7 +1833,6 @@ function buildPackageIndexHtml(packageName: string, rows: PackageIndexRow[]): st
       return `    <tr>
       <td><strong>${escapeText(row.laneName)}</strong><br /><code>${escapeText(row.laneId)}</code></td>
       <td>${escapeText(row.stage)}</td>
-      <td>${row.cutoff ? "Yes" : "No"}</td>
       <td>
         <a href="${escapeAttr(row.singleHtmlHref)}">Single HTML</a><br />
         <a href="${escapeAttr(row.slideIndexHref)}">Slide HTML index</a><br />
@@ -1867,7 +1864,7 @@ function buildPackageIndexHtml(packageName: string, rows: PackageIndexRow[]): st
   <h1>${escapeText(packageName)}</h1>
   <table>
     <thead>
-      <tr><th>Lane</th><th>Stage</th><th>Cut off</th><th>Artifacts</th><th>Prompt</th></tr>
+      <tr><th>Lane</th><th>Stage</th><th>Artifacts</th><th>Prompt</th></tr>
     </thead>
     <tbody>
 ${items}
@@ -1910,7 +1907,6 @@ export async function buildPlaygroundLanesPackageArtifact(
       laneId: lane.lane_id,
       laneName,
       stage,
-      cutoff: lane.cutoff,
       prompt: lane.creator_prompt,
       singleHtmlHref: `${folder}${htmlSingle.filename}`,
       slideIndexHref: `${folder}index.html`,

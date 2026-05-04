@@ -67,6 +67,8 @@ export type ImageInsertionPlan = {
   unmatched_slots: UnmatchedImageSlot[];
 };
 
+export type RecoveryHint = "interrupt" | "crashed" | "ready";
+
 export type DeckState = {
   thread_id: string;
   checkpoint_id?: string;
@@ -74,6 +76,7 @@ export type DeckState = {
   values: Record<string, any>;
   next: string[];
   interrupts: any[];
+  recovery_hint?: RecoveryHint;
   tasks?: Array<{ id?: string | null; name?: string | null; error?: string | null }>;
 };
 
@@ -158,7 +161,6 @@ export type PlaygroundLane = {
   lane_id: string;
   lane_thread_id: string;
   creator_prompt: string;
-  cutoff: boolean;
   created_at: string;
   state: DeckState | null;
 };

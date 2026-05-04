@@ -302,12 +302,23 @@ def current_state(thread_id: str, *, source_thread_id: str | None = None) -> dic
         rebuilt = synthetic_interrupt(values)
         if rebuilt is not None:
             interrupts = [rebuilt]
+    if failed_tasks:
+        recovery_hint = "crashed"
+    elif interrupts:
+        recovery_hint = "interrupt"
+    elif next_nodes:
+        # Pending work with no error and no interrupt — likely a process crash
+        # mid-node or an external resume from outside the harness.
+        recovery_hint = "crashed"
+    else:
+        recovery_hint = "ready"
     state = {
         "thread_id": thread_id,
         "checkpoint_id": snap.config["configurable"].get("checkpoint_id"),
         "values": values,
         "next": next_nodes,
         "interrupts": interrupts,
+        "recovery_hint": recovery_hint,
         "created_at": getattr(snap, "created_at", None),
     }
     if failed_tasks:

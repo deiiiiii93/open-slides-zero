@@ -40,8 +40,7 @@ from .decks import (
     _coerce_text_material,
     normalize_uploaded_materials,
 )
-from .playground_store import is_cutoff_thread
-
+from ..llm import stream as stream_module
 router = APIRouter()
 log = logging.getLogger(__name__)
 
@@ -71,12 +70,16 @@ def _stream_graph(
     so users can retry a mid-pipeline failure.
     """
     g = graph()
+    cancel_event = stream_module.register_cancel_event(thread_id)
     try:
         for mode, chunk in g.stream(
             input_payload,
             cfg,  # type: ignore[arg-type]
             stream_mode=["custom", "updates"],
         ):
+            if cancel_event.is_set():
+                yield _sse({"type": "cancelled", "thread_id": thread_id})
+                break
             if mode == "custom":
                 ch = chunk.get("channel") if isinstance(chunk, dict) else None
                 if ch == "tokens":
@@ -114,6 +117,8 @@ def _stream_graph(
                 mirror_to_disk(thread_id)
             except Exception:
                 log.exception("failed to emit recovery state for %s", thread_id)
+    finally:
+        stream_module.unregister_cancel_event(thread_id)
 
 
 def _safe_patch(patch: Any) -> dict[str, Any]:
@@ -289,8 +294,6 @@ def stream_resume(thread_id: str, body: ResumeBody) -> StreamingResponse:
     # Resume does not re-accept thinking_effort_overrides: effort is frozen at
     # lane/deck creation, persisted in lane_thinking_effort_overrides, and read
     # from state by each subagent. To change effort, create a new lane.
-    if is_cutoff_thread(thread_id):
-        raise HTTPException(status_code=409, detail="Playground lane is cut off.")
     snap = graph().get_state(config_for(thread_id))  # type: ignore[arg-type]
     if not snap:
         raise HTTPException(status_code=404, detail="Unknown deck")

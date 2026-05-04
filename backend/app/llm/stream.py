@@ -14,6 +14,7 @@ There are two situations where we want tokens to flow:
 from __future__ import annotations
 
 import contextvars
+import threading
 from typing import Any, Callable
 
 try:
@@ -21,6 +22,46 @@ try:
 except Exception:  # pragma: no cover
     def get_stream_writer() -> Any | None:  # type: ignore[misc]
         return None
+
+
+# Best-effort cancellation: SSE endpoints register a per-thread event before
+# starting graph.stream(); DELETE endpoints set the event to signal cancellation.
+# The streaming loop checks the event between chunks. The upstream LLM HTTP
+# request still completes in the background — full kill would require plumbing
+# httpx cancel() through zenmux.chat.
+_lane_cancel_events: dict[str, threading.Event] = {}
+_lane_cancel_lock = threading.Lock()
+
+
+class LaneCancelled(RuntimeError):
+    pass
+
+
+def register_cancel_event(thread_id: str) -> threading.Event:
+    event = threading.Event()
+    with _lane_cancel_lock:
+        _lane_cancel_events[thread_id] = event
+    return event
+
+
+def unregister_cancel_event(thread_id: str) -> None:
+    with _lane_cancel_lock:
+        _lane_cancel_events.pop(thread_id, None)
+
+
+def cancel_lane(thread_id: str) -> bool:
+    with _lane_cancel_lock:
+        event = _lane_cancel_events.get(thread_id)
+    if event is None:
+        return False
+    event.set()
+    return True
+
+
+def is_lane_cancelled(thread_id: str) -> bool:
+    with _lane_cancel_lock:
+        event = _lane_cancel_events.get(thread_id)
+    return event is not None and event.is_set()
 
 
 # Tag identifies which subagent is emitting (outline / style / layout / html:N).

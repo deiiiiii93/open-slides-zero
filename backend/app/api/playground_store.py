@@ -1,7 +1,7 @@
 """SQLite helpers for creator playground metadata.
 
 LangGraph checkpoints remain the source of truth for lane state. These tables
-only track parent/lane relationships, cut-off status, and saved prompt snippets.
+only track parent/lane relationships and saved prompt snippets.
 """
 
 from __future__ import annotations
@@ -36,7 +36,6 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
             lane_id TEXT NOT NULL,
             lane_thread_id TEXT NOT NULL UNIQUE,
             creator_prompt TEXT NOT NULL,
-            cutoff INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             PRIMARY KEY (parent_thread_id, lane_id)
         )
@@ -48,6 +47,11 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
         ON playground_lanes(parent_thread_id, created_at)
         """
     )
+    try:
+        conn.execute("ALTER TABLE playground_lanes DROP COLUMN cutoff")
+    except sqlite3.OperationalError:
+        # Column already absent (fresh DB) or older SQLite without DROP COLUMN.
+        pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS masterpieces (
@@ -66,7 +70,6 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
         "lane_id": row["lane_id"],
         "lane_thread_id": row["lane_thread_id"],
         "creator_prompt": row["creator_prompt"],
-        "cutoff": bool(row["cutoff"]),
         "created_at": row["created_at"],
     }
 
@@ -75,7 +78,7 @@ def list_lanes(parent_thread_id: str) -> list[dict[str, Any]]:
     with _connect() as conn:
         rows = conn.execute(
             """
-            SELECT parent_thread_id, lane_id, lane_thread_id, creator_prompt, cutoff, created_at
+            SELECT parent_thread_id, lane_id, lane_thread_id, creator_prompt, created_at
             FROM playground_lanes
             WHERE parent_thread_id = ?
             ORDER BY created_at, lane_id
@@ -112,8 +115,8 @@ def create_lane_record(
         conn.execute(
             """
             INSERT INTO playground_lanes
-            (parent_thread_id, lane_id, lane_thread_id, creator_prompt, cutoff, created_at)
-            VALUES (?, ?, ?, ?, 0, ?)
+            (parent_thread_id, lane_id, lane_thread_id, creator_prompt, created_at)
+            VALUES (?, ?, ?, ?, ?)
             """,
             (parent_thread_id, lane_id, lane_thread_id, creator_prompt, created_at),
         )
@@ -123,18 +126,36 @@ def create_lane_record(
         "lane_id": lane_id,
         "lane_thread_id": lane_thread_id,
         "creator_prompt": creator_prompt,
-        "cutoff": False,
         "created_at": created_at,
     }
 
 
-def delete_lane_record(parent_thread_id: str, lane_id: str) -> None:
+def delete_lane_record(parent_thread_id: str, lane_id: str) -> dict[str, Any] | None:
+    """Atomically read-and-delete the lane row. Returns the row if it existed,
+    None if a concurrent caller deleted it first."""
     with _connect() as conn:
-        conn.execute(
-            "DELETE FROM playground_lanes WHERE parent_thread_id = ? AND lane_id = ?",
-            (parent_thread_id, lane_id),
-        )
-        conn.commit()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute(
+                """
+                SELECT parent_thread_id, lane_id, lane_thread_id, creator_prompt, created_at
+                FROM playground_lanes
+                WHERE parent_thread_id = ? AND lane_id = ?
+                """,
+                (parent_thread_id, lane_id),
+            ).fetchone()
+            if row is None:
+                conn.execute("COMMIT")
+                return None
+            conn.execute(
+                "DELETE FROM playground_lanes WHERE parent_thread_id = ? AND lane_id = ?",
+                (parent_thread_id, lane_id),
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    return _row_to_dict(row)
 
 
 def delete_lanes_for_parent(parent_thread_id: str) -> list[dict[str, Any]]:
@@ -154,7 +175,7 @@ def get_lane(parent_thread_id: str, lane_id: str) -> dict[str, Any] | None:
     with _connect() as conn:
         row = conn.execute(
             """
-            SELECT parent_thread_id, lane_id, lane_thread_id, creator_prompt, cutoff, created_at
+            SELECT parent_thread_id, lane_id, lane_thread_id, creator_prompt, created_at
             FROM playground_lanes
             WHERE parent_thread_id = ? AND lane_id = ?
             """,
@@ -167,7 +188,7 @@ def get_lane_by_thread(lane_thread_id: str) -> dict[str, Any] | None:
     with _connect() as conn:
         row = conn.execute(
             """
-            SELECT parent_thread_id, lane_id, lane_thread_id, creator_prompt, cutoff, created_at
+            SELECT parent_thread_id, lane_id, lane_thread_id, creator_prompt, created_at
             FROM playground_lanes
             WHERE lane_thread_id = ?
             """,
@@ -187,25 +208,6 @@ def delete_lane_for_thread(lane_thread_id: str) -> dict[str, Any] | None:
         )
         conn.commit()
     return row
-
-
-def mark_lane_cutoff(parent_thread_id: str, lane_id: str) -> dict[str, Any] | None:
-    with _connect() as conn:
-        conn.execute(
-            """
-            UPDATE playground_lanes
-            SET cutoff = 1
-            WHERE parent_thread_id = ? AND lane_id = ?
-            """,
-            (parent_thread_id, lane_id),
-        )
-        conn.commit()
-    return get_lane(parent_thread_id, lane_id)
-
-
-def is_cutoff_thread(thread_id: str) -> bool:
-    lane = get_lane_by_thread(thread_id)
-    return bool(lane and lane["cutoff"])
 
 
 def _masterpiece_to_dict(row: sqlite3.Row) -> dict[str, Any]:

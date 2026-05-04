@@ -833,11 +833,10 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
                     style={{
                       border: lane.lane_id === activeLane?.lane_id ? "1px solid #2563eb" : "1px solid #e5e5e5",
                       background: lane.lane_id === activeLane?.lane_id ? "#eff6ff" : "#fff",
-                      color: lane.cutoff ? "#92400e" : "#111827",
+                      color: "#111827",
                     }}
                   >
                     {laneLabel(lane)}
-                    {lane.cutoff ? " · cut off" : ""}
                   </button>
                 ))}
               </div>
@@ -965,8 +964,8 @@ function LaneDetail({
   const aspectRatio = (state?.values?.aspect_ratio as keyof typeof CANVAS | undefined) ?? "16:9";
   const [, baseH] = CANVAS[aspectRatio] ?? CANVAS["16:9"];
   const overlayHeight = (baseH * LANE_CANVAS_WIDTH) / (CANVAS[aspectRatio]?.[0] ?? CANVAS["16:9"][0]);
-  const canComment = hasSlides && stage === "ready" && !busy && !lane.cutoff;
-  const canContinue = Boolean(state && !gate && stage !== "ready" && !lane.cutoff && state.next.length > 0);
+  const canComment = hasSlides && stage === "ready" && !busy;
+  const canContinue = Boolean(state && !gate && stage !== "ready" && state.next.length > 0);
   const continueDisabled = busy && !taskError;
 
   return (
@@ -1092,15 +1091,9 @@ function LaneDetail({
         </div>
       </div>
 
-      {lane.cutoff && (
-        <div style={{ color: "#92400e", background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: 6, padding: 8, marginBottom: 12 }}>
-          This lane is cut off. Existing outputs are preserved.
-        </div>
-      )}
-
       {!state && <div style={{ color: "#64748b" }}>Lane state is loading.</div>}
 
-      {!lane.cutoff && gate?.gate === "style" && (
+      {gate?.gate === "style" && (
         <StyleStage
           title="Lane style"
           submitLabel="Revise"
@@ -1112,7 +1105,7 @@ function LaneDetail({
         />
       )}
 
-      {!lane.cutoff && gate?.gate === "layout" && (
+      {gate?.gate === "layout" && (
         <LayoutStage
           catalog={catalog}
           layouts={gate.layouts}
@@ -1125,7 +1118,7 @@ function LaneDetail({
         />
       )}
 
-      {!lane.cutoff && gate?.gate === "html" && (
+      {gate?.gate === "html" && (
         <HtmlStage
           title="Retry lane HTML"
           submitLabel="Retry failed slides"
@@ -1136,18 +1129,28 @@ function LaneDetail({
         />
       )}
 
-      {taskError && !lane.cutoff && (
+      {taskError && (
         <div style={{ color: "crimson", border: "1px solid crimson", borderRadius: 6, padding: 8, marginBottom: 12 }}>
           {taskError}
         </div>
       )}
 
-      {state && !gate && stage !== "ready" && !lane.cutoff && (
+      {state && !gate && stage !== "ready" && (
         <div style={{ color: "#64748b", display: "flex", alignItems: "center", gap: 10 }}>
-          <span>{taskError ? "Lane stopped before the next step." : "Lane generation is between steps."}</span>
+          <span>
+            {taskError
+              ? "Lane stopped before the next step."
+              : state.recovery_hint === "crashed"
+                ? "Lane was interrupted unexpectedly. Resume from the last checkpoint?"
+                : "Lane generation is between steps."}
+          </span>
           {canContinue && (
             <button disabled={continueDisabled} onClick={() => void onResume(lane, {})}>
-              {taskError ? "Retry lane" : "Continue lane"}
+              {taskError
+                ? "Retry lane"
+                : state.recovery_hint === "crashed"
+                  ? "Resume from last checkpoint"
+                  : "Continue lane"}
             </button>
           )}
         </div>
@@ -1249,8 +1252,8 @@ function ArenaLane({ lane, slideIdx }: { lane: PlaygroundLane; slideIdx: number 
     <div ref={cardRef} style={{ border: "1px solid #e5e5e5", borderRadius: 6, padding: 10, background: "#fafafa", minWidth: 0 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
         <strong>{laneLabel(lane)}</strong>
-        <span style={{ color: lane.cutoff ? "#92400e" : "#64748b", fontSize: 12 }}>
-          {lane.cutoff ? "cut off" : state?.values?.current_stage ?? "pending"}
+        <span style={{ color: "#64748b", fontSize: 12 }}>
+          {state?.values?.current_stage ?? "pending"}
         </span>
       </div>
       {html ? (
