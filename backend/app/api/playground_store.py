@@ -127,6 +127,19 @@ def delete_lane_record(parent_thread_id: str, lane_id: str) -> None:
         conn.commit()
 
 
+def delete_lanes_for_parent(parent_thread_id: str) -> list[dict[str, Any]]:
+    rows = list_lanes(parent_thread_id)
+    if not rows:
+        return []
+    with _connect() as conn:
+        conn.execute(
+            "DELETE FROM playground_lanes WHERE parent_thread_id = ?",
+            (parent_thread_id,),
+        )
+        conn.commit()
+    return rows
+
+
 def get_lane(parent_thread_id: str, lane_id: str) -> dict[str, Any] | None:
     with _connect() as conn:
         row = conn.execute(
@@ -151,6 +164,19 @@ def get_lane_by_thread(lane_thread_id: str) -> dict[str, Any] | None:
             (lane_thread_id,),
         ).fetchone()
     return _row_to_dict(row) if row else None
+
+
+def delete_lane_for_thread(lane_thread_id: str) -> dict[str, Any] | None:
+    row = get_lane_by_thread(lane_thread_id)
+    if row is None:
+        return None
+    with _connect() as conn:
+        conn.execute(
+            "DELETE FROM playground_lanes WHERE lane_thread_id = ?",
+            (lane_thread_id,),
+        )
+        conn.commit()
+    return row
 
 
 def mark_lane_cutoff(parent_thread_id: str, lane_id: str) -> dict[str, Any] | None:

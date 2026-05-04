@@ -156,6 +156,40 @@ def _create_ready_deck() -> dict:
     return ready
 
 
+def _inject_stale_generated_image_state(thread_id: str) -> dict:
+    graph_module.get_graph().update_state(  # type: ignore[arg-type]
+        history.config_for(thread_id),
+        {
+            "image_assets": [
+                {
+                    "asset_id": "user-asset",
+                    "uri": "https://example.com/user.png",
+                    "name": "user.png",
+                    "source": "user",
+                },
+                {
+                    "asset_id": "generated-slide-0",
+                    "uri": "/tmp/generated-slide-0.png",
+                    "name": "generated-slide-0.png",
+                    "source": "generated",
+                },
+            ],
+            "image_insertion_plan": {
+                "status": "applied",
+                "slots": [{"slot_id": "slide-0-slot-0"}],
+                "mappings": [{"slot_id": "slide-0-slot-0", "asset_id": "generated-slide-0"}],
+                "applied_mappings": [{"slot_id": "slide-0-slot-0", "asset_id": "generated-slide-0"}],
+                "unmatched_slots": [],
+            },
+            "image_insertion_status": "applied",
+            "image_generation_errors": [{"slide_idx": 0, "error": "old failure"}],
+            "html_slides_base": {0: "<html><body>base</body></html>"},
+        },
+        as_node="post_html",
+    )
+    return decks.get_deck(thread_id)
+
+
 def test_structure_review_fork_creates_new_thread_and_preserves_source(isolated_graph):
     source = _create_ready_deck()
     source_thread_id = source["thread_id"]
@@ -362,6 +396,35 @@ def test_layout_review_fork_stops_at_layout_gate_and_supports_future_forks(isola
     )
     assert second_fork["source_thread_id"] == rendered["thread_id"]
     assert _interrupt_gate(second_fork) == "style"
+
+
+def test_layout_review_fork_clears_generated_image_state(isolated_graph):
+    source = _create_ready_deck()
+    source = _inject_stale_generated_image_state(source["thread_id"])
+
+    forked = history.fork_from_review(
+        source["thread_id"],
+        history.ForkFromLayoutBody(
+            review_stage="layout",
+            overrides={0: "radial_compact"},
+        ),
+    )
+
+    assert _interrupt_gate(forked) == "layout"
+    assert [asset["asset_id"] for asset in forked["values"].get("image_assets", [])] == ["user-asset"]
+    assert forked["values"].get("image_insertion_plan") in (None, {})
+    assert forked["values"].get("image_insertion_status") is None
+    assert forked["values"].get("image_generation_errors") in (None, [])
+    assert not forked["values"].get("html_slides_base")
+
+    rendered = hitl.resume_deck(
+        forked["thread_id"],
+        {"approved": True, "overrides": {}},
+    )
+
+    assert rendered["values"]["current_stage"] == "ready"
+    assert [asset["asset_id"] for asset in rendered["values"].get("image_assets", [])] == ["user-asset"]
+    assert not rendered["values"].get("image_insertion_plan")
 
 
 def test_layout_review_fork_preset_change_starts_from_style(isolated_graph):

@@ -1,0 +1,67 @@
+- generic [ref=e3]:
+  - heading "Open Slides Zero" [level=1] [ref=e4]
+  - paragraph [ref=e5]: Paste your source material, set a page target, then the agent walks you through three review gates (structure → style → layout) before rendering the deck.
+  - generic [ref=e6]:
+    - heading "Deck basic info" [level=2] [ref=e7]
+    - generic [ref=e8]:
+      - generic [ref=e9]:
+        - text: Deck name (optional)
+        - textbox "Deck name (optional)" [ref=e10]:
+          - /placeholder: e.g. Q3 Earnings Review
+      - generic [ref=e11]:
+        - generic [ref=e12]:
+          - text: Pages
+          - spinbutton "Pages" [ref=e13]: "8"
+        - generic [ref=e14]:
+          - text: Aspect
+          - combobox "Aspect" [ref=e15]:
+            - option "16:9" [selected]
+            - option "4:3"
+            - option "21:9"
+        - generic [ref=e16]:
+          - text: Density
+          - combobox "Density" [ref=e17]:
+            - option "minimal"
+            - option "balanced" [selected]
+            - option "dense"
+            - option "very_dense"
+        - generic [ref=e18]:
+          - text: Visual direction
+          - combobox "Visual direction" [ref=e19]:
+            - option "AI Decide" [selected]
+        - generic [ref=e20]:
+          - text: Style hint
+          - textbox "Style hint" [ref=e21]:
+            - /placeholder: e.g. MBB slate
+  - generic [ref=e22]:
+    - heading "Context" [level=2] [ref=e23]
+    - generic [ref=e24]:
+      - generic [ref=e25]:
+        - text: Material (text, bullets, or pasted notes)
+        - textbox "Material (text, bullets, or pasted notes)" [ref=e26]
+      - generic [ref=e27]:
+        - generic [ref=e28]: Upload source files
+        - generic [ref=e29]:
+          - button "Choose files" [ref=e30]
+          - generic [ref=e31]: No files selected
+      - paragraph [ref=e32]: "Supported: TXT, Markdown, PDF, PPTX, JPG, PNG, DOCX, XLSX."
+      - generic [ref=e33]:
+        - text: Image URLs for insertion
+        - textbox "Image URLs for insertion" [ref=e34]:
+          - /placeholder: One image URL per line
+  - generic [ref=e35]:
+    - heading "Models" [level=2] [ref=e36]
+    - generic [ref=e37]:
+      - generic [ref=e38]:
+        - text: style
+        - combobox "style" [disabled] [ref=e39]:
+          - option "Default routing" [selected]
+      - generic [ref=e40]:
+        - text: layout
+        - combobox "layout" [disabled] [ref=e41]:
+          - option "Default routing" [selected]
+      - generic [ref=e42]:
+        - text: html
+        - combobox "html" [disabled] [ref=e43]:
+          - option "Default routing" [selected]
+  - button "Create deck" [disabled] [ref=e45]

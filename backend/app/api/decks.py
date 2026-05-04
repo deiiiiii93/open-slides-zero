@@ -26,6 +26,7 @@ from ..catalog.structures import STRUCTURE_DEFINITIONS
 from ..catalog.visual_presets import list_visual_style_presets, visual_style_preset_state
 from ..graph.graph import DB_PATH
 from ..llm.models import normalize_lane_model_overrides
+from . import playground_store
 from .common import config_for, current_state, delete_thread, graph, mirror_to_disk
 
 router = APIRouter()
@@ -334,6 +335,37 @@ def get_deck(thread_id: str) -> dict[str, Any]:
     if not state["values"]:
         raise HTTPException(status_code=404, detail="Unknown deck")
     return state
+
+
+@router.delete("/decks/{thread_id}")
+def delete_deck(thread_id: str) -> dict[str, Any]:
+    snap = graph().get_state(config_for(thread_id))  # type: ignore[arg-type]
+    if not snap or not snap.values:
+        raise HTTPException(status_code=404, detail="Unknown deck")
+
+    child_lanes = playground_store.delete_lanes_for_parent(thread_id)
+    playground_store.delete_lane_for_thread(thread_id)
+
+    deleted_thread_ids = list(
+        dict.fromkeys(
+            [
+                thread_id,
+                *[
+                    str(lane["lane_thread_id"])
+                    for lane in child_lanes
+                    if lane.get("lane_thread_id")
+                ],
+            ]
+        )
+    )
+    for deleted_thread_id in deleted_thread_ids:
+        delete_thread(deleted_thread_id)
+
+    return {
+        "ok": True,
+        "thread_id": thread_id,
+        "deleted_thread_ids": deleted_thread_ids,
+    }
 
 
 @router.get("/decks/{thread_id}/catalog")

@@ -50,6 +50,8 @@ import {
 const CANVAS_W = 960;
 const CANVAS_H = 540;
 type ReviewStage = "structure" | "style" | "layout" | "brief" | "ready";
+type DeckHistoryEntry = { id: string; name: string };
+type StoredDeckHistoryEntry = DeckHistoryEntry | string;
 const REVIEW_STAGES: Array<{ id: ReviewStage; label: string }> = [
   { id: "structure", label: "Structure" },
   { id: "style", label: "Style" },
@@ -142,6 +144,25 @@ function recentDeckSearchText(deck: DeckListItem): string {
     .toLowerCase();
 }
 
+function readDeckHistory(): DeckHistoryEntry[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem("osz.history") || "[]") as StoredDeckHistoryEntry[];
+    if (!Array.isArray(raw)) return [];
+    return raw.map((item) => (typeof item === "string" ? { id: item, name: item } : item));
+  } catch {
+    return [];
+  }
+}
+
+function writeDeckHistory(entries: DeckHistoryEntry[]) {
+  localStorage.setItem("osz.history", JSON.stringify(entries));
+}
+
+function pruneDeckHistory(threadIds: string[]) {
+  const deleted = new Set(threadIds);
+  writeDeckHistory(readDeckHistory().filter((entry) => !deleted.has(entry.id)));
+}
+
 export function App() {
   const [deck, setDeck] = useState<DeckState | null>(null);
   const [catalog, setCatalog] = useState<CatalogResponse | null>(null);
@@ -153,6 +174,7 @@ export function App() {
   const [showMasterpieces, setShowMasterpieces] = useState(false);
   const [exporting, setExporting] = useState<string | null>(null);
   const [deckList, setDeckList] = useState<DeckListItem[] | null>(null);
+  const [deletingDeckId, setDeletingDeckId] = useState<string | null>(null);
   const [modelOptions, setModelOptions] = useState<ModelOptions | null>(null);
   const [selectedReviewStage, setSelectedReviewStage] = useState<ReviewStage>("ready");
 
@@ -213,16 +235,9 @@ export function App() {
 
   const rememberDeck = useCallback((nextDeck: DeckState) => {
     const name = (nextDeck.values?.deck_name as string) || nextDeck.thread_id;
-    const histRaw = JSON.parse(localStorage.getItem("osz.history") || "[]") as (
-      | { id: string; name: string }
-      | string
-    )[];
-    const hist = histRaw.map((h) => (typeof h === "string" ? { id: h, name: h } : h));
+    const hist = readDeckHistory();
     const filtered = hist.filter((h) => h.id !== nextDeck.thread_id);
-    localStorage.setItem(
-      "osz.history",
-      JSON.stringify([{ id: nextDeck.thread_id, name }, ...filtered].slice(0, 20)),
-    );
+    writeDeckHistory([{ id: nextDeck.thread_id, name }, ...filtered].slice(0, 20));
   }, []);
 
   // Handle a single SSE event stream to completion.
@@ -493,6 +508,46 @@ export function App() {
     setShowMasterpieces(false);
   }
 
+  async function onDeleteDeck(id: string, name?: string | null) {
+    if (busy || deletingDeckId) return;
+    const label = (name || id).trim();
+    const confirmed = window.confirm(
+      `Delete "${label}"? This permanently removes its checkpoints, generated files, and playground lanes.`,
+    );
+    if (!confirmed) return;
+
+    setDeletingDeckId(id);
+    setErr(null);
+    try {
+      const result = await api.deleteDeck(id);
+      const deletedIds = result.deleted_thread_ids.length ? result.deleted_thread_ids : [id];
+      const deleted = new Set(deletedIds);
+      const activeId = localStorage.getItem("osz.thread_id");
+      if (activeId && deleted.has(activeId)) {
+        localStorage.removeItem("osz.thread_id");
+      }
+      pruneDeckHistory(deletedIds);
+      if (deck && deleted.has(deck.thread_id)) {
+        abortRef.current?.abort();
+        setDeck(null);
+        setBuffersByTag({});
+        setActiveNode(null);
+        setActiveSlide(null);
+        setActiveModel(null);
+        setElapsedByTag({});
+        tagStartRef.current = {};
+        setShowExport(false);
+        setShowHistory(false);
+        setShowMasterpieces(false);
+      }
+      await refreshDeckList();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setDeletingDeckId(null);
+    }
+  }
+
   async function runExport(
     label: string,
     fn: (d: DeckState) => Promise<void>,
@@ -520,7 +575,9 @@ export function App() {
         catalog={catalog}
         modelOptions={modelOptions}
         recentDecks={deckList}
+        deletingDeckId={deletingDeckId}
         onLoadDeck={(id) => void refresh(id).catch((e) => setErr(String(e)))}
+        onDeleteDeck={(id, name) => void onDeleteDeck(id, name)}
       />
     );
   }
@@ -720,6 +777,17 @@ export function App() {
               </div>
             )}
           </div>
+          <button
+            disabled={busy || Boolean(deletingDeckId)}
+            onClick={() =>
+              void onDeleteDeck(
+                deck.thread_id,
+                (deck.values?.deck_name as string | undefined) || deck.thread_id,
+              )
+            }
+          >
+            {deletingDeckId === deck.thread_id ? "Deleting…" : "Delete deck"}
+          </button>
           <button onClick={onNewDeck}>New deck</button>
           {showHistory && (
             <div
@@ -739,11 +807,7 @@ export function App() {
               {(() => {
                 // Merge backend list with localStorage history; backend is authoritative for names
                 const backendDecks = deckList ?? [];
-                const histRaw = JSON.parse(localStorage.getItem("osz.history") || "[]") as (
-                  | { id: string; name: string }
-                  | string
-                )[];
-                const localHist = histRaw.map((h) => (typeof h === "string" ? { id: h, name: h } : h));
+                const localHist = readDeckHistory();
 
                 const merged = new Map<string, { name: string; stage: string }>();
                 for (const d of backendDecks) {
@@ -763,38 +827,67 @@ export function App() {
                   );
                 }
                 return Array.from(merged.entries()).map(([id, info]) => (
-                  <button
+                  <div
                     key={id}
-                    onClick={() => {
-                      setShowHistory(false);
-                      void refresh(id).catch((e) => setErr(String(e)));
-                    }}
                     style={{
-                      display: "block",
+                      display: "flex",
+                      alignItems: "stretch",
                       width: "100%",
-                      textAlign: "left",
-                      padding: "6px 12px",
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
-                      fontSize: 13,
-                      fontFamily: "inherit",
+                      borderBottom: "1px solid #f0f0f0",
                     }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f5f5f5")}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
                   >
-                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 260 }}>
-                      {info.name}
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <code style={{ fontSize: 11, color: "#999" }}>{id}</code>
-                      {info.stage && (
-                        <span style={{ fontSize: 10, color: "#64748b", background: "#f1f5f9", padding: "1px 4px", borderRadius: 4 }}>
-                          {info.stage}
-                        </span>
-                      )}
-                    </div>
-                  </button>
+                    <button
+                      disabled={Boolean(deletingDeckId)}
+                      onClick={() => {
+                        setShowHistory(false);
+                        void refresh(id).catch((e) => setErr(String(e)));
+                      }}
+                      style={{
+                        flex: "1 1 auto",
+                        minWidth: 0,
+                        textAlign: "left",
+                        padding: "6px 12px",
+                        background: "none",
+                        border: "none",
+                        cursor: deletingDeckId ? "default" : "pointer",
+                        fontSize: 13,
+                        fontFamily: "inherit",
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!deletingDeckId) e.currentTarget.style.background = "#f5f5f5";
+                      }}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                    >
+                      <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 260 }}>
+                        {info.name}
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <code style={{ fontSize: 11, color: "#999" }}>{id}</code>
+                        {info.stage && (
+                          <span style={{ fontSize: 10, color: "#64748b", background: "#f1f5f9", padding: "1px 4px", borderRadius: 4 }}>
+                            {info.stage}
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                    <button
+                      disabled={busy || Boolean(deletingDeckId)}
+                      onClick={() => void onDeleteDeck(id, info.name)}
+                      style={{
+                        flex: "0 0 auto",
+                        border: "none",
+                        borderLeft: "1px solid #f0f0f0",
+                        background: "#fff",
+                        color: "#b91c1c",
+                        cursor: busy || deletingDeckId ? "default" : "pointer",
+                        fontSize: 12,
+                        fontFamily: "inherit",
+                        padding: "0 10px",
+                      }}
+                    >
+                      {deletingDeckId === id ? "Deleting…" : "Delete"}
+                    </button>
+                  </div>
                 ));
               })()}
             </div>
@@ -1603,7 +1696,9 @@ function CreateForm({
   catalog,
   modelOptions,
   recentDecks,
+  deletingDeckId,
   onLoadDeck,
+  onDeleteDeck,
 }: {
   onSubmit: (f: {
     deckName: string;
@@ -1623,7 +1718,9 @@ function CreateForm({
   catalog: CatalogResponse | null;
   modelOptions: ModelOptions | null;
   recentDecks: DeckListItem[] | null;
+  deletingDeckId: string | null;
   onLoadDeck: (id: string) => void;
+  onDeleteDeck: (id: string, name?: string | null) => void;
 }) {
   const [deckName, setDeckName] = useState("");
   const [text, setText] = useState("");
@@ -1969,7 +2066,7 @@ function CreateForm({
 
       <div style={{ display: "flex", justifyContent: "flex-start", marginTop: 16 }}>
         <button
-          disabled={busy || (!text.trim() && files.length === 0 && imageUrls.length === 0)}
+          disabled={busy || Boolean(deletingDeckId) || (!text.trim() && files.length === 0 && imageUrls.length === 0)}
           onClick={() =>
             onSubmit({
               deckName,
@@ -1987,7 +2084,7 @@ function CreateForm({
           }
           style={{ padding: "8px 14px", fontFamily: "inherit", fontSize: 14 }}
         >
-          {busy ? "Streaming…" : "Create deck"}
+          {busy ? "Streaming…" : deletingDeckId ? "Deleting…" : "Create deck"}
         </button>
       </div>
 
@@ -2029,62 +2126,90 @@ function CreateForm({
               </div>
             )}
             {visibleRecentDecks.map((d, idx) => (
-              <button
+              <div
                 key={d.thread_id}
-                disabled={busy}
-                onClick={() => onLoadDeck(d.thread_id)}
                 style={{
-                  display: "block",
+                  display: "flex",
+                  alignItems: "stretch",
                   width: "100%",
-                  textAlign: "left",
-                  padding: "10px 14px",
                   background: "#fff",
-                  border: "none",
                   borderBottom: idx === visibleRecentDecks.length - 1 ? "none" : "1px solid #f0f0f0",
-                  cursor: busy ? "default" : "pointer",
-                  fontFamily: "inherit",
-                  fontSize: 14,
-                  opacity: busy ? 0.6 : 1,
-                }}
-                onMouseEnter={(e) => {
-                  if (!busy) e.currentTarget.style.background = "#f5f5f5";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "#fff";
                 }}
               >
-                <div
+                <button
+                  disabled={busy || Boolean(deletingDeckId)}
+                  onClick={() => onLoadDeck(d.thread_id)}
                   style={{
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    fontWeight: 500,
+                    flex: "1 1 auto",
+                    minWidth: 0,
+                    textAlign: "left",
+                    padding: "10px 14px",
+                    background: "#fff",
+                    border: "none",
+                    cursor: busy || deletingDeckId ? "default" : "pointer",
+                    fontFamily: "inherit",
+                    fontSize: 14,
+                    opacity: busy || deletingDeckId ? 0.6 : 1,
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!busy && !deletingDeckId) e.currentTarget.style.background = "#f5f5f5";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "#fff";
                   }}
                 >
-                  {d.deck_name || d.thread_id}
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-                  <code style={{ fontSize: 11, color: "#999" }}>{d.thread_id}</code>
-                  {d.stage && (
-                    <span
-                      style={{
-                        fontSize: 10,
-                        color: "#64748b",
-                        background: "#f1f5f9",
-                        padding: "1px 5px",
-                        borderRadius: 4,
-                      }}
-                    >
-                      {d.stage}
-                    </span>
-                  )}
-                  {d.created_at && (
-                    <span style={{ fontSize: 11, color: "#999" }}>
-                      {recentDeckDateText(d.created_at)}
-                    </span>
-                  )}
-                </div>
-              </button>
+                  <div
+                    style={{
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      fontWeight: 500,
+                    }}
+                  >
+                    {d.deck_name || d.thread_id}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+                    <code style={{ fontSize: 11, color: "#999" }}>{d.thread_id}</code>
+                    {d.stage && (
+                      <span
+                        style={{
+                          fontSize: 10,
+                          color: "#64748b",
+                          background: "#f1f5f9",
+                          padding: "1px 5px",
+                          borderRadius: 4,
+                        }}
+                      >
+                        {d.stage}
+                      </span>
+                    )}
+                    {d.created_at && (
+                      <span style={{ fontSize: 11, color: "#999" }}>
+                        {recentDeckDateText(d.created_at)}
+                      </span>
+                    )}
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || Boolean(deletingDeckId)}
+                  onClick={() => onDeleteDeck(d.thread_id, d.deck_name || d.thread_id)}
+                  style={{
+                    flex: "0 0 auto",
+                    border: "none",
+                    borderLeft: "1px solid #f0f0f0",
+                    background: "#fff",
+                    color: "#b91c1c",
+                    cursor: busy || deletingDeckId ? "default" : "pointer",
+                    fontFamily: "inherit",
+                    fontSize: 13,
+                    padding: "0 14px",
+                    opacity: busy || deletingDeckId ? 0.6 : 1,
+                  }}
+                >
+                  {deletingDeckId === d.thread_id ? "Deleting…" : "Delete"}
+                </button>
+              </div>
             ))}
           </div>
           <div
@@ -2104,7 +2229,7 @@ function CreateForm({
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <button
                 type="button"
-                disabled={busy || boundedRecentPage <= 1}
+                disabled={busy || Boolean(deletingDeckId) || boundedRecentPage <= 1}
                 onClick={() => setRecentPage((page) => Math.max(1, page - 1))}
               >
                 Previous
@@ -2114,7 +2239,7 @@ function CreateForm({
               </span>
               <button
                 type="button"
-                disabled={busy || boundedRecentPage >= recentPageCount}
+                disabled={busy || Boolean(deletingDeckId) || boundedRecentPage >= recentPageCount}
                 onClick={() => setRecentPage((page) => Math.min(recentPageCount, page + 1))}
               >
                 Next

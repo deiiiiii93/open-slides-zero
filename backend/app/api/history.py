@@ -115,6 +115,27 @@ def _downstream_clear_patch(from_stage: str) -> dict[str, Any]:
     return {field: _empty_for(field) for field in _DOWNSTREAM_FIELDS[from_stage]}
 
 
+def _review_fork_image_reset_patch(values: dict[str, Any]) -> dict[str, Any]:
+    """Clear ready-time image insertion state for forks.
+
+    User-provided image assets belong to the source material and should remain
+    available. Generated assets and match records are tied to the rendered HTML
+    being forked away from, so carrying them forward makes regenerated forks
+    pick stale images.
+    """
+    image_assets = [
+        asset
+        for asset in (values.get("image_assets") or [])
+        if str(asset.get("source") or "user") != "generated"
+    ]
+    return {
+        "image_assets": image_assets,
+        "image_insertion_plan": {},
+        "image_insertion_status": None,
+        "image_generation_errors": [],
+    }
+
+
 def _clone_checkpoint_lineage(
     source_thread_id: str,
     target_cfg: dict[str, Any],
@@ -278,7 +299,10 @@ def _fork_from_review(
         from the current ready checkpoint, run the style node once, then pause
         at await_style.
         """
-        clear = _downstream_clear_patch("style")
+        clear = {
+            **_downstream_clear_patch("style"),
+            **_review_fork_image_reset_patch(snap.values),
+        }
         update_seed = {**clear, **patch, **style_patch, "current_stage": "style"}
         new_target_cfg = _clone_checkpoint_lineage(thread_id, snap.config, new_thread_id)
         style_update = style_node({**snap.values, **update_seed})
@@ -321,6 +345,7 @@ def _fork_from_review(
                 )
             patch = {
                 **_downstream_clear_patch("style"),
+                **_review_fork_image_reset_patch(snap.values),
                 **patch,
                 **preset_update,
                 "current_stage": "style",
@@ -338,6 +363,7 @@ def _fork_from_review(
                 detail="No prior checkpoint found with node 'await_layout' pending.",
             )
         patch.update(_downstream_clear_patch("consolidate"))
+        patch.update(_review_fork_image_reset_patch(snap.values))
         patch["layouts"] = apply_layout_overrides(snap.values.get("layouts"), overrides)
         patch["current_stage"] = "await_layout"
         patch.update(preset_update)
@@ -356,7 +382,11 @@ def _fork_from_review(
             detail=f"No prior checkpoint found with node '{_STAGE_TO_NODE.get(target_stage)}' pending.",
         )
 
-    patch = {**_downstream_clear_patch(target_stage), **patch}
+    patch = {
+        **_downstream_clear_patch(target_stage),
+        **_review_fork_image_reset_patch(snap.values),
+        **patch,
+    }
     new_target_cfg = _clone_checkpoint_lineage(thread_id, source_target_cfg, new_thread_id)
     new_cfg = g.update_state(new_target_cfg, patch)  # type: ignore[arg-type]
     g.invoke(None, new_cfg)  # type: ignore[arg-type]

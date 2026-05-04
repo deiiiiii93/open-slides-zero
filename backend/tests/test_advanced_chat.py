@@ -539,6 +539,32 @@ def test_advanced_ready_style_fork_uses_style_fallback(
         created["thread_id"],
         {"approved": True, "overrides": {}},
     )
+    graph_module.get_graph().update_state(  # type: ignore[arg-type]
+        common.config_for(created["thread_id"]),
+        {
+            "image_assets": [
+                {
+                    "asset_id": "user-asset",
+                    "uri": "https://example.com/user.png",
+                    "name": "user.png",
+                    "source": "user",
+                },
+                {
+                    "asset_id": "generated-slide-0",
+                    "uri": "/tmp/generated-slide-0.png",
+                    "name": "generated-slide-0.png",
+                    "source": "generated",
+                },
+            ],
+            "image_insertion_plan": {
+                "status": "applied",
+                "applied_mappings": [{"slot_id": "slide-0-slot-0", "asset_id": "generated-slide-0"}],
+            },
+            "image_insertion_status": "applied",
+        },
+        as_node="post_html",
+    )
+    ready = decks.get_deck(created["thread_id"])
 
     def fake_style_structured(_model, messages, schema, **_kwargs):
         assert schema is style._VisualStyle
@@ -582,6 +608,8 @@ def test_advanced_ready_style_fork_uses_style_fallback(
     assert forked["values"]["visual_style"]["palette"]["primary"] == "#663300"
     assert not forked["values"].get("layouts")
     assert not forked["values"].get("html_slides")
+    assert [asset["asset_id"] for asset in forked["values"].get("image_assets", [])] == ["user-asset"]
+    assert not forked["values"].get("image_insertion_plan")
 
 
 def test_advanced_chat_commit_goes_directly_to_layout_gate(isolated_graph):

@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.api import comments as comments_api
-from app.api import common, decks, hitl, playground
+from app.api import common, decks, hitl, playground, playground_store
 from app.artifacts import store
 from app.graph import graph as graph_module
 from app.graph.nodes import html_one, layout, outline, style
@@ -186,6 +186,101 @@ def _create_playground_base() -> dict:
     assert base["values"]["current_stage"] == "playground"
     assert not base["interrupts"]
     return base
+
+
+def _create_playground_lane(client: TestClient, base: dict, prompt: str = "Try a sharper lane.") -> dict:
+    response = client.post(
+        f"/decks/{base['thread_id']}/playground/lanes/stream",
+        json={"creator_prompt": prompt},
+    )
+    assert response.status_code == 200, response.text
+    events = _parse_sse_events(response.text)
+    done = next(event for event in events if event["type"] == "done")
+    return done["state"]
+
+
+def test_delete_deck_removes_checkpoints_and_artifacts(isolated_graph):
+    client = TestClient(app)
+    created = decks.create_deck(
+        decks.CreateDeckBody(
+            deck_name="Delete me",
+            expected_pages=2,
+            materials=[decks.Material(kind="text", uri="text:Revenue up. Margin stable.")],
+        )
+    )
+    thread_id = created["thread_id"]
+    artifact_dir = store.ROOT / thread_id
+    store.write_markdown(thread_id, "probe.md", "temporary mirror")
+
+    assert artifact_dir.exists()
+
+    response = client.delete(f"/decks/{thread_id}")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": True,
+        "thread_id": thread_id,
+        "deleted_thread_ids": [thread_id],
+    }
+    assert client.get(f"/decks/{thread_id}").status_code == 404
+    assert thread_id not in {deck["thread_id"] for deck in client.get("/decks").json()["decks"]}
+    assert not artifact_dir.exists()
+
+
+def test_delete_playground_parent_cascades_lane_thread_and_records(isolated_graph):
+    client = TestClient(app)
+    base = _create_playground_base()
+    lane_state = _create_playground_lane(client, base)
+    parent_thread_id = base["thread_id"]
+    lane_thread_id = lane_state["thread_id"]
+
+    assert playground_store.get_lane_by_thread(lane_thread_id) is not None
+    assert (store.ROOT / parent_thread_id).exists()
+    assert (store.ROOT / lane_thread_id).exists()
+
+    response = client.delete(f"/decks/{parent_thread_id}")
+
+    assert response.status_code == 200
+    assert response.json()["thread_id"] == parent_thread_id
+    assert set(response.json()["deleted_thread_ids"]) == {parent_thread_id, lane_thread_id}
+    assert client.get(f"/decks/{parent_thread_id}").status_code == 404
+    assert client.get(f"/decks/{lane_thread_id}").status_code == 404
+    assert playground_store.list_lanes(parent_thread_id) == []
+    assert playground_store.get_lane_by_thread(lane_thread_id) is None
+    assert not (store.ROOT / parent_thread_id).exists()
+    assert not (store.ROOT / lane_thread_id).exists()
+
+
+def test_delete_playground_lane_preserves_parent_and_removes_lane_record(isolated_graph):
+    client = TestClient(app)
+    base = _create_playground_base()
+    lane_state = _create_playground_lane(client, base)
+    parent_thread_id = base["thread_id"]
+    lane_thread_id = lane_state["thread_id"]
+
+    response = client.delete(f"/decks/{lane_thread_id}")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": True,
+        "thread_id": lane_thread_id,
+        "deleted_thread_ids": [lane_thread_id],
+    }
+    assert client.get(f"/decks/{lane_thread_id}").status_code == 404
+    assert client.get(f"/decks/{parent_thread_id}").status_code == 200
+    assert playground_store.list_lanes(parent_thread_id) == []
+    assert playground_store.get_lane_by_thread(lane_thread_id) is None
+    assert (store.ROOT / parent_thread_id).exists()
+    assert not (store.ROOT / lane_thread_id).exists()
+
+
+def test_delete_unknown_deck_returns_404(isolated_graph):
+    client = TestClient(app)
+
+    response = client.delete("/decks/missing-thread")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Unknown deck"
 
 
 def test_outline_gate_continues_normal_flow_when_approved(isolated_graph):

@@ -143,6 +143,12 @@ export type DeckListItem = {
   created_at: string | null;
 };
 
+export type DeleteDeckResponse = {
+  ok: boolean;
+  thread_id: string;
+  deleted_thread_ids: string[];
+};
+
 export type PlaygroundLane = {
   lane_id: string;
   lane_thread_id: string;
@@ -214,6 +220,8 @@ export const api = {
   createDeck: (body: CreateDeckBody) => http<DeckState>("POST", "/decks", body),
 
   getDeck: (id: string) => http<DeckState>("GET", `/decks/${id}`),
+
+  deleteDeck: (id: string) => http<DeleteDeckResponse>("DELETE", `/decks/${id}`),
 
   getCatalog: (id: string) => http<CatalogResponse>("GET", `/decks/${id}/catalog`),
 
