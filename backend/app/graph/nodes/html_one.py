@@ -96,6 +96,49 @@ Before returning cover/closing HTML, verify:
 - The final slide contains a conclusion or action, not only a recap.
 """
 
+DENSE_FIT_DISCIPLINE = """\
+Dense fit discipline:
+- Treat root overflow:hidden only as a safety net. No inner zone may rely on
+  clipping, truncation, scroll, line-clamp, ellipsis, or hidden text to appear
+  fitted.
+- Before writing HTML, make a zone budget for the exact canvas: reserve
+  header/footer/margins, assign each requested pattern zone a grid track or
+  explicit rectangle, and place every visible element into one non-overlapping
+  zone.
+- Use CSS grid for macro layout and flex-column inside zones. For many bullets,
+  convert content into proof rows, split columns, compact evidence cards,
+  micro-bars, or marked steps instead of a plain list.
+- Use the lower end of the existing role-based type scale; do not introduce a
+  new type scale. Keep body/proof, headings, labels/meta, display text, and
+  decorative glyphs within the current composition rules.
+- If the slide is too dense for a display-scale title, reserve display_family
+  for one controlled typographic anchor, matching the existing typography
+  contract.
+- Compress by reducing visual chrome, shortening labels/captions, splitting
+  content into columns/rows, and simplifying motifs. Do not remove factual
+  content or hide overflow.
+- If using absolute positioning, every text-bearing block must have explicit
+  non-overlapping bounds and must fit at final pixel size.
+- Final silent check: title, proof/content, visual, and footer/header zones all
+  fit the 960x540 canvas with readable hierarchy and no overlap.
+"""
+
+AESTHETIC_BREATH_DISCIPLINE = """\
+Aesthetic breath discipline:
+- A slide can fail quality even without overflow if every zone is filled,
+  boxed, or visually equal-weight.
+- Keep at least one quiet field or breath zone per slide when content allows.
+- Do not enlarge type just because space exists; use the lower end of the
+  existing type scale for dense, execution, grid, and compact-panel slides.
+- Compact panel headings are structural labels, not slide titles; they should
+  not dominate body/proof content.
+- Prefer open columns, hairline dividers, bands, and whitespace over full
+  bordered card grids unless the selected pattern explicitly calls for cards.
+- If a zone has short text, leave space instead of adding chrome or scaling text
+  up.
+- Reduce chrome before increasing type size or adding containers.
+"""
+
 ROLE_SPECIFIC_COMPOSITION_GUIDANCE = """\
 Role-specific composition guidance:
 
@@ -260,6 +303,10 @@ document for a single slide. Hard constraints:
 {ANTI_SLOP_RULES}
 
 {COMPOSITION_DISCIPLINE}
+
+{DENSE_FIT_DISCIPLINE}
+
+{AESTHETIC_BREATH_DISCIPLINE}
 
 Design system to apply:
 - Palette: {palette}
@@ -491,8 +538,9 @@ Review the slide and decide whether it should be accepted or revised.
 
 Use decision="revise" only for concrete issues that materially improve the slide:
 - visible overflow, crowding, weak hierarchy, awkward zone use, unreadable type,
-  generic card/chrome treatment, unearned decoration, validator warnings, or
-  violations of the anti-slop/composition rules.
+  cramped but technically fitting composition, generic card/chrome treatment,
+  unearned decoration, validator warnings, or violations of the
+  anti-slop/composition rules.
 - Treat the typography role contract as binding. If display_family is present
   and distinct from heading_family but unused, request a concrete revision.
 - Do not request changes for subjective taste alone.
@@ -501,6 +549,10 @@ Use decision="revise" only for concrete issues that materially improve the slide
 {ANTI_SLOP_RULES}
 
 {COMPOSITION_DISCIPLINE}
+
+{DENSE_FIT_DISCIPLINE}
+
+{AESTHETIC_BREATH_DISCIPLINE}
 """
     user = f"""\
 Slide metadata:

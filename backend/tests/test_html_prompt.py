@@ -122,6 +122,7 @@ def test_html_prompt_includes_composition_quality_rules():
     assert "external CSS imports" in system_prompt
     assert "hover states, animations" in system_prompt
     assert "title hierarchy first" in system_prompt
+    assert "Fit all text at final pixel size with no truncation, scrolling" in system_prompt
 
     assert "Before returning the HTML, silently review" in system_prompt
     assert "exact canvas size" in system_prompt
@@ -138,6 +139,42 @@ def test_html_prompt_includes_composition_quality_rules():
     assert "one, and only one, earned decorative motif" in system_prompt
     assert "proof rows, quote/callout, evidence strip" in system_prompt
     assert "conclusion or action, not only a recap" in system_prompt
+
+    assert "Dense fit discipline:" in system_prompt
+    assert "Treat root overflow:hidden only as a safety net" in system_prompt
+    assert "No inner zone may rely on" in system_prompt
+    assert "clipping, truncation, scroll, line-clamp, ellipsis" in system_prompt
+    assert "make a zone budget for the exact canvas" in system_prompt
+    assert "assign each requested pattern zone a grid track or" in system_prompt
+    assert "place every visible element into one non-overlapping" in system_prompt
+    assert "Use CSS grid for macro layout and flex-column inside zones" in system_prompt
+    assert "Use the lower end of the existing role-based type scale" in system_prompt
+    assert "do not introduce a" in system_prompt
+    assert "new type scale" in system_prompt
+    assert "reserve display_family" in system_prompt
+    assert "controlled typographic anchor" in system_prompt
+    assert "Compress by reducing visual chrome" in system_prompt
+    assert "Do not remove factual" in system_prompt
+    assert "content or hide overflow" in system_prompt
+    assert "every text-bearing block must have explicit" in system_prompt
+    assert "fit the 960x540 canvas with readable hierarchy and no overlap" in system_prompt
+
+    assert "Aesthetic breath discipline:" in system_prompt
+    assert "fail quality even without overflow" in system_prompt
+    assert "every zone is filled" in system_prompt
+    assert "boxed, or visually equal-weight" in system_prompt
+    assert "quiet field or breath zone" in system_prompt
+    assert "Do not enlarge type just because space exists" in system_prompt
+    assert "lower end of the" in system_prompt
+    assert "existing type scale" in system_prompt
+    assert "dense, execution, grid, and compact-panel slides" in system_prompt
+    assert "Compact panel headings are structural labels" in system_prompt
+    assert "not slide titles" in system_prompt
+    assert "open columns, hairline dividers, bands, and whitespace" in system_prompt
+    assert "full" in system_prompt
+    assert "bordered card grids" in system_prompt
+    assert "leave space instead of adding chrome or scaling text" in system_prompt
+    assert "Reduce chrome before increasing type size" in system_prompt
 
 
 def test_html_prompt_includes_cover_and_closing_role_guidance():
@@ -253,6 +290,9 @@ def test_html_critic_receives_typography_role_contract():
     assert "Treat the typography role contract as binding" in system_prompt
     assert "display_family is present" in system_prompt
     assert "but unused" in system_prompt
+    assert "cramped but technically fitting composition" in system_prompt
+    assert "Aesthetic breath discipline:" in system_prompt
+    assert "quiet field or breath zone" in system_prompt
     assert "Typography role contract:" in user_prompt
     assert "display_family: `Display Face`" in user_prompt
     assert "Use this exact CSS stack at least once" in user_prompt

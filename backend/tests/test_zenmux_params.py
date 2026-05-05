@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from app.llm import zenmux
+from app.llm.models import get_model
 
 
 class _Message:
@@ -45,6 +46,10 @@ class _FakeClient:
 
 class _StructuredPayload(BaseModel):
     value: str
+
+
+def test_html_critic_defaults_to_deepseek_flash():
+    assert get_model("html.critic") == "deepseek/deepseek-v4-flash"
 
 
 def test_kimi_temperature_is_forced_to_one(monkeypatch):

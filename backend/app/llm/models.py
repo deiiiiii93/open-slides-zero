@@ -12,6 +12,7 @@ from typing import Any
 # Defaults chosen from the ZenMux model catalog:
 #   - high-stakes reasoning / HTML composition → anthropic/claude-sonnet-4.6
 #   - merge / classification / cheap tasks     → openai/gpt-5.4-mini
+#   - HTML quality critique                    → deepseek/deepseek-v4-flash
 #   - vision / OCR                             → google/gemini-3.1-pro-preview
 #   - image generation                         → openai/gpt-image-2
 _DEFAULTS: dict[str, str] = {
@@ -25,7 +26,7 @@ _DEFAULTS: dict[str, str] = {
     "layout":         "anthropic/claude-sonnet-4.6",
     "consolidate":    "openai/gpt-5.4-mini",
     "html":           "anthropic/claude-sonnet-4.6",
-    "html.critic":    "anthropic/claude-sonnet-4.6",
+    "html.critic":    "deepseek/deepseek-v4-flash",
     "image_plan":     "openai/gpt-5.4-mini",
     "edit.intent":    "openai/gpt-5.4-mini",
     "image_gen":      "openai/gpt-image-2",
