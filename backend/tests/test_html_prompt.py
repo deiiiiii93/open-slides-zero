@@ -132,6 +132,59 @@ def test_html_prompt_includes_composition_quality_rules():
     assert "zone contents, not motifs" in system_prompt
     assert "Avoid use boring Arabic numerals" in system_prompt
     assert "do not count toward the motif limit" in system_prompt
+    assert "Before returning cover/closing HTML, verify:" in system_prompt
+    assert "not merely centered title + bullets" in system_prompt
+    assert "explicit named zones in CSS/DOM comments or class names" in system_prompt
+    assert "one, and only one, earned decorative motif" in system_prompt
+    assert "proof rows, quote/callout, evidence strip" in system_prompt
+    assert "conclusion or action, not only a recap" in system_prompt
+
+
+def test_html_prompt_includes_cover_and_closing_role_guidance():
+    messages = _slide_prompt(
+        {
+            "slide_idx": 0,
+            "title": "A Designed Opening",
+            "role": "cover",
+            "bullets": ["Proof point", "Second proof point"],
+            "pattern": "cover_left_title",
+            "zones": ["title", "subtitle", "visual"],
+        },
+        {
+            "aspect_ratio": "16:9",
+            "style": {
+                "palette": {"background": "#fff", "text": "#111"},
+                "typography": {"heading": "Aptos", "body": "Aptos"},
+                "tone": "editorial",
+            },
+            "density": "balanced",
+            "language": "en",
+        },
+    )
+
+    system_prompt = messages[0]["content"]
+    assert "Use the `cover_left_title` layout pattern" in system_prompt
+    assert "Role-specific composition guidance:" in system_prompt
+    assert system_prompt.index("Use the `cover_left_title` layout pattern") < system_prompt.index(
+        "Role-specific composition guidance:"
+    )
+
+    assert 'If Role is "cover":' in system_prompt
+    assert "designed opening moment" in system_prompt
+    assert "eyebrow/meta, display title, proof/support" in system_prompt
+    assert "compact" in system_prompt
+    assert "2-column evidence strip" in system_prompt
+    assert "exactly one content-earned visual motif" in system_prompt
+    assert "theme, chapter, source, date, or keynote" in system_prompt
+    assert "Highlight 1-2 key words" in system_prompt
+
+    assert 'If Role is "closing" or "close":' in system_prompt
+    assert "synthesis plus next action" in system_prompt
+    assert "closing label, final thesis, recap/proof" in system_prompt
+    assert "Reuse the deck's established motif" in system_prompt
+    assert "recap proof rows, decision columns, quote block" in system_prompt
+    assert "one clear closing action, quote, or final line" in system_prompt
+    assert "footer/contact/meta treatment" in system_prompt
 
 
 def test_html_prompt_includes_binding_typography_role_contract():

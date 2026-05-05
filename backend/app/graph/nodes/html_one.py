@@ -86,6 +86,46 @@ exact canvas size, no overflow/truncation, clear 2-4 zone structure,
 role-based type scale, restrained colors/chrome, no external imports,
 no hover states, no animations, no responsive fallback CSS, and no unearned
 motif. If any check fails, revise the HTML before returning.
+
+Before returning cover/closing HTML, verify:
+- It is not merely centered title + bullets.
+- It has explicit named zones in CSS/DOM comments or class names.
+- It has one, and only one, earned decorative motif.
+- Bullets have been transformed into proof rows, quote/callout, evidence strip,
+  CTA, or footer metadata.
+- The final slide contains a conclusion or action, not only a recap.
+"""
+
+ROLE_SPECIFIC_COMPOSITION_GUIDANCE = """\
+Role-specific composition guidance:
+
+If Role is "cover":
+- Treat the slide as a designed opening moment, not a normal content slide.
+- Use 3-4 named zones: eyebrow/meta, display title, proof/support, and one
+  visual/footer zone.
+- Convert bullets into short proof rows, subtitle fragments, or a compact
+  2-column evidence strip. Do not leave them as a plain list unless the pattern
+  explicitly demands it.
+- Add exactly one content-earned visual motif tied to the deck topic or style:
+  thin rules, vertical accent band, rings, corner marks, watermark glyph/word,
+  large faint character, image panel, or brand/date lockup.
+- Add small editorial metadata such as theme, chapter, source, date, or keynote
+  label when it reinforces the cover.
+- Highlight 1-2 key words in the title with the accent color or display font
+  treatment.
+
+If Role is "closing" or "close":
+- Treat the slide as synthesis plus next action, not just another title slide.
+- Use 3-4 named zones: closing label, final thesis, recap/proof, and
+  CTA/contact/footer.
+- Reuse the deck's established motif from the cover, but simplify it.
+- Convert bullets into recap proof rows, decision columns, quote block, or
+  contact/action cards.
+- Include one clear closing action, quote, or final line. Make it visually
+  distinct but restrained.
+- The closing slide should feel resolved: strong title hierarchy, fewer
+  elements than a dense content slide, and a footer/contact/meta treatment when
+  appropriate.
 """
 
 _TRUNCATION_REASONS = {"length", "max_tokens"}
@@ -214,6 +254,8 @@ document for a single slide. Hard constraints:
   placeholder prompt hints and captions.
 - Use inline <style> — no external stylesheet or JS frameworks.
 - Use the `{pattern}` layout pattern with zones: {zones}.
+
+{ROLE_SPECIFIC_COMPOSITION_GUIDANCE}
 
 {ANTI_SLOP_RULES}
 
