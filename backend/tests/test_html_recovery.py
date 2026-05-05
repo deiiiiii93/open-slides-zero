@@ -63,6 +63,7 @@ def isolated_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     graph_module._compiled = None
     monkeypatch.setattr(graph_module, "DB_PATH", tmp_path / "threads.sqlite")
     monkeypatch.setattr(store, "ROOT", tmp_path / "threads")
+    monkeypatch.delenv("OSZ_HTML_REACT_MAX_CYCLES", raising=False)
     monkeypatch.setenv("OSZ_HTML_MAX_ATTEMPTS", "2")
 
     def fake_chat_structured(_model, _messages, schema, **_kwargs):
@@ -138,6 +139,8 @@ def isolated_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                     },
                 ],
             )
+        if schema is html_one._HtmlCritique:
+            return schema(decision="accept", issues=[], revision_instructions="")
         raise AssertionError(f"Unexpected schema: {schema}")
 
     monkeypatch.setattr(outline.zenmux, "chat_structured", fake_chat_structured)
@@ -190,6 +193,13 @@ def test_html_retry_succeeds_within_single_run(isolated_graph, monkeypatch: pyte
     assert not ready["interrupts"]
     assert calls["Opening argument"] == 1
     assert calls["Execution path"] == 2
+    metadata = ready["values"]["html_generation_metadata"]
+    assert set(map(int, metadata.keys())) == {0, 1}
+    assert metadata[0]["status"] == "succeeded"
+    assert metadata[1]["status"] == "succeeded"
+    assert metadata[1]["cycles_run"] == 2
+    assert metadata[1]["cycles"][0]["stop_reason"] == "truncated"
+    assert metadata[1]["cycles"][1]["critic_decision"] == "accept"
 
 
 def test_html_failure_interrupts_and_never_persists_placeholder(isolated_graph, monkeypatch: pytest.MonkeyPatch):
@@ -205,6 +215,11 @@ def test_html_failure_interrupts_and_never_persists_placeholder(isolated_graph, 
     assert _interrupt_gate(paused) == "html"
     assert 1 not in paused["values"].get("html_slides", {})
     assert paused["values"]["html_failures"][0]["slide_idx"] == 1
+    metadata = paused["values"]["html_generation_metadata"]
+    assert metadata[0]["status"] == "succeeded"
+    assert metadata[1]["status"] == "failed"
+    assert metadata[1]["cycles_run"] == 2
+    assert metadata[1]["cycles"][-1]["stop_reason"] == "truncated"
     assert all("html generation failed" not in html for html in paused["values"].get("html_slides", {}).values())
     assert paused["interrupts"][0]["failed_slides"][0]["slide_idx"] == 1
 
@@ -229,5 +244,178 @@ def test_html_retry_interrupt_reruns_only_failed_slides(isolated_graph, monkeypa
     assert retried["values"]["current_stage"] == "ready"
     assert not retried["interrupts"]
     assert retried["values"]["html_slides"][0] == preserved
+    metadata = retried["values"]["html_generation_metadata"]
+    assert metadata[0]["status"] == "succeeded"
+    assert metadata[1]["status"] == "succeeded"
+    assert metadata[1]["cycles_run"] == 1
     assert calls["Opening argument"] == 1
     assert calls["Execution path"] == 3
+
+
+def _single_slide_brief() -> dict:
+    return {
+        "aspect_ratio": "16:9",
+        "style": {
+            "palette": {"background": "#fff", "text": "#111"},
+            "typography": {"heading_family": "IBM Plex Serif", "body_family": "IBM Plex Sans"},
+            "tone": "editorial",
+        },
+        "density": "balanced",
+        "language": "en",
+        "slides": [
+            {
+                "slide_idx": 0,
+                "title": "Quality slide",
+                "role": "context",
+                "bullets": ["Evidence one", "Evidence two"],
+                "pattern": "content_card_grid",
+                "zones": ["title", "proof"],
+                "wireframe": "",
+            }
+        ],
+    }
+
+
+def test_html_react_accepts_first_valid_draft(monkeypatch: pytest.MonkeyPatch):
+    composer_calls = 0
+    critic_calls = 0
+
+    def fake_html(_model, messages, **_kwargs):
+        nonlocal composer_calls
+        composer_calls += 1
+        title, pattern = _prompt_metadata(messages)
+        return CompletionResult(text=_good_html(title, pattern), finish_reason="stop")
+
+    def fake_critic(_model, _messages, schema, **_kwargs):
+        nonlocal critic_calls
+        critic_calls += 1
+        assert schema is html_one._HtmlCritique
+        return schema(decision="accept", issues=[], revision_instructions="")
+
+    monkeypatch.setattr(html_one.zenmux, "chat_with_metadata", fake_html)
+    monkeypatch.setattr(html_one.zenmux, "chat_structured", fake_critic)
+
+    result = html_one.html_one_node({"slide_idx": 0, "brief": _single_slide_brief()})
+
+    assert 0 in result["html_slides"]
+    metadata = result["html_generation_metadata"][0]
+    assert metadata["status"] == "succeeded"
+    assert metadata["accepted_by"] == "critic"
+    assert metadata["cycles_run"] == 1
+    assert metadata["cycles"][0]["critic_decision"] == "accept"
+    assert composer_calls == 1
+    assert critic_calls == 1
+
+
+def test_html_react_revision_uses_critic_feedback(monkeypatch: pytest.MonkeyPatch):
+    composer_messages: list[list[dict[str, object]]] = []
+    critic_calls = 0
+
+    def fake_html(_model, messages, **_kwargs):
+        composer_messages.append(messages)
+        title, pattern = _prompt_metadata(messages)
+        suffix = " refined" if len(composer_messages) == 2 else ""
+        return CompletionResult(text=_good_html(title + suffix, pattern), finish_reason="stop")
+
+    def fake_critic(_model, _messages, schema, **_kwargs):
+        nonlocal critic_calls
+        critic_calls += 1
+        assert schema is html_one._HtmlCritique
+        if critic_calls == 1:
+            return schema(
+                decision="revise",
+                issues=["Hierarchy is too flat."],
+                revision_instructions="Improve visual hierarchy with a stronger title zone.",
+            )
+        return schema(decision="accept", issues=[], revision_instructions="")
+
+    monkeypatch.setenv("OSZ_HTML_REACT_MAX_CYCLES", "3")
+    monkeypatch.setattr(html_one.zenmux, "chat_with_metadata", fake_html)
+    monkeypatch.setattr(html_one.zenmux, "chat_structured", fake_critic)
+
+    result = html_one.html_one_node({"slide_idx": 0, "brief": _single_slide_brief()})
+
+    assert "refined" in result["html_slides"][0]
+    metadata = result["html_generation_metadata"][0]
+    assert metadata["status"] == "succeeded"
+    assert metadata["accepted_by"] == "critic"
+    assert metadata["cycles_run"] == 2
+    assert metadata["cycles"][0]["critic_decision"] == "revise"
+    assert metadata["cycles"][0]["critic_issues"] == ["Hierarchy is too flat."]
+    assert len(composer_messages) == 2
+    assert "Improve visual hierarchy" in str(composer_messages[1][-1]["content"])
+
+
+def test_html_react_sends_validator_warnings_to_critic(monkeypatch: pytest.MonkeyPatch):
+    critic_prompt = ""
+
+    def fake_html(_model, messages, **_kwargs):
+        title, pattern = _prompt_metadata(messages)
+        html = _good_html(title, pattern).replace(
+            "* { box-sizing: border-box; }",
+            "* { box-sizing: border-box; font-family: Inter, sans-serif; }",
+        )
+        return CompletionResult(text=html, finish_reason="stop")
+
+    def fake_critic(_model, messages, schema, **_kwargs):
+        nonlocal critic_prompt
+        assert schema is html_one._HtmlCritique
+        critic_prompt = "\n\n".join(str(message["content"]) for message in messages)
+        return schema(decision="accept", issues=[], revision_instructions="")
+
+    monkeypatch.setattr(html_one.zenmux, "chat_with_metadata", fake_html)
+    monkeypatch.setattr(html_one.zenmux, "chat_structured", fake_critic)
+
+    html_one.html_one_node({"slide_idx": 0, "brief": _single_slide_brief()})
+
+    assert "banned_font" in critic_prompt
+    assert "Inter" in critic_prompt
+
+
+def test_html_react_skips_critic_for_invalid_draft(monkeypatch: pytest.MonkeyPatch):
+    composer_messages: list[list[dict[str, object]]] = []
+    critic_calls = 0
+
+    def fake_html(_model, messages, **_kwargs):
+        composer_messages.append(messages)
+        if len(composer_messages) == 1:
+            return CompletionResult(
+                text="<!DOCTYPE html><html><head><style>.slide{width:960px;",
+                finish_reason="length",
+            )
+        assert "finish_reason=length" in str(messages[-1]["content"])
+        title, pattern = _prompt_metadata(messages)
+        return CompletionResult(text=_good_html(title, pattern), finish_reason="stop")
+
+    def fake_critic(_model, _messages, schema, **_kwargs):
+        nonlocal critic_calls
+        critic_calls += 1
+        assert schema is html_one._HtmlCritique
+        return schema(decision="accept", issues=[], revision_instructions="")
+
+    monkeypatch.setenv("OSZ_HTML_REACT_MAX_CYCLES", "2")
+    monkeypatch.setattr(html_one.zenmux, "chat_with_metadata", fake_html)
+    monkeypatch.setattr(html_one.zenmux, "chat_structured", fake_critic)
+
+    result = html_one.html_one_node({"slide_idx": 0, "brief": _single_slide_brief()})
+
+    assert 0 in result["html_slides"]
+    metadata = result["html_generation_metadata"][0]
+    assert metadata["cycles_run"] == 2
+    assert metadata["cycles"][0]["validation_error_count"] > 0
+    assert metadata["cycles"][0]["critic_decision"] is None
+    assert metadata["cycles"][1]["critic_decision"] == "accept"
+    assert len(composer_messages) == 2
+    assert critic_calls == 1
+
+
+def test_html_react_max_cycles_env_default_and_legacy_fallback(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("OSZ_HTML_REACT_MAX_CYCLES", raising=False)
+    monkeypatch.delenv("OSZ_HTML_MAX_ATTEMPTS", raising=False)
+    assert html_one._html_react_max_cycles() == 3
+
+    monkeypatch.setenv("OSZ_HTML_MAX_ATTEMPTS", "2")
+    assert html_one._html_react_max_cycles() == 2
+
+    monkeypatch.setenv("OSZ_HTML_REACT_MAX_CYCLES", "4")
+    assert html_one._html_react_max_cycles() == 4

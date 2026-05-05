@@ -10,12 +10,19 @@ The system prompt encodes the anti-slop rules verbatim.
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
 
 from ...catalog import layouts as L
 from ...catalog.validator import validate_slide_html
 from ...llm import zenmux
-from ...llm.models import get_lane_model, get_lane_thinking_effort, html_overlay_for_preset
+from ...llm.models import (
+    get_lane_model,
+    get_lane_thinking_effort,
+    get_model,
+    html_overlay_for_preset,
+)
 from ...llm.stream import push_event, tagged_stream
 
 
@@ -38,21 +45,19 @@ Avoid AI-slop tropes (these are non-negotiable):
 """
 
 COMPOSITION_DISCIPLINE = """\
-Claude-quality composition discipline:
+Highend-quality composition discipline:
 - Choose 2-4 named zones from the requested pattern before writing HTML. Every
   visible element must belong to one zone.
-- Convert bullets into designed evidence: numbered keys, proof rows, micro-bars,
+- Convert bullets into designed evidence: proof rows, micro-bars,
   split columns, quote blocks, or marked steps. Use a plain bullet list only when
   it is the clearest structure. These are zone contents, not motifs.
+- Avoid use boring Arabic numerals (such as circled numbers, plain numbers) to express numbered keys.
 - Add at most one content-earned CSS-only motif when useful: thin rules, bands,
   rings, simple bars, coordinate lines, counters, or typographic anchors. A motif
   is a small decorative anchor, not a structural layout pattern. Proof rows,
   split columns, and quote blocks do not count toward the motif limit.
-- Use at most two font-family roles per slide: one display/heading face and one
-  body/label face, derived from the supplied typography when it names a system or
-  already-loaded face. If the supplied typography names a font that would require
-  loading, substitute a near-equivalent system fallback instead. Do not use
-  external font imports, @import rules, or font <link> tags.
+- Use at most three font-family roles per slide.
+- Use Exactly the font families from typography in context. Do not use font family other than the brief gives.
 - For a 960x540 slide, use a role-based type scale: cover/display 34-48px,
   normal titles 28-40px, section headings 18-26px, body/proof 11.5-15px for
   dense slides or 13-17px for balanced slides, and labels/meta 9-11px.
@@ -60,9 +65,7 @@ Claude-quality composition discipline:
   for a 540px-tall canvas). Body/proof text must stay at or below 20px.
 - Prefer font weights 400, 600, and 700, optionally 300. Avoid arbitrary weights
   like 350, 450, 550, or 650.
-- Use title line-height 1.1-1.35, body/proof line-height 1.45-1.7, and
-  label/meta line-height 1-1.25. Reserve letter-spacing 0.08em-0.18em for
-  labels and kickers, not body text.
+- Reserve proper line spacing to keep visual comfortable.
 - Compose for the exact root canvas only. Do not add @media rules, print styles,
   responsive fallback CSS, hover states, transitions, animations, or defensive
   fit-guard sections.
@@ -71,7 +74,7 @@ Claude-quality composition discipline:
   near-square edges, and near-zero shadows. Use circular radius only for dots,
   rings, or markers.
 - Avoid decorative blobs, generic card piles, hover states, animations, SVG,
-  external CSS imports, and external font imports.
+  external CSS imports.
 - Use semantic, slide-specific class names and short CSS comments for major
   regions. Keep the DOM shallow and purposeful.
 - Make density intentional: title hierarchy first, proof second, captions or
@@ -86,10 +89,60 @@ motif. If any check fails, revise the HTML before returning.
 """
 
 _TRUNCATION_REASONS = {"length", "max_tokens"}
+_MAX_METADATA_ISSUES = 5
+_MAX_METADATA_ISSUE_CHARS = 300
+
+
+class _HtmlCritique(BaseModel):
+    decision: Literal["accept", "revise"]
+    issues: list[str] = Field(default_factory=list)
+    revision_instructions: str = ""
 
 
 def _canvas_css(aspect_ratio: str) -> tuple[int, int]:
     return L.CANVAS_SIZES.get(aspect_ratio, L.CANVAS_SIZES["16:9"])
+
+
+def _typography_role_contract(typography: dict[str, Any]) -> str:
+    heading = typography.get("heading_family") or typography.get("heading")
+    body = typography.get("body_family") or typography.get("body")
+    display = typography.get("display_family") or typography.get("display")
+
+    lines = [
+        "Typography role contract:",
+    ]
+    if body:
+        lines.append(
+            f"- body_family: `{body}` — use this exact CSS stack for the root/default "
+            "font and for paragraphs, proof text, captions, labels, and metadata."
+        )
+    if heading:
+        lines.append(
+            f"- heading_family: `{heading}` — use this exact CSS stack for normal "
+            "slide titles, section headings, and structural labels."
+        )
+    if display and display != heading:
+        lines.append(
+            f"- display_family: `{display}` — this role is not optional when present. "
+            "Use this exact CSS stack at least once on the slide: for the primary h1 "
+            "on cover, opener, section, closing, or impact slides, or for exactly one "
+            "content-earned typographic anchor/glyph on dense evidence slides."
+        )
+        lines.append(
+            "- Do not silently replace display_family with heading_family because it "
+            "feels safer; if the slide is too dense for a display title, reserve "
+            "display_family for one controlled anchor only."
+        )
+    elif display:
+        lines.append(
+            f"- display_family: `{display}` — same as heading_family; use it for "
+            "display-scale moments without adding another font role."
+        )
+    else:
+        lines.append(
+            "- display_family: not provided; use heading_family for display-scale moments."
+        )
+    return "\n".join(lines)
 
 
 def _slide_prompt(
@@ -102,6 +155,7 @@ def _slide_prompt(
     style = brief["style"]
     palette = style.get("palette", {})
     typography = style.get("typography", {})
+    typography_contract = _typography_role_contract(typography)
     pattern = brief_slide["pattern"]
     zones = brief_slide["zones"]
     guidance_lines: list[str] = []
@@ -168,6 +222,7 @@ document for a single slide. Hard constraints:
 Design system to apply:
 - Palette: {palette}
 - Typography: {typography}
+{typography_contract}
 - Density: {brief['density']}
 - Tone: {style.get('tone', 'editorial')}
 {visual_guidance}
@@ -214,8 +269,23 @@ def _html_timeout_seconds() -> float:
     return max(1.0, float(os.getenv("OSZ_HTML_TIMEOUT_SECONDS", "180")))
 
 
-def _html_max_attempts() -> int:
-    return max(1, int(os.getenv("OSZ_HTML_MAX_ATTEMPTS", "2")))
+def _positive_int_env(name: str) -> int | None:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return max(1, value)
+
+
+def _html_react_max_cycles() -> int:
+    return (
+        _positive_int_env("OSZ_HTML_REACT_MAX_CYCLES")
+        or _positive_int_env("OSZ_HTML_MAX_ATTEMPTS")
+        or 3
+    )
 
 
 def _strip_code_fences(html: str) -> str:
@@ -239,6 +309,95 @@ def _validation_errors(
     ]
 
 
+def _validation_warnings(
+    validation: Any,
+    slide_idx: int,
+) -> list[str]:
+    return [
+        f"slide {slide_idx}: {issue.rule} — {issue.message}"
+        for issue in validation.warnings
+    ]
+
+
+def _cap_metadata_text(value: Any) -> str:
+    text = str(value).strip()
+    if len(text) <= _MAX_METADATA_ISSUE_CHARS:
+        return text
+    return text[: _MAX_METADATA_ISSUE_CHARS - 1].rstrip() + "…"
+
+
+def _cap_metadata_issues(issues: list[Any]) -> list[str]:
+    return [
+        _cap_metadata_text(issue)
+        for issue in issues[:_MAX_METADATA_ISSUES]
+        if str(issue).strip()
+    ]
+
+
+def _cycle_metadata(
+    *,
+    cycle: int,
+    composer_finish_reason: str | None,
+    validation_error_count: int = 0,
+    validation_warning_count: int = 0,
+    critic_decision: str | None = None,
+    critic_issues: list[Any] | None = None,
+    stop_reason: str,
+) -> dict[str, Any]:
+    return {
+        "cycle": cycle,
+        "composer_finish_reason": composer_finish_reason,
+        "validation_error_count": validation_error_count,
+        "validation_warning_count": validation_warning_count,
+        "critic_decision": critic_decision,
+        "critic_issues": _cap_metadata_issues(critic_issues or []),
+        "stop_reason": stop_reason,
+    }
+
+
+def _html_generation_metadata(
+    *,
+    slide_idx: int,
+    status: Literal["succeeded", "failed"],
+    model: str | None = None,
+    critic_model: str | None = None,
+    reasoning_effort: str | None = None,
+    preset_id: str | None = None,
+    temperature: float | None = None,
+    max_cycles: int = 0,
+    cycles: list[dict[str, Any]] | None = None,
+    accepted_by: str | None = None,
+    final_finish_reason: str | None = None,
+    final_error: str | None = None,
+) -> dict[str, Any]:
+    cycle_records = list(cycles or [])
+    return {
+        "slide_idx": slide_idx,
+        "status": status,
+        "model": model,
+        "critic_model": critic_model,
+        "reasoning_effort": reasoning_effort,
+        "preset_id": preset_id,
+        "temperature": temperature,
+        "max_cycles": max_cycles,
+        "cycles_run": len(cycle_records),
+        "accepted_by": accepted_by,
+        "final_finish_reason": final_finish_reason,
+        "final_error": _cap_metadata_text(final_error) if final_error else None,
+        "cycles": cycle_records,
+    }
+
+
+def _with_html_metadata(
+    slide_idx: int,
+    metadata: dict[str, Any],
+    update: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    out = dict(update or {})
+    out["html_generation_metadata"] = {slide_idx: metadata}
+    return out
+
+
 def _retry_prompt(
     finish_reason: str | None,
     validation_errors: list[str],
@@ -257,6 +416,77 @@ def _retry_prompt(
     )
 
 
+def _critique_prompt(critique: _HtmlCritique) -> str:
+    issues = [str(issue).strip() for issue in critique.issues if str(issue).strip()]
+    instructions = critique.revision_instructions.strip()
+    detail_lines = [f"- {issue}" for issue in issues]
+    if instructions:
+        detail_lines.append(f"- Revision instructions: {instructions}")
+    detail = "\n".join(detail_lines) if detail_lines else "- Make only concrete quality fixes."
+    return (
+        "Your previous HTML passed hard validation, but the critic requested a "
+        "quality revision. Re-render the entire slide as one fully closed HTML "
+        "document. Preserve all factual content, keep the requested layout pattern, "
+        "and fix only the concrete issues below. Return the full document only.\n"
+        f"Critic observations:\n{detail}"
+    )
+
+
+def _critic_messages(
+    *,
+    brief_slide: dict[str, Any],
+    brief: dict[str, Any],
+    html: str,
+    warnings: list[str],
+) -> list[dict[str, Any]]:
+    warning_text = "\n".join(f"- {warning}" for warning in warnings) if warnings else "- None"
+    style = brief.get("style") or {}
+    typography = style.get("typography") or {}
+    typography_contract = _typography_role_contract(typography)
+    system = f"""\
+You are an exacting critic for generated HTML/CSS slide quality.
+Review the slide and decide whether it should be accepted or revised.
+
+Use decision="revise" only for concrete issues that materially improve the slide:
+- visible overflow, crowding, weak hierarchy, awkward zone use, unreadable type,
+  generic card/chrome treatment, unearned decoration, validator warnings, or
+  violations of the anti-slop/composition rules.
+- Treat the typography role contract as binding. If display_family is present
+  and distinct from heading_family but unused, request a concrete revision.
+- Do not request changes for subjective taste alone.
+- Do not rewrite or return HTML. Return structured critique only.
+
+{ANTI_SLOP_RULES}
+
+{COMPOSITION_DISCIPLINE}
+"""
+    user = f"""\
+Slide metadata:
+- Title: {brief_slide.get('title')}
+- Role: {brief_slide.get('role')}
+- Pattern: {brief_slide.get('pattern')}
+- Zones: {brief_slide.get('zones')}
+- Bullets: {brief_slide.get('bullets')}
+- Density: {brief.get('density')}
+- Tone: {style.get('tone', 'editorial')}
+- Typography: {typography}
+
+{typography_contract}
+
+Validator warnings:
+{warning_text}
+
+Generated HTML to review:
+```html
+{html}
+```
+"""
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+
+
 def _failure_update(
     *,
     slide_idx: int,
@@ -264,6 +494,7 @@ def _failure_update(
     reason: str,
     finish_reason: str | None = None,
     errors: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     update: dict[str, Any] = {
         "html_failures": [{
@@ -275,7 +506,18 @@ def _failure_update(
     }
     if errors:
         update["errors"] = errors
-    return update
+    return _with_html_metadata(
+        slide_idx,
+        metadata
+        or _html_generation_metadata(
+            slide_idx=slide_idx,
+            status="failed",
+            max_cycles=attempt_count,
+            final_finish_reason=finish_reason,
+            final_error=reason,
+        ),
+        update,
+    )
 
 
 def html_one_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -314,34 +556,51 @@ def html_one_node(state: dict[str, Any]) -> dict[str, Any]:
     overlay_model = overlay.get("model")
     fallback_model = overlay_model if isinstance(overlay_model, str) and overlay_model else None
     model = get_lane_model(brief, "html", "html", fallback_model=fallback_model)
+    critic_model = get_model("html.critic")
     reasoning_effort = get_lane_thinking_effort(brief, "html")
     overlay_temperature = overlay.get("temperature")
     temperature = float(overlay_temperature) if isinstance(overlay_temperature, (int, float)) else 0.4
+    max_cycles = _html_react_max_cycles()
     event: dict[str, Any] = {
         "node": "html_one",
         "slide_idx": slide_idx,
         "state": "started",
         "model": model,
+        "critic_model": critic_model,
         "preset_id": preset_id,
         "temperature": temperature,
+        "max_cycles": max_cycles,
     }
     if reasoning_effort:
         event["reasoning_effort"] = reasoning_effort
     push_event(event)
     previous_html = ""
+    last_valid_html: str | None = None
+    last_critique: _HtmlCritique | None = None
     last_reason = f"slide {slide_idx}: unknown html generation failure"
     last_finish_reason: str | None = None
     last_errors: list[str] = []
+    cycles_metadata: list[dict[str, Any]] = []
 
-    for attempt in range(1, _html_max_attempts() + 1):
+    for cycle in range(1, max_cycles + 1):
+        push_event({
+            "node": "html_one",
+            "slide_idx": slide_idx,
+            "state": "cycle_started",
+            "cycle": cycle,
+            "max_cycles": max_cycles,
+            "model": model,
+        })
         messages = list(base_messages)
-        if attempt > 1:
+        if cycle > 1:
+            revision_prompt = (
+                _critique_prompt(last_critique)
+                if last_critique is not None
+                else _retry_prompt(last_finish_reason, last_errors)
+            )
             messages.extend([
                 {"role": "assistant", "content": previous_html},
-                {
-                    "role": "user",
-                    "content": _retry_prompt(last_finish_reason, last_errors),
-                },
+                {"role": "user", "content": revision_prompt},
             ])
         try:
             with tagged_stream(tag):
@@ -358,6 +617,42 @@ def html_one_node(state: dict[str, Any]) -> dict[str, Any]:
             last_reason = str(exc)
             last_finish_reason = None
             last_errors = [f"html_one slide {slide_idx}: {exc}"]
+            cycles_metadata.append(
+                _cycle_metadata(
+                    cycle=cycle,
+                    composer_finish_reason=None,
+                    critic_issues=[str(exc)],
+                    stop_reason="composer_error",
+                )
+            )
+            if last_valid_html is not None:
+                push_event({
+                    "node": "html_one",
+                    "slide_idx": slide_idx,
+                    "state": "finished",
+                    "model": model,
+                    "cycle": cycle,
+                    "accepted_by": "last_valid_after_composer_error",
+                    "error": str(exc),
+                })
+                metadata = _html_generation_metadata(
+                    slide_idx=slide_idx,
+                    status="succeeded",
+                    model=model,
+                    critic_model=critic_model,
+                    reasoning_effort=reasoning_effort,
+                    preset_id=preset_id,
+                    temperature=temperature,
+                    max_cycles=max_cycles,
+                    cycles=cycles_metadata,
+                    accepted_by="last_valid_after_composer_error",
+                    final_error=str(exc),
+                )
+                return _with_html_metadata(
+                    slide_idx,
+                    metadata,
+                    {"html_slides": {slide_idx: last_valid_html}},
+                )
             push_event({
                 "node": "html_one",
                 "slide_idx": slide_idx,
@@ -367,10 +662,22 @@ def html_one_node(state: dict[str, Any]) -> dict[str, Any]:
             })
             return _failure_update(
                 slide_idx=slide_idx,
-                attempt_count=attempt,
+                attempt_count=cycle,
                 reason=last_reason,
                 finish_reason=last_finish_reason,
                 errors=last_errors,
+                metadata=_html_generation_metadata(
+                    slide_idx=slide_idx,
+                    status="failed",
+                    model=model,
+                    critic_model=critic_model,
+                    reasoning_effort=reasoning_effort,
+                    preset_id=preset_id,
+                    temperature=temperature,
+                    max_cycles=max_cycles,
+                    cycles=cycles_metadata,
+                    final_error=last_reason,
+                ),
             )
 
         html = _strip_code_fences(result.text)
@@ -380,28 +687,258 @@ def html_one_node(state: dict[str, Any]) -> dict[str, Any]:
             density=brief["density"],
         )
         validation_errors = _validation_errors(validation, slide_idx)
+        warnings = _validation_warnings(validation, slide_idx)
         if result.finish_reason in _TRUNCATION_REASONS:
             validation_errors.append(
                 f"slide {slide_idx}: finish_reason — response ended with {result.finish_reason}"
             )
 
-        if not validation_errors:
+        if validation_errors:
+            cycles_metadata.append(
+                _cycle_metadata(
+                    cycle=cycle,
+                    composer_finish_reason=result.finish_reason,
+                    validation_error_count=len(validation_errors),
+                    validation_warning_count=len(warnings),
+                    stop_reason=(
+                        "truncated"
+                        if result.finish_reason in _TRUNCATION_REASONS
+                        else "validation_failed"
+                    ),
+                )
+            )
+            previous_html = html
+            last_critique = None
+            last_finish_reason = result.finish_reason
+            last_errors = validation_errors
+            last_reason = validation_errors[0] if validation_errors else (
+                f"slide {slide_idx}: html validation failed"
+            )
+            push_event({
+                "node": "html_one",
+                "slide_idx": slide_idx,
+                "state": "cycle_invalid",
+                "cycle": cycle,
+                "error": last_reason,
+                "model": model,
+            })
+            if cycle >= max_cycles:
+                if last_valid_html is not None:
+                    push_event({
+                        "node": "html_one",
+                        "slide_idx": slide_idx,
+                        "state": "finished",
+                        "model": model,
+                        "cycle": cycle,
+                        "accepted_by": "last_valid_after_invalid_revision",
+                    })
+                    metadata = _html_generation_metadata(
+                        slide_idx=slide_idx,
+                        status="succeeded",
+                        model=model,
+                        critic_model=critic_model,
+                        reasoning_effort=reasoning_effort,
+                        preset_id=preset_id,
+                        temperature=temperature,
+                        max_cycles=max_cycles,
+                        cycles=cycles_metadata,
+                        accepted_by="last_valid_after_invalid_revision",
+                        final_finish_reason=result.finish_reason,
+                        final_error=last_reason,
+                    )
+                    return _with_html_metadata(
+                        slide_idx,
+                        metadata,
+                        {"html_slides": {slide_idx: last_valid_html}},
+                    )
+                break
+            continue
+
+        last_valid_html = html
+        push_event({
+            "node": "html_one",
+            "slide_idx": slide_idx,
+            "state": "critic_started",
+            "cycle": cycle,
+            "model": critic_model,
+            "warning_count": len(warnings),
+        })
+        try:
+            critique = zenmux.chat_structured(
+                critic_model,
+                _critic_messages(
+                    brief_slide=slide,
+                    brief=brief,
+                    html=html,
+                    warnings=warnings,
+                ),
+                _HtmlCritique,
+                temperature=0.1,
+                max_tokens=1400,
+                timeout=_html_timeout_seconds(),
+                max_attempts=2,
+            )
+        except Exception as exc:
+            cycles_metadata.append(
+                _cycle_metadata(
+                    cycle=cycle,
+                    composer_finish_reason=result.finish_reason,
+                    validation_error_count=0,
+                    validation_warning_count=len(warnings),
+                    critic_decision="error",
+                    critic_issues=[str(exc)],
+                    stop_reason="critic_error",
+                )
+            )
+            push_event({
+                "node": "html_one",
+                "slide_idx": slide_idx,
+                "state": "critic_error",
+                "cycle": cycle,
+                "error": str(exc),
+                "model": critic_model,
+            })
             push_event({
                 "node": "html_one",
                 "slide_idx": slide_idx,
                 "state": "finished",
                 "model": model,
+                "cycle": cycle,
+                "accepted_by": "critic_error",
             })
-            return {"html_slides": {slide_idx: html}}
+            metadata = _html_generation_metadata(
+                slide_idx=slide_idx,
+                status="succeeded",
+                model=model,
+                critic_model=critic_model,
+                reasoning_effort=reasoning_effort,
+                preset_id=preset_id,
+                temperature=temperature,
+                max_cycles=max_cycles,
+                cycles=cycles_metadata,
+                accepted_by="critic_error",
+                final_finish_reason=result.finish_reason,
+                final_error=str(exc),
+            )
+            return _with_html_metadata(
+                slide_idx,
+                metadata,
+                {"html_slides": {slide_idx: html}},
+            )
 
-        previous_html = html
-        last_finish_reason = result.finish_reason
-        last_errors = validation_errors
-        last_reason = validation_errors[0] if validation_errors else (
-            f"slide {slide_idx}: html validation failed"
+        issues = [str(issue).strip() for issue in critique.issues if str(issue).strip()]
+        revision_instructions = critique.revision_instructions.strip()
+        if critique.decision == "accept" or not (issues or revision_instructions):
+            cycles_metadata.append(
+                _cycle_metadata(
+                    cycle=cycle,
+                    composer_finish_reason=result.finish_reason,
+                    validation_error_count=0,
+                    validation_warning_count=len(warnings),
+                    critic_decision=critique.decision,
+                    critic_issues=issues,
+                    stop_reason="critic_accept",
+                )
+            )
+            push_event({
+                "node": "html_one",
+                "slide_idx": slide_idx,
+                "state": "critic_accept",
+                "cycle": cycle,
+                "model": critic_model,
+            })
+            push_event({
+                "node": "html_one",
+                "slide_idx": slide_idx,
+                "state": "finished",
+                "model": model,
+                "cycle": cycle,
+                "accepted_by": "critic",
+            })
+            metadata = _html_generation_metadata(
+                slide_idx=slide_idx,
+                status="succeeded",
+                model=model,
+                critic_model=critic_model,
+                reasoning_effort=reasoning_effort,
+                preset_id=preset_id,
+                temperature=temperature,
+                max_cycles=max_cycles,
+                cycles=cycles_metadata,
+                accepted_by="critic",
+                final_finish_reason=result.finish_reason,
+            )
+            return _with_html_metadata(
+                slide_idx,
+                metadata,
+                {"html_slides": {slide_idx: html}},
+            )
+
+        push_event({
+            "node": "html_one",
+            "slide_idx": slide_idx,
+            "state": "critic_revise",
+            "cycle": cycle,
+            "model": critic_model,
+            "issue_count": len(issues),
+        })
+        if cycle >= max_cycles:
+            cycles_metadata.append(
+                _cycle_metadata(
+                    cycle=cycle,
+                    composer_finish_reason=result.finish_reason,
+                    validation_error_count=0,
+                    validation_warning_count=len(warnings),
+                    critic_decision=critique.decision,
+                    critic_issues=issues,
+                    stop_reason="max_cycles",
+                )
+            )
+            push_event({
+                "node": "html_one",
+                "slide_idx": slide_idx,
+                "state": "finished",
+                "model": model,
+                "cycle": cycle,
+                "accepted_by": "max_cycles",
+            })
+            metadata = _html_generation_metadata(
+                slide_idx=slide_idx,
+                status="succeeded",
+                model=model,
+                critic_model=critic_model,
+                reasoning_effort=reasoning_effort,
+                preset_id=preset_id,
+                temperature=temperature,
+                max_cycles=max_cycles,
+                cycles=cycles_metadata,
+                accepted_by="max_cycles",
+                final_finish_reason=result.finish_reason,
+            )
+            return _with_html_metadata(
+                slide_idx,
+                metadata,
+                {"html_slides": {slide_idx: html}},
+            )
+
+        cycles_metadata.append(
+            _cycle_metadata(
+                cycle=cycle,
+                composer_finish_reason=result.finish_reason,
+                validation_error_count=0,
+                validation_warning_count=len(warnings),
+                critic_decision=critique.decision,
+                critic_issues=issues,
+                stop_reason="critic_revise",
+            )
         )
-        if attempt >= _html_max_attempts():
-            break
+        previous_html = html
+        last_critique = critique
+        last_finish_reason = None
+        last_errors = []
+        last_reason = issues[0] if issues else (
+            revision_instructions or f"slide {slide_idx}: critic requested revision"
+        )
 
     push_event({
         "node": "html_one",
@@ -412,8 +949,21 @@ def html_one_node(state: dict[str, Any]) -> dict[str, Any]:
     })
     return _failure_update(
         slide_idx=slide_idx,
-        attempt_count=_html_max_attempts(),
+        attempt_count=max_cycles,
         reason=last_reason,
         finish_reason=last_finish_reason,
         errors=last_errors or [last_reason],
+        metadata=_html_generation_metadata(
+            slide_idx=slide_idx,
+            status="failed",
+            model=model,
+            critic_model=critic_model,
+            reasoning_effort=reasoning_effort,
+            preset_id=preset_id,
+            temperature=temperature,
+            max_cycles=max_cycles,
+            cycles=cycles_metadata,
+            final_finish_reason=last_finish_reason,
+            final_error=last_reason,
+        ),
     )

@@ -198,6 +198,7 @@ def _resume_patch_for_synthetic_gate(
                     "consolidated_brief_md": "",
                     "brief": {},
                     "html_slides": {},
+                    "html_generation_metadata": {},
                     "html_failures": [],
                     "pending_html_retry_slides": [],
                     **preset_update,
@@ -221,6 +222,7 @@ def _resume_patch_for_synthetic_gate(
                     "current_stage": "html",
                     "html_failures": [],
                     "pending_html_retry_slides": retry_slide_ids,
+                    "html_generation_metadata": {idx: None for idx in retry_slide_ids},
                 },
             )
         return (

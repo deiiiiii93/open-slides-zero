@@ -2,7 +2,7 @@
 
 from app.catalog.visual_presets import VISUAL_STYLE_PRESETS
 from app.graph.nodes.consolidate import consolidate_node
-from app.graph.nodes.html_one import _slide_prompt
+from app.graph.nodes.html_one import _critic_messages, _slide_prompt
 
 
 def test_html_prompt_includes_no_filler_rule():
@@ -97,13 +97,14 @@ def test_html_prompt_includes_composition_quality_rules():
     )
 
     system_prompt = messages[0]["content"]
-    assert "Claude-quality composition discipline:" in system_prompt
+    assert "Highend-quality composition discipline:" in system_prompt
     assert "Choose 2-4 named zones" in system_prompt
     assert "visible element must belong to one zone" in system_prompt
     assert "content-earned CSS-only motif" in system_prompt
     assert "thin rules, bands" in system_prompt
     assert "rings, simple bars" in system_prompt
-    assert "at most two font-family roles" in system_prompt
+    assert "at most three font-family roles" in system_prompt
+    assert "Use Exactly the font families from typography" in system_prompt
     assert "cover/display 34-48px" in system_prompt
     assert "normal titles 28-40px" in system_prompt
     assert "body/proof 11.5-15px" in system_prompt
@@ -112,16 +113,13 @@ def test_html_prompt_includes_composition_quality_rules():
     assert "Body/proof text must" in system_prompt
     assert "400, 600, and 700" in system_prompt
     assert "350, 450, 550, or 650" in system_prompt
-    assert "title line-height 1.1-1.35" in system_prompt
-    assert "body/proof line-height 1.45-1.7" in system_prompt
-    assert "letter-spacing 0.08em-0.18em" in system_prompt
+    assert "Reserve proper line spacing" in system_prompt
     assert "exact root canvas only" in system_prompt
     assert "@media rules" in system_prompt
     assert "responsive fallback CSS" in system_prompt
     assert "transitions, animations" in system_prompt
     assert "near-zero shadows" in system_prompt
     assert "external CSS imports" in system_prompt
-    assert "external font imports" in system_prompt
     assert "hover states, animations" in system_prompt
     assert "title hierarchy first" in system_prompt
 
@@ -132,8 +130,79 @@ def test_html_prompt_includes_composition_quality_rules():
     assert "If any check fails, revise" in system_prompt
 
     assert "zone contents, not motifs" in system_prompt
+    assert "Avoid use boring Arabic numerals" in system_prompt
     assert "do not count toward the motif limit" in system_prompt
-    assert "substitute a near-equivalent system fallback" in system_prompt
+
+
+def test_html_prompt_includes_binding_typography_role_contract():
+    messages = _slide_prompt(
+        {
+            "slide_idx": 0,
+            "title": "Title",
+            "role": "opener",
+            "bullets": ["Only real content"],
+            "pattern": "title_body",
+            "zones": ["title", "body"],
+        },
+        {
+            "aspect_ratio": "16:9",
+            "style": {
+                "palette": {"background": "#fff", "text": "#111"},
+                "typography": {
+                    "heading_family": "Heading Serif",
+                    "body_family": "Body Sans",
+                    "display_family": "Display Face",
+                },
+                "tone": "editorial",
+            },
+            "density": "balanced",
+            "language": "en",
+        },
+    )
+
+    system_prompt = messages[0]["content"]
+    assert "Typography role contract:" in system_prompt
+    assert "body_family: `Body Sans`" in system_prompt
+    assert "heading_family: `Heading Serif`" in system_prompt
+    assert "display_family: `Display Face`" in system_prompt
+    assert "not optional when present" in system_prompt
+    assert "Use this exact CSS stack at least once" in system_prompt
+    assert "controlled anchor only" in system_prompt
+
+
+def test_html_critic_receives_typography_role_contract():
+    messages = _critic_messages(
+        brief_slide={
+            "slide_idx": 0,
+            "title": "Title",
+            "role": "opener",
+            "bullets": ["Only real content"],
+            "pattern": "title_body",
+            "zones": ["title", "body"],
+        },
+        brief={
+            "style": {
+                "typography": {
+                    "heading_family": "Heading Serif",
+                    "body_family": "Body Sans",
+                    "display_family": "Display Face",
+                },
+                "tone": "editorial",
+            },
+            "density": "balanced",
+        },
+        html="<!DOCTYPE html><html><body><div class='slide'>Title</div></body></html>",
+        warnings=[],
+    )
+
+    system_prompt = messages[0]["content"]
+    user_prompt = messages[1]["content"]
+    assert "Treat the typography role contract as binding" in system_prompt
+    assert "display_family is present" in system_prompt
+    assert "but unused" in system_prompt
+    assert "Typography role contract:" in user_prompt
+    assert "display_family: `Display Face`" in user_prompt
+    assert "Use this exact CSS stack at least once" in user_prompt
 
 
 def test_html_prompt_omits_visual_direction_guidance_for_ai_decide():

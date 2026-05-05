@@ -4,8 +4,8 @@ The state lives in the LangGraph checkpointer; filesystem markdown is a derived
 mirror. All fields optional so partial forks / regenerate-from-stage work cleanly.
 
 Reducers:
-  html_slides is a dict[int, str] merged slide-by-slide so the Send() fan-out
-  can commit slides independently without clobbering peers.
+  html_slides and html_generation_metadata are merged slide-by-slide so the
+  Send() fan-out can commit slides independently without clobbering peers.
 """
 
 from __future__ import annotations
@@ -73,6 +73,30 @@ def _merge_html(current: dict[int, str] | None, incoming: dict[int, str] | None)
     out: dict[int, str] = dict(current or {})
     for k, v in (incoming or {}).items():
         out[int(k)] = v
+    return out
+
+
+def _merge_html_generation_metadata(
+    current: dict[int, dict[str, Any]] | None,
+    incoming: dict[int | str, dict[str, Any] | None] | None,
+) -> dict[int, dict[str, Any]]:
+    """Merge per-slide HTML generation metadata.
+
+    ``{}`` clears all metadata, matching ``_merge_html``. A ``None`` value
+    deletes one slide's metadata, which lets retry paths clear stale failed-slide
+    audit records without dropping metadata for unaffected slides.
+    """
+    if incoming == {}:
+        return {}
+    out: dict[int, dict[str, Any]] = {
+        int(k): dict(v) for k, v in (current or {}).items()
+    }
+    for k, v in (incoming or {}).items():
+        idx = int(k)
+        if v is None:
+            out.pop(idx, None)
+        else:
+            out[idx] = dict(v)
     return out
 
 
@@ -164,6 +188,7 @@ class SlideState(TypedDict, total=False):
     # ---- I — fan-out reducer merges per-slide results ----
     html_slides: Annotated[dict[int, str], _merge_html]
     html_slides_base: Annotated[dict[int, str], _merge_html]
+    html_generation_metadata: Annotated[dict[int, dict[str, Any]], _merge_html_generation_metadata]
     html_failures: Annotated[list[dict[str, Any]], _merge_html_failures]
     pending_html_retry_slides: list[int]
 

@@ -25,6 +25,7 @@ _DEFAULTS: dict[str, str] = {
     "layout":         "anthropic/claude-sonnet-4.6",
     "consolidate":    "openai/gpt-5.4-mini",
     "html":           "anthropic/claude-sonnet-4.6",
+    "html.critic":    "anthropic/claude-sonnet-4.6",
     "image_plan":     "openai/gpt-5.4-mini",
     "edit.intent":    "openai/gpt-5.4-mini",
     "image_gen":      "openai/gpt-image-2",
@@ -48,6 +49,11 @@ _CURATED_LANE_MODEL_OPTIONS: list[dict[str, str]] = [
         "id": "openai/gpt-5.4",
         "label": "GPT-5.4",
         "description": "General high-capability option for style, layout, and HTML stages.",
+    },
+    {
+        "id": "openai/gpt-5.5",
+        "label": "GPT-5.5",
+        "description": "OpenAI's latest model. General high-capability option for style, layout, and HTML stages.",
     },
     {
         "id": "openai/gpt-5.4-mini",

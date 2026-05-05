@@ -102,6 +102,7 @@ def _regenerate_html_only(
 
     brief_by_idx = {s["slide_idx"]: s for s in brief["slides"]}
     updates: dict[int, str] = {}
+    metadata_updates: dict[int, dict[str, Any]] = {}
     errors: list[str] = []
     for idx in affected_slides:
         if idx not in brief_by_idx:
@@ -121,6 +122,9 @@ def _regenerate_html_only(
                 continue
         for k, v in (result.get("html_slides") or {}).items():
             updates[int(k)] = v
+        for k, v in (result.get("html_generation_metadata") or {}).items():
+            if isinstance(v, dict):
+                metadata_updates[int(k)] = v
         for e in (result.get("errors") or []):
             errors.append(e)
 
@@ -131,6 +135,8 @@ def _regenerate_html_only(
             "html_failures": [],
             "pending_html_retry_slides": [],
         }
+        if metadata_updates:
+            update["html_generation_metadata"] = metadata_updates
         plan = snap.values.get("image_insertion_plan") or {}
         applied_mappings = plan.get("applied_mappings") or []
         if snap.values.get("image_insertion_status") == "applied" and applied_mappings:

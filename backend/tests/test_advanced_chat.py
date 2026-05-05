@@ -153,6 +153,8 @@ def isolated_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                     },
                 ],
             )
+        if schema is html_one._HtmlCritique:
+            return schema(decision="accept", issues=[], revision_instructions="")
         raise AssertionError(f"Unexpected schema: {schema}")
 
     def fake_html(_model, messages, **_kwargs):
@@ -430,6 +432,10 @@ def test_advanced_ready_comment_stays_html_only_even_if_classifier_says_layout(
     assert state["next"] == []
     assert not state["interrupts"]
     assert len(state["values"]["html_slides"]) == original_count
+    metadata = state["values"]["html_generation_metadata"]
+    slide_0_metadata = metadata.get("0") or metadata.get(0)
+    assert slide_0_metadata["status"] == "succeeded"
+    assert slide_0_metadata["accepted_by"] == "critic"
     assert done["result"]["coerced_stage"] == "html"
     assert laid_out["values"]["current_stage"] == "await_layout"
 

@@ -4,11 +4,10 @@ import json
 from pathlib import Path
 
 import pytest
-from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.api import comments as comments_api
-from app.api import common, decks, hitl, playground, playground_store
+from app.api import common, decks, hitl, playground_store
 from app.artifacts import store
 from app.graph import graph as graph_module
 from app.graph.nodes import html_one, layout, outline, style
@@ -139,6 +138,8 @@ def isolated_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                     },
                 ],
             )
+        if schema is html_one._HtmlCritique:
+            return schema(decision="accept", issues=[], revision_instructions="")
         raise AssertionError(f"Unexpected schema: {schema}")
 
     def fake_html(model, messages, **_kwargs):

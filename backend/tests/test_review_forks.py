@@ -101,6 +101,8 @@ def isolated_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                     },
                 ],
             )
+        if schema is html_one._HtmlCritique:
+            return schema(decision="accept", issues=[], revision_instructions="")
         raise AssertionError(f"Unexpected schema: {schema}")
 
     def fake_chat(_model, messages, **_kwargs):
@@ -350,6 +352,7 @@ def test_layout_review_preset_change_reruns_style(isolated_graph):
     assert rerouted["values"].get("layouts") in (None, [])
     assert not rerouted["values"].get("brief")
     assert not rerouted["values"].get("html_slides")
+    assert not rerouted["values"].get("html_generation_metadata")
 
 
 def test_layout_review_fork_stops_at_layout_gate_and_supports_future_forks(isolated_graph):
@@ -371,6 +374,7 @@ def test_layout_review_fork_stops_at_layout_gate_and_supports_future_forks(isola
     assert forked["values"].get("consolidated_brief_md") in (None, "")
     assert not forked["values"].get("brief")
     assert not forked["values"].get("html_slides")
+    assert not forked["values"].get("html_generation_metadata")
     assert len(isolated_graph["html_messages"]) == html_calls_before
 
     rendered = hitl.resume_deck(
@@ -416,6 +420,7 @@ def test_layout_review_fork_clears_generated_image_state(isolated_graph):
     assert forked["values"].get("image_insertion_status") is None
     assert forked["values"].get("image_generation_errors") in (None, [])
     assert not forked["values"].get("html_slides_base")
+    assert not forked["values"].get("html_generation_metadata")
 
     rendered = hitl.resume_deck(
         forked["thread_id"],
@@ -446,6 +451,7 @@ def test_layout_review_fork_preset_change_starts_from_style(isolated_graph):
     assert forked["values"].get("layouts") in (None, [])
     assert not forked["values"].get("brief")
     assert not forked["values"].get("html_slides")
+    assert not forked["values"].get("html_generation_metadata")
     assert len(isolated_graph["html_messages"]) == html_calls_before
 
 

@@ -35,24 +35,28 @@ router = APIRouter()
 _DOWNSTREAM_FIELDS: dict[str, list[str]] = {
     "outline":      ["outline_md", "outline_slides", "visual_style_md", "visual_style",
                      "layouts", "consolidated_brief_md", "brief", "html_slides",
-                     "html_slides_base", "html_failures", "pending_html_retry_slides",
+                     "html_generation_metadata", "html_slides_base", "html_failures",
+                     "pending_html_retry_slides",
                      "image_insertion_plan", "image_insertion_status",
                      "image_generation_errors"],
     "style":        ["visual_style_md", "visual_style",
                      "layouts", "consolidated_brief_md", "brief", "html_slides",
-                     "html_slides_base", "html_failures", "pending_html_retry_slides",
+                     "html_generation_metadata", "html_slides_base", "html_failures",
+                     "pending_html_retry_slides",
                      "image_insertion_plan", "image_insertion_status",
                      "image_generation_errors"],
     "layout":       ["layouts", "consolidated_brief_md", "brief", "html_slides",
-                     "html_slides_base", "html_failures", "pending_html_retry_slides",
+                     "html_generation_metadata", "html_slides_base", "html_failures",
+                     "pending_html_retry_slides",
                      "image_insertion_plan", "image_insertion_status",
                      "image_generation_errors"],
     "consolidate":  ["consolidated_brief_md", "brief", "html_slides",
-                     "html_slides_base", "html_failures", "pending_html_retry_slides",
+                     "html_generation_metadata", "html_slides_base", "html_failures",
+                     "pending_html_retry_slides",
                      "image_insertion_plan", "image_insertion_status",
                      "image_generation_errors"],
-    "html":         ["html_slides", "html_slides_base", "html_failures",
-                     "pending_html_retry_slides", "image_insertion_plan",
+    "html":         ["html_slides", "html_generation_metadata", "html_slides_base",
+                     "html_failures", "pending_html_retry_slides", "image_insertion_plan",
                      "image_insertion_status", "image_generation_errors"],
     "image_only":   [],  # no state invalidation; only prompt-hint change
 }
@@ -61,7 +65,7 @@ _DOWNSTREAM_FIELDS: dict[str, list[str]] = {
 def _empty_for(field: str) -> Any:
     if field.endswith("_md"):
         return ""
-    if field in ("html_slides", "html_slides_base"):
+    if field in ("html_slides", "html_slides_base", "html_generation_metadata"):
         return {}
     if field == "image_insertion_plan":
         return {}
@@ -254,6 +258,17 @@ def _regenerate_from(
         }
         if preserved:
             new_cfg = g.update_state(new_cfg, {"html_slides": preserved})  # type: ignore[arg-type]
+        current_metadata = snap.values.get("html_generation_metadata") or {}
+        preserved_metadata = {
+            int(k): v
+            for k, v in current_metadata.items()
+            if int(k) not in affected_slides
+        }
+        if preserved_metadata:
+            new_cfg = g.update_state(  # type: ignore[arg-type]
+                new_cfg,
+                {"html_generation_metadata": preserved_metadata},
+            )
 
     # 4. Resume forward from the historical checkpoint — the target node runs
     #    fresh, everything downstream re-executes.
