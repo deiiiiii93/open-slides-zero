@@ -186,22 +186,34 @@ textarea.osz-control {
   align-items: center;
   gap: 6px;
   white-space: nowrap;
-  border-radius: 999px;
-  padding: 5px 10px;
-  font-size: 12px;
+  border-radius: 0;
+  padding: 5px 12px;
+  font-size: 11px;
   font-weight: 700;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  background: transparent;
 }
 
 .osz-status-ready {
-  border: 1px solid #a7f3d0;
-  background: #ecfdf5;
-  color: #047857;
+  border: 1px solid #3d5a2a;
+  color: #3d5a2a;
 }
 
 .osz-status-required {
-  border: 1px solid #fed7aa;
-  background: #fff7ed;
-  color: #b45309;
+  border: 1px solid #8a5a14;
+  color: #8a5a14;
+}
+
+.osz-status-error {
+  border: 1px solid #8b1a1a;
+  color: #8b1a1a;
+}
+
+.osz-status-busy {
+  border: 1px solid #0a0a0a;
+  background: #0a0a0a;
+  color: #f5f3ee;
 }
 
 .runtime-config-panel {
@@ -217,9 +229,9 @@ textarea.osz-control {
 
 .runtime-config-note {
   margin-top: 10px;
-  color: #6e6e73;
+  color: #5c5852;
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 1.55;
 }
 
 .runtime-config-actions {
@@ -231,8 +243,8 @@ textarea.osz-control {
 
 .osz-disclosure {
   margin-top: 14px;
-  border-top: 1px solid #ebebeb;
-  padding-top: 12px;
+  border-top: 1px solid #0a0a0a;
+  padding-top: 14px;
 }
 
 .osz-disclosure-summary {
@@ -245,25 +257,30 @@ textarea.osz-control {
   border: 0;
   background: transparent;
   cursor: pointer;
-  color: #1c1c1e;
-  font-size: 14px;
+  color: #0a0a0a;
+  font-size: 11px;
   font-weight: 700;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  font-family: ui-sans-serif, -apple-system, sans-serif;
 }
 
 .osz-disclosure-summary::after {
   content: "+";
   display: inline-grid;
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   flex: 0 0 auto;
   place-items: center;
-  border-radius: 999px;
-  background: #f0f0f0;
-  color: #6e6e73;
+  border-radius: 0;
+  background: #0a0a0a;
+  color: #f5f3ee;
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .osz-disclosure-open .osz-disclosure-summary::after {
-  content: "-";
+  content: "−";
 }
 
 .runtime-model-grid {
@@ -284,10 +301,10 @@ textarea.osz-control {
   display: grid;
   gap: 8px;
   min-width: 0;
-  padding: 12px;
-  border: 1px solid #ebebeb;
-  border-radius: 8px;
-  background: #fafafa;
+  padding: 14px;
+  border: 1px solid #0a0a0a;
+  border-radius: 0;
+  background: #e8e3d8;
 }
 
 .runtime-model-card .osz-muted {
@@ -355,8 +372,8 @@ textarea.osz-control {
 
 .osz-file-list {
   overflow: hidden;
-  border: 1px solid #ebebeb;
-  border-radius: 8px;
+  border: 1.5px solid #0a0a0a;
+  border-radius: 0;
 }
 
 .osz-file-row {
@@ -364,28 +381,28 @@ textarea.osz-control {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 9px 10px;
-  background: #ffffff;
+  padding: 10px 12px;
+  background: #f5f3ee;
 }
 
 .osz-file-row + .osz-file-row {
-  border-top: 1px solid #f3f3f3;
+  border-top: 1px solid #0a0a0a;
 }
 
 .osz-file-name {
   overflow: hidden;
-  color: #1c1c1e;
+  color: #0a0a0a;
   font-size: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .osz-warning {
-  border: 1px solid #fcd34d;
-  border-radius: 8px;
-  background: #fffbeb;
-  color: #92400e;
-  padding: 9px 10px;
+  border: 1px solid #8a5a14;
+  border-radius: 0;
+  background: #f5f3ee;
+  color: #8a5a14;
+  padding: 10px 12px;
   font-size: 13px;
 }
 
