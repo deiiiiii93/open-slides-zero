@@ -1,11 +1,23 @@
 from __future__ import annotations
 
+from typing import TypedDict
 from typing import Any
 
+import pytest
+from fastapi import HTTPException
+from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel
 
+from app.graph.graph import _runtime_node
 from app.llm import zenmux
 from app.llm.models import get_model
+from app.llm.runtime_config import (
+    RuntimeLLMConfig,
+    attach_runtime_config_id,
+    register_runtime_config,
+    unregister_runtime_config,
+    use_runtime_config,
+)
 
 
 class _Message:
@@ -46,6 +58,10 @@ class _FakeClient:
 
 class _StructuredPayload(BaseModel):
     value: str
+
+
+class _MiniState(TypedDict):
+    text: str
 
 
 def test_html_critic_defaults_to_deepseek_flash():
@@ -150,3 +166,132 @@ def test_chat_structured_forwards_reasoning_effort(monkeypatch):
     assert result.value == "ok"
     assert call["reasoning_effort"] == "medium"
     assert call["response_format"] == {"type": "json_object"}
+
+
+def test_runtime_zenmux_config_overrides_env_client(monkeypatch):
+    client = _FakeClient()
+    calls: list[tuple[str, str]] = []
+
+    def fake_client_for(key: str, base_url: str):
+        calls.append((key, base_url))
+        return client
+
+    monkeypatch.setenv("ZENMUX_API_KEY", "env-key")
+    monkeypatch.setenv("ZENMUX_BASE_URL", "https://env.example/v1")
+    monkeypatch.setattr(zenmux, "_client_for", fake_client_for)
+
+    with use_runtime_config(
+        RuntimeLLMConfig(
+            zenmux_api_key="runtime-key",
+            zenmux_base_url="https://runtime.example/v1",
+        )
+    ):
+        zenmux.chat_with_metadata(
+            "anthropic/claude-sonnet-4.6",
+            [{"role": "user", "content": "hello"}],
+        )
+
+    assert calls == [("runtime-key", "https://runtime.example/v1")]
+
+
+def test_runtime_config_reaches_langgraph_worker_thread(monkeypatch):
+    client = _FakeClient()
+    calls: list[tuple[str, str]] = []
+
+    def fake_client_for(key: str, base_url: str):
+        calls.append((key, base_url))
+        return client
+
+    def node(_state: _MiniState) -> dict[str, str]:
+        text = zenmux.chat_with_metadata(
+            "anthropic/claude-sonnet-4.6",
+            [{"role": "user", "content": "hello"}],
+        ).text
+        return {"text": text}
+
+    monkeypatch.delenv("ZENMUX_API_KEY", raising=False)
+    monkeypatch.setattr(zenmux, "_client_for", fake_client_for)
+
+    graph = StateGraph(_MiniState)
+    graph.add_node("node", _runtime_node(node))
+    graph.add_edge(START, "node")
+    graph.add_edge("node", END)
+    compiled = graph.compile()
+
+    with use_runtime_config(
+        RuntimeLLMConfig(
+            zenmux_api_key="runtime-key",
+            zenmux_base_url="https://runtime.example/v1",
+        )
+    ):
+        chunks = list(
+            compiled.stream(
+                {"text": ""},
+                attach_runtime_config_id({"configurable": {"thread_id": "runtime-test"}}),
+                stream_mode=["updates"],
+            )
+        )
+
+    assert chunks[-1] == ("updates", {"node": {"text": "ok"}})
+    assert calls == [("runtime-key", "https://runtime.example/v1")]
+
+
+def test_explicit_runtime_config_id_reaches_stream_without_contextvar(monkeypatch):
+    client = _FakeClient()
+    calls: list[tuple[str, str]] = []
+
+    def fake_client_for(key: str, base_url: str):
+        calls.append((key, base_url))
+        return client
+
+    def node(_state: _MiniState) -> dict[str, str]:
+        text = zenmux.chat_with_metadata(
+            "anthropic/claude-sonnet-4.6",
+            [{"role": "user", "content": "hello"}],
+        ).text
+        return {"text": text}
+
+    monkeypatch.delenv("ZENMUX_API_KEY", raising=False)
+    monkeypatch.setattr(zenmux, "_client_for", fake_client_for)
+
+    graph = StateGraph(_MiniState)
+    graph.add_node("node", _runtime_node(node))
+    graph.add_edge(START, "node")
+    graph.add_edge("node", END)
+    compiled = graph.compile()
+
+    runtime_id = register_runtime_config(
+        RuntimeLLMConfig(
+            zenmux_api_key="explicit-runtime-key",
+            zenmux_base_url="https://explicit.example/v1",
+        )
+    )
+    try:
+        chunks = list(
+            compiled.stream(
+                {"text": ""},
+                attach_runtime_config_id(
+                    {"configurable": {"thread_id": "runtime-test"}},
+                    runtime_id,
+                ),
+                stream_mode=["updates"],
+            )
+        )
+    finally:
+        unregister_runtime_config(runtime_id)
+
+    assert chunks[-1] == ("updates", {"node": {"text": "ok"}})
+    assert calls == [("explicit-runtime-key", "https://explicit.example/v1")]
+
+
+def test_missing_runtime_and_env_key_raises_clear_http_error(monkeypatch):
+    monkeypatch.delenv("ZENMUX_API_KEY", raising=False)
+
+    with pytest.raises(HTTPException) as exc:
+        zenmux.chat_with_metadata(
+            "anthropic/claude-sonnet-4.6",
+            [{"role": "user", "content": "hello"}],
+        )
+
+    assert exc.value.status_code == 401
+    assert "ZenMux API key is required" in str(exc.value.detail)

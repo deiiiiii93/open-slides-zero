@@ -17,13 +17,13 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, TypeVar
 
 import json_repair
+from fastapi import HTTPException
 from openai import OpenAI
 from pydantic import BaseModel, ValidationError
 from tenacity import (
@@ -34,12 +34,17 @@ from tenacity import (
 )
 
 from .models import VISION_FALLBACK, vision_capable
+from .runtime_config import (
+    DEFAULT_ZENMUX_BASE_URL,
+    effective_zenmux_base_url,
+    require_zenmux_api_key,
+)
 from .stream import push_token
 from .vision import image_part_from_path, image_part_from_url, text_part
 
 log = logging.getLogger(__name__)
 
-ZENMUX_BASE_URL = os.getenv("ZENMUX_BASE_URL", "https://zenmux.ai/api/v1")
+ZENMUX_BASE_URL = DEFAULT_ZENMUX_BASE_URL
 ZENMUX_API_KEY_ENV = "ZENMUX_API_KEY"
 ZENMUX_CHAT_TIMEOUT_ENV = "ZENMUX_CHAT_TIMEOUT_SECONDS"
 _TEMPERATURE_ONE_MODEL_PARTS = ("kimi",)
@@ -57,15 +62,13 @@ class CompletionResult:
 # Client
 # ---------------------------------------------------------------------------
 
-@lru_cache(maxsize=1)
+@lru_cache(maxsize=16)
+def _client_for(key: str, base_url: str) -> OpenAI:
+    return OpenAI(api_key=key, base_url=base_url)
+
+
 def _client() -> OpenAI:
-    key = os.getenv(ZENMUX_API_KEY_ENV)
-    if not key:
-        raise RuntimeError(
-            f"Missing {ZENMUX_API_KEY_ENV}. Export your ZenMux API key before "
-            f"starting the backend."
-        )
-    return OpenAI(api_key=key, base_url=ZENMUX_BASE_URL)
+    return _client_for(require_zenmux_api_key(), effective_zenmux_base_url())
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +180,8 @@ def _apply_model_param_compatibility(kwargs: dict[str, Any]) -> dict[str, Any]:
 
 
 def _default_chat_timeout() -> float | None:
+    import os
+
     raw = os.getenv(ZENMUX_CHAT_TIMEOUT_ENV, "180").strip()
     try:
         value = float(raw)
@@ -344,6 +349,8 @@ def _embeddings_call(model: str, inputs: list[str]) -> list[list[float]]:
     try:
         resp = _client().embeddings.create(model=model, input=inputs)
     except Exception as e:
+        if isinstance(e, HTTPException):
+            raise
         if _is_retriable(e):
             raise RetriableError from e
         raise
@@ -379,6 +386,8 @@ def _oneshot_completion_with_metadata(**kwargs: Any) -> CompletionResult:
     try:
         resp = _client().chat.completions.create(**kwargs)
     except Exception as e:
+        if isinstance(e, HTTPException):
+            raise
         if _is_retriable(e):
             raise RetriableError from e
         raise
@@ -408,6 +417,8 @@ def _stream_completion_with_metadata(**kwargs: Any) -> CompletionResult:
                 chunks.append(piece)
                 push_token(piece)
     except Exception as e:
+        if isinstance(e, HTTPException):
+            raise
         if _is_retriable(e):
             raise RetriableError from e
         raise

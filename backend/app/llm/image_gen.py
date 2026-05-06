@@ -7,16 +7,16 @@ not import the image SDK unless the user explicitly confirms a generation.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
 from .models import get_model
-
-ZENMUX_VERTEX_BASE_URL = os.getenv(
-    "ZENMUX_VERTEX_BASE_URL",
-    "https://zenmux.ai/api/vertex-ai",
+from .runtime_config import (
+    effective_zenmux_vertex_base_url,
+    require_zenmux_api_key,
 )
+
+ZENMUX_VERTEX_BASE_URL = "https://zenmux.ai/api/vertex-ai"
 ZENMUX_API_KEY_ENV = "ZENMUX_API_KEY"
 
 
@@ -26,9 +26,7 @@ def generate_image(prompt: str, output_path: str | Path, *, model: str | None = 
     The caller owns user confirmation. This function should only be called
     after the user has reviewed and submitted the prompt.
     """
-    key = os.getenv(ZENMUX_API_KEY_ENV)
-    if not key:
-        raise RuntimeError(f"Missing {ZENMUX_API_KEY_ENV}.")
+    key = require_zenmux_api_key()
 
     try:
         from google import genai
@@ -46,7 +44,7 @@ def generate_image(prompt: str, output_path: str | Path, *, model: str | None = 
         api_key=key,
         http_options=types.HttpOptions(
             api_version="v1",
-            base_url=ZENMUX_VERTEX_BASE_URL,
+            base_url=effective_zenmux_vertex_base_url(),
         ),
     )
     response = client.models.generate_images(

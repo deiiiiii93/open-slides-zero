@@ -35,8 +35,8 @@ import {
   type ImageMapping,
   type Masterpiece,
   type Material,
-  type ModelOptions,
   type ModelStage,
+  type RuntimeModelOptions,
   type ThinkingEffort,
 } from "./api";
 import { streamSSE, type StreamEvent } from "./sse";
@@ -47,6 +47,13 @@ import {
   exportPptx,
   hasExportableSlides,
 } from "./exporter";
+import {
+  DEFAULT_ZENMUX_BASE_URL,
+  hasRuntimeZenmuxKey,
+  readRuntimeConfig,
+  type RuntimeConfig,
+  writeRuntimeConfig,
+} from "./runtimeConfig";
 
 const CANVAS_W = 960;
 const CANVAS_H = 540;
@@ -173,6 +180,11 @@ function pruneDeckHistory(threadIds: string[]) {
   writeDeckHistory(readDeckHistory().filter((entry) => !deleted.has(entry.id)));
 }
 
+function isDeckAccessError(error: unknown): boolean {
+  const text = String(error);
+  return text.includes("GET /decks/") && text.includes("→ 404:");
+}
+
 export function App() {
   const [deck, setDeck] = useState<DeckState | null>(null);
   const [catalog, setCatalog] = useState<CatalogResponse | null>(null);
@@ -185,7 +197,10 @@ export function App() {
   const [exporting, setExporting] = useState<string | null>(null);
   const [deckList, setDeckList] = useState<DeckListItem[] | null>(null);
   const [deletingDeckId, setDeletingDeckId] = useState<string | null>(null);
-  const [modelOptions, setModelOptions] = useState<ModelOptions | null>(null);
+  const [runtimeModelOptions, setRuntimeModelOptions] = useState<RuntimeModelOptions | null>(null);
+  const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig>(() => readRuntimeConfig());
+  const [showConfig, setShowConfig] = useState(false);
+  const [identityReady, setIdentityReady] = useState(false);
   const [selectedReviewStage, setSelectedReviewStage] = useState<ReviewStage>("ready");
 
   // Streaming state
@@ -199,38 +214,66 @@ export function App() {
 
   const refresh = useCallback(
     async (id: string) => {
-      const d = await api.getDeck(id);
-      setDeck(d);
-      if (!catalog) setCatalog(await api.getCatalog(id));
+      try {
+        const d = await api.getDeck(id);
+        setDeck(d);
+        if (!catalog) setCatalog(await api.getCatalog(id));
+      } catch (e) {
+        if (isDeckAccessError(e)) {
+          localStorage.removeItem("osz.thread_id");
+          pruneDeckHistory([id]);
+          setDeck(null);
+          setErr("This deck is not available in this browser session.");
+          return;
+        }
+        throw e;
+      }
     },
     [catalog],
   );
 
+  const updateRuntimeConfig = useCallback((next: RuntimeConfig) => {
+    setRuntimeConfig(next);
+    writeRuntimeConfig(next);
+    setErr(null);
+  }, []);
+
   const refreshDeckList = useCallback(async () => {
+    if (!identityReady) return;
     try {
       const { decks } = await api.listDecks();
       setDeckList(decks);
     } catch {
       setDeckList([]);
     }
+  }, [identityReady]);
+
+  useEffect(() => {
+    void api.ensureIdentity()
+      .then(() => setIdentityReady(true))
+      .catch((e) => {
+        setErr(`Could not initialize private deck identity: ${String(e)}`);
+        setIdentityReady(true);
+      });
   }, []);
 
   useEffect(() => {
+    if (!identityReady) return;
     const saved = localStorage.getItem("osz.thread_id");
     if (saved) void refresh(saved).catch((e) => setErr(String(e)));
-  }, [refresh]);
+  }, [identityReady, refresh]);
 
   useEffect(() => {
     if (!catalog) void api.getCatalog("catalog").then(setCatalog).catch(() => undefined);
   }, [catalog]);
 
   useEffect(() => {
-    if (!modelOptions) void api.listModelOptions().then(setModelOptions).catch(() => undefined);
-  }, [modelOptions]);
+    if (!runtimeModelOptions) void api.listRuntimeModelOptions().then(setRuntimeModelOptions).catch(() => undefined);
+  }, [runtimeModelOptions]);
 
   useEffect(() => {
-    if (!deck) void refreshDeckList();
-  }, [deck, refreshDeckList]);
+    if (!deck && identityReady) void refreshDeckList();
+  }, [deck, identityReady, refreshDeckList]);
 
   useEffect(() => {
     setSelectedReviewStage("ready");
@@ -589,7 +632,9 @@ export function App() {
         busy={busy}
         err={err}
         catalog={catalog}
-        modelOptions={modelOptions}
+        runtimeConfig={runtimeConfig}
+        runtimeModelOptions={runtimeModelOptions}
+        onRuntimeConfigChange={updateRuntimeConfig}
         recentDecks={deckList}
         deletingDeckId={deletingDeckId}
         onLoadDeck={(id) => void refresh(id).catch((e) => setErr(String(e)))}
@@ -702,8 +747,19 @@ export function App() {
         <div style={{ display: "flex", alignItems: "center", gap: 8, position: "relative" }}>
           <button
             onClick={() => {
+              setShowMasterpieces(false);
               setShowExport(false);
               setShowHistory(false);
+              setShowConfig((s) => !s);
+            }}
+          >
+            Config
+          </button>
+          <button
+            onClick={() => {
+              setShowExport(false);
+              setShowHistory(false);
+              setShowConfig(false);
               setShowMasterpieces((s) => !s);
             }}
           >
@@ -713,6 +769,7 @@ export function App() {
             onClick={() => {
               setShowMasterpieces(false);
               setShowExport(false);
+              setShowConfig(false);
               setShowHistory((s) => {
                 const next = !s;
                 if (next) void refreshDeckList();
@@ -728,6 +785,7 @@ export function App() {
               onClick={() => {
                 setShowMasterpieces(false);
                 setShowHistory(false);
+                setShowConfig(false);
                 setShowExport((s) => !s);
               }}
             >
@@ -918,6 +976,14 @@ export function App() {
         <div style={{ color: "crimson", padding: 8, border: "1px solid crimson", marginBottom: 8 }}>
           {err}
         </div>
+      )}
+      {showConfig && (
+        <RuntimeConfigPanel
+          config={runtimeConfig}
+          modelOptions={runtimeModelOptions}
+          onChange={updateRuntimeConfig}
+          busy={busy}
+        />
       )}
       {materialWarnings.length > 0 && (
         <div
@@ -1706,6 +1772,176 @@ function MasterpieceManager({
   );
 }
 
+function RuntimeConfigPanel({
+  config,
+  modelOptions,
+  onChange,
+  busy,
+}: {
+  config: RuntimeConfig;
+  modelOptions: RuntimeModelOptions | null;
+  onChange: (config: RuntimeConfig) => void;
+  busy: boolean;
+}) {
+  const stages = Object.entries(modelOptions?.stages ?? {});
+  const effortOptions = modelOptions?.thinking_efforts?.options ?? [];
+  const hasKey = hasRuntimeZenmuxKey(config);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const overrideCount =
+    Object.keys(config.modelOverrides).length + Object.keys(config.thinkingEffortOverrides).length;
+
+  function update(next: Partial<RuntimeConfig>) {
+    onChange({ ...config, ...next });
+  }
+
+  function updateModelOverride(stage: string, value: string) {
+    const next = { ...config.modelOverrides };
+    if (value) next[stage] = value;
+    else delete next[stage];
+    update({ modelOverrides: next });
+  }
+
+  function updateEffortOverride(stage: string, value: ThinkingEffort | "") {
+    const next = { ...config.thinkingEffortOverrides };
+    if (value) next[stage] = value;
+    else delete next[stage];
+    update({ thinkingEffortOverrides: next });
+  }
+
+  return (
+    <section className="osz-panel runtime-config-panel">
+      <div className="osz-panel-body">
+      <div className="osz-section-header">
+        <div className="osz-section-title">
+          <span className="osz-step-badge">1</span>
+          <h2>Connect ZenMux</h2>
+        </div>
+        <span
+          className={`osz-status ${hasKey ? "osz-status-ready" : "osz-status-required"}`}
+        >
+          {hasKey ? "Key ready" : "Key required"}
+        </span>
+      </div>
+      <div className="runtime-config-primary">
+        <label className="osz-field">
+          ZenMux API key
+          <input
+            type="password"
+            autoComplete="off"
+            value={config.zenmuxApiKey}
+            disabled={busy}
+            onChange={(e) => update({ zenmuxApiKey: e.target.value })}
+            placeholder="sk-..."
+            className="osz-control"
+          />
+        </label>
+      </div>
+      <div className="runtime-config-note">
+        Stored only in this browser session. The key is sent to this site for active requests.
+      </div>
+
+      <div className={`osz-disclosure ${showAdvanced ? "osz-disclosure-open" : ""}`}>
+        <button
+          type="button"
+          className="osz-disclosure-summary"
+          aria-expanded={showAdvanced}
+          onClick={() => setShowAdvanced((open) => !open)}
+        >
+          <span>Advanced connection and models</span>
+          <span className="osz-muted">
+            {overrideCount === 0 ? "recommended defaults" : `${overrideCount} override${overrideCount === 1 ? "" : "s"}`}
+          </span>
+        </button>
+        {showAdvanced && <>
+        <div className="runtime-advanced-settings">
+          <label className="osz-field">
+            ZenMux base URL
+            <input
+              type="url"
+              value={config.zenmuxBaseUrl || DEFAULT_ZENMUX_BASE_URL}
+              disabled={busy}
+              onChange={(e) => update({ zenmuxBaseUrl: e.target.value || DEFAULT_ZENMUX_BASE_URL })}
+              className="osz-control"
+            />
+          </label>
+        </div>
+        <div className="runtime-model-grid">
+          {stages.map(([stage, stageOptions]) => {
+            const effortValue = config.thinkingEffortOverrides[stage] ?? "";
+            return (
+              <div key={stage} className="runtime-model-card">
+                <label className="osz-field">
+                  {stageOptions.label}
+                  <select
+                    value={config.modelOverrides[stage] ?? ""}
+                    disabled={busy || !modelOptions}
+                    onChange={(e) => updateModelOverride(stage, e.target.value)}
+                    className="osz-control"
+                  >
+                    <option value="">Recommended default</option>
+                    {stageOptions.options.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="osz-muted">Default: {stageOptions.default_model}</div>
+                {stageOptions.supports_thinking_effort && (
+                  <label className="osz-field">
+                    Thinking effort
+                    <select
+                      value={effortValue}
+                      disabled={busy || !modelOptions}
+                      onChange={(e) => updateEffortOverride(stage, e.target.value as ThinkingEffort | "")}
+                      className="osz-control"
+                    >
+                      <option value="">Provider default</option>
+                      {effortOptions.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        </>}
+      </div>
+
+      <div className="runtime-config-actions">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => update({ zenmuxApiKey: "" })}
+          className="osz-button"
+        >
+          Clear key
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() =>
+            onChange({
+              zenmuxApiKey: config.zenmuxApiKey,
+              zenmuxBaseUrl: DEFAULT_ZENMUX_BASE_URL,
+              modelOverrides: {},
+              thinkingEffortOverrides: {},
+            })
+          }
+          className="osz-button"
+        >
+          Reset models
+        </button>
+      </div>
+      </div>
+    </section>
+  );
+}
+
 // ---------------- Create form ----------------
 
 function CreateForm({
@@ -1713,7 +1949,9 @@ function CreateForm({
   busy,
   err,
   catalog,
-  modelOptions,
+  runtimeConfig,
+  runtimeModelOptions,
+  onRuntimeConfigChange,
   recentDecks,
   deletingDeckId,
   onLoadDeck,
@@ -1736,7 +1974,9 @@ function CreateForm({
   busy: boolean;
   err: string | null;
   catalog: CatalogResponse | null;
-  modelOptions: ModelOptions | null;
+  runtimeConfig: RuntimeConfig;
+  runtimeModelOptions: RuntimeModelOptions | null;
+  onRuntimeConfigChange: (config: RuntimeConfig) => void;
   recentDecks: DeckListItem[] | null;
   deletingDeckId: string | null;
   onLoadDeck: (id: string) => void;
@@ -1762,7 +2002,6 @@ function CreateForm({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const visualPresets = catalog?.visual_style_presets ?? [];
   const selectedPreset = visualPresets.find((preset) => preset.id === visualPresetId);
-  const thinkingEffortOptions = modelOptions?.thinking_efforts?.options ?? [];
   const imageUrls = splitImageUrls(imageUrlText);
   const filteredRecentDecks = useMemo(() => {
     const decks = recentDecks ?? [];
@@ -1805,61 +2044,49 @@ function CreateForm({
     );
   }
 
-  const sectionStyle = {
-    border: "1px solid #e5e7eb",
-    borderRadius: 8,
-    padding: 16,
-    marginTop: 16,
-    background: "#fff",
-  };
-  const sectionTitleStyle = {
-    margin: "0 0 12px",
-    fontSize: 18,
-    color: "#111827",
-  };
-  const labelStyle = {
-    display: "grid",
-    gap: 4,
-    color: "#111827",
-    fontSize: 14,
-    fontWeight: 600,
-  };
-  const controlStyle = {
-    width: "100%",
-    boxSizing: "border-box" as const,
-    fontFamily: "inherit",
-    fontSize: 14,
-    padding: "7px 8px",
-  };
-
   return (
-    <div style={{ maxWidth: 860, margin: "56px auto", fontFamily: "Georgia, serif" }}>
-      <h1 style={{ marginBottom: 12 }}>Open Slides Zero</h1>
-      <p style={{ color: "#555", maxWidth: 720, lineHeight: 1.45 }}>
-        Paste your source material, set a page target, then the agent walks you through
-        three review gates (structure → style → layout) before rendering the deck.
-      </p>
+    <div className="osz-create-shell">
+      <header className="osz-create-hero">
+        <h1>Open Slides Zero</h1>
+        <p>
+          Create a private deck from text, files, and image links. Bring your ZenMux key;
+          deck access stays tied to this browser.
+        </p>
+      </header>
       {err && (
-        <div style={{ color: "crimson", padding: 8, border: "1px solid crimson", marginBottom: 8 }}>
+        <div className="osz-error">
           {err}
         </div>
       )}
 
-      <section style={sectionStyle}>
-        <h2 style={sectionTitleStyle}>Deck basic info</h2>
-        <div style={{ display: "grid", gap: 12 }}>
-          <label style={labelStyle}>
+      <RuntimeConfigPanel
+        config={runtimeConfig}
+        modelOptions={runtimeModelOptions}
+        onChange={onRuntimeConfigChange}
+        busy={busy}
+      />
+
+      <section className="osz-panel">
+        <div className="osz-panel-body">
+        <div className="osz-section-header">
+          <div className="osz-section-title">
+            <span className="osz-step-badge">2</span>
+            <h2>Deck settings</h2>
+          </div>
+        </div>
+        <div style={{ display: "grid", gap: 14 }}>
+          <label className="osz-field">
             Deck name (optional)
             <input
               type="text"
               value={deckName}
               onChange={(e) => setDeckName(e.target.value)}
               placeholder="e.g. Q3 Earnings Review"
-              style={controlStyle}
+              className="osz-control"
             />
           </label>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10 }}>
-            <label style={labelStyle}>
+          <div className="osz-grid-3">
+            <label className="osz-field">
               Pages
               <input
                 type="number"
@@ -1867,23 +2094,23 @@ function CreateForm({
                 max={30}
                 value={pages}
                 onChange={(e) => setPages(Number(e.target.value))}
-                style={controlStyle}
+                className="osz-control"
               />
             </label>
-            <label style={labelStyle}>
+            <label className="osz-field">
               Aspect
-              <select value={aspect} onChange={(e) => setAspect(e.target.value)} style={controlStyle}>
+              <select value={aspect} onChange={(e) => setAspect(e.target.value)} className="osz-control">
                 <option>16:9</option>
                 <option>4:3</option>
                 <option>21:9</option>
               </select>
             </label>
-            <label style={labelStyle}>
+            <label className="osz-field">
               Density
               <select
                 value={density}
                 onChange={(e) => setDensity(e.target.value)}
-                style={controlStyle}
+                className="osz-control"
               >
                 <option>minimal</option>
                 <option>balanced</option>
@@ -1891,23 +2118,23 @@ function CreateForm({
                 <option>very_dense</option>
               </select>
             </label>
-            <label style={labelStyle} title="Advanced opens a chat-first planning workflow and keeps the per-thread RAG index.">
+            <label className="osz-field" title="Advanced opens a chat-first planning workflow and keeps the per-thread RAG index.">
               Agent
               <select
                 value={agentMode}
                 onChange={(e) => setAgentMode(e.target.value as AgentMode)}
-                style={controlStyle}
+                className="osz-control"
               >
                 <option value="default">default</option>
                 <option value="advanced">advanced chat</option>
               </select>
             </label>
-            <label style={labelStyle}>
+            <label className="osz-field">
               Visual direction
               <select
                 value={visualPresetId}
                 onChange={(e) => setVisualPresetId(e.target.value)}
-                style={controlStyle}
+                className="osz-control"
               >
                 <option value="">AI Decide</option>
                 {visualPresets.map((preset) => (
@@ -1917,37 +2144,45 @@ function CreateForm({
                 ))}
               </select>
             </label>
-            <label style={labelStyle}>
+            <label className="osz-field">
               Style hint
               <input
                 placeholder="e.g. MBB slate"
                 value={styleHint}
                 onChange={(e) => setStyleHint(e.target.value)}
-                style={controlStyle}
+                className="osz-control"
               />
             </label>
           </div>
           {selectedPreset && (
-            <div style={{ color: "#64748b", fontSize: 12, lineHeight: 1.45 }}>
+            <div className="osz-muted">
               {selectedPreset.description}
             </div>
           )}
         </div>
+        </div>
       </section>
 
-      <section style={sectionStyle}>
-        <h2 style={sectionTitleStyle}>Context</h2>
-        <div style={{ display: "grid", gap: 12 }}>
-          <label style={labelStyle}>
+      <section className="osz-panel">
+        <div className="osz-panel-body">
+        <div className="osz-section-header">
+          <div className="osz-section-title">
+            <span className="osz-step-badge">3</span>
+            <h2>Source material</h2>
+          </div>
+          <div className="osz-muted">TXT, Markdown, PDF, PPTX, images, DOCX, XLSX</div>
+        </div>
+        <div style={{ display: "grid", gap: 14 }}>
+          <label className="osz-field">
             Material (text, bullets, or pasted notes)
             <textarea
               value={text}
               onChange={(e) => setText(e.target.value)}
               rows={9}
-              style={{ ...controlStyle, resize: "vertical" }}
+              className="osz-control"
             />
           </label>
-          <div style={labelStyle}>
+          <div className="osz-field">
             <span>Upload source files</span>
             <input
               ref={fileInputRef}
@@ -1965,81 +2200,50 @@ function CreateForm({
                 type="button"
                 disabled={busy}
                 onClick={() => fileInputRef.current?.click()}
-                style={{ padding: "7px 10px", fontFamily: "inherit", fontSize: 14 }}
+                className="osz-button"
               >
                 Choose files
               </button>
-              <span style={{ color: "#4b5563", fontSize: 13, fontWeight: 400 }}>
+              <span className="osz-muted">
                 {files.length === 0
                   ? "No files selected"
                   : `${files.length} file${files.length === 1 ? "" : "s"} selected`}
               </span>
             </div>
           </div>
-          <p style={{ color: "#555", fontSize: 13, margin: 0 }}>
-            Supported: TXT, Markdown, PDF, PPTX, JPG, PNG, DOCX, XLSX.
-          </p>
-          <label style={labelStyle}>
+          <label className="osz-field">
             Image URLs for insertion
             <textarea
               value={imageUrlText}
               onChange={(e) => setImageUrlText(e.target.value)}
               rows={3}
               placeholder="One image URL per line"
-              style={{ ...controlStyle, resize: "vertical" }}
+              className="osz-control"
             />
           </label>
           {fileError && (
-            <div
-              style={{
-                color: "#92400e",
-                background: "#fffbeb",
-                border: "1px solid #fcd34d",
-                borderRadius: 6,
-                padding: 8,
-              }}
-            >
+            <div className="osz-warning">
               {fileError}
             </div>
           )}
           {files.length > 0 && (
-            <div
-              style={{
-                border: "1px solid #e5e5e5",
-                borderRadius: 8,
-                overflow: "hidden",
-              }}
-            >
+            <div className="osz-file-list">
               {files.map((file, idx) => (
                 <div
                   key={`${file.name}-${file.size}-${idx}`}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 12,
-                    padding: "8px 10px",
-                    borderBottom: idx === files.length - 1 ? "none" : "1px solid #f0f0f0",
-                    background: "#fff",
-                  }}
+                  className="osz-file-row"
                 >
                   <div style={{ minWidth: 0 }}>
-                    <div
-                      style={{
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                        fontSize: 14,
-                      }}
-                    >
+                    <div className="osz-file-name">
                       {file.name}
                     </div>
-                    <div style={{ fontSize: 12, color: "#666" }}>{formatFileSize(file.size)}</div>
+                    <div className="osz-muted">{formatFileSize(file.size)}</div>
                   </div>
                   <button
                     type="button"
                     disabled={busy}
                     onClick={() => setFiles((prev) => prev.filter((_, fileIdx) => fileIdx !== idx))}
+                    className="osz-button osz-button-danger"
                   >
                     Remove
                   </button>
@@ -2048,74 +2252,17 @@ function CreateForm({
             </div>
           )}
         </div>
-      </section>
-
-      <section style={sectionStyle}>
-        <h2 style={sectionTitleStyle}>Models</h2>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-            gap: 12,
-          }}
-        >
-          {MODEL_STAGE_ORDER.map((stage) => {
-            const stageOptions = modelOptions?.stages[stage];
-            const effortValue = thinkingEffortOverrides[stage] ?? "";
-            return (
-              <div key={stage} style={{ display: "grid", gap: 8 }}>
-                <label style={labelStyle}>
-                  {(stageOptions?.label ?? stage)} model
-                  <select
-                    value={modelOverrides[stage] ?? ""}
-                    disabled={!stageOptions || busy}
-                    onChange={(e) =>
-                      setModelOverrides((prev) => ({
-                        ...prev,
-                        [stage]: e.target.value || undefined,
-                      }))
-                    }
-                    style={controlStyle}
-                  >
-                    <option value="">Default routing</option>
-                    {stageOptions?.options.map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label style={labelStyle}>
-                  {(stageOptions?.label ?? stage)} thinking effort
-                  <select
-                    value={effortValue}
-                    disabled={!modelOptions || busy}
-                    onChange={(e) => {
-                      const value = e.target.value as ThinkingEffort | "";
-                      setThinkingEffortOverrides((prev) => ({
-                        ...prev,
-                        [stage]: value || undefined,
-                      }));
-                    }}
-                    style={controlStyle}
-                  >
-                    <option value="">Provider default</option>
-                    {thinkingEffortOptions.map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-            );
-          })}
         </div>
       </section>
 
-      <div style={{ display: "flex", justifyContent: "flex-start", marginTop: 16 }}>
+      <div className="osz-create-actions">
         <button
-          disabled={busy || Boolean(deletingDeckId) || (!text.trim() && files.length === 0 && imageUrls.length === 0)}
+          disabled={
+            busy ||
+            Boolean(deletingDeckId) ||
+            !hasRuntimeZenmuxKey(runtimeConfig) ||
+            (!text.trim() && files.length === 0 && imageUrls.length === 0)
+          }
           onClick={() =>
             onSubmit({
               deckName,
@@ -2132,14 +2279,23 @@ function CreateForm({
               files,
             })
           }
-          style={{ padding: "8px 14px", fontFamily: "inherit", fontSize: 14 }}
+          className="osz-button osz-button-primary"
         >
-          {busy ? "Streaming…" : deletingDeckId ? "Deleting…" : "Create deck"}
+          {busy
+            ? "Streaming…"
+            : deletingDeckId
+              ? "Deleting…"
+              : !hasRuntimeZenmuxKey(runtimeConfig)
+                ? "Add ZenMux key"
+                : "Create deck"}
         </button>
+        {!hasRuntimeZenmuxKey(runtimeConfig) && (
+          <span className="osz-muted">Enter a ZenMux key above to start.</span>
+        )}
       </div>
 
       {recentDecks && recentDecks.length > 0 && (
-        <div style={{ marginTop: 40 }}>
+        <div className="recent-decks-panel">
           <div
             style={{
               display: "flex",

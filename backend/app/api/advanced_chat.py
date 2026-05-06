@@ -13,15 +13,22 @@ import queue as _queue
 import threading
 from typing import Any, Callable, Iterable, Iterator
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ..graph.nodes import advanced_chat as advanced_chat_node
 from ..llm import zenmux
 from ..llm.models import get_model
+from ..llm.runtime_config import (
+    RuntimeLLMConfig,
+    redact_secrets,
+    runtime_config_from_request,
+    use_runtime_config,
+)
 from ..llm.stream import push_event, tagged_stream, writer_override
 from .common import config_for, current_state, graph, mirror_to_disk
+from .owners import Owner, current_owner, require_deck_owner
 from .streaming import SSE_HEADERS, _safe_patch, _sse
 
 router = APIRouter()
@@ -183,7 +190,7 @@ def _run_with_streaming(thread_id: str, message: str) -> Iterator[str]:
             q.put({"__done": True, "result": result})
         except Exception as exc:  # noqa: BLE001
             log.exception("advanced chat stream failed")
-            q.put({"__error": str(exc)})
+            q.put({"__error": redact_secrets(exc)})
         finally:
             q.put(_SENTINEL)
 
@@ -231,10 +238,17 @@ def _run_with_streaming(thread_id: str, message: str) -> Iterator[str]:
 
 
 @router.post("/decks/{thread_id}/advanced_chat/stream")
-def advanced_chat_stream(thread_id: str, body: AdvancedChatTurn) -> StreamingResponse:
+def advanced_chat_stream(
+    thread_id: str,
+    body: AdvancedChatTurn,
+    owner: Owner = Depends(current_owner),
+    runtime_config: RuntimeLLMConfig = Depends(runtime_config_from_request),
+) -> StreamingResponse:
+    require_deck_owner(thread_id, owner)
     _require_advanced_chat_state(thread_id)
 
     def gen() -> Iterable[str]:
-        yield from _run_with_streaming(thread_id, body.message)
+        with use_runtime_config(runtime_config):
+            yield from _run_with_streaming(thread_id, body.message)
 
     return StreamingResponse(gen(), headers=SSE_HEADERS)

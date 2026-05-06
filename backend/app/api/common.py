@@ -14,12 +14,14 @@ from ..catalog.visual_presets import normalize_visual_style_preset_id, visual_st
 from ..graph.graph import get_graph
 from ..graph.layout_overrides import apply_layout_overrides
 from ..graph.nodes.advanced_chat import commit_advanced_chat_draft
+from ..llm.runtime_config import attach_runtime_config_id
+from . import owners
 
 log = logging.getLogger(__name__)
 
 
 def config_for(thread_id: str) -> dict[str, Any]:
-    return {"configurable": {"thread_id": thread_id}}
+    return attach_runtime_config_id({"configurable": {"thread_id": thread_id}})
 
 
 def graph() -> CompiledStateGraph:
@@ -271,6 +273,7 @@ def delete_thread(thread_id: str) -> None:
     artifact_dir = store.ROOT / thread_id
     if artifact_dir.exists():
         shutil.rmtree(artifact_dir, ignore_errors=True)
+    owners.delete_deck_owner(thread_id)
 
 
 def current_state(thread_id: str, *, source_thread_id: str | None = None) -> dict[str, Any]:

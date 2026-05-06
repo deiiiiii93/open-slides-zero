@@ -21,7 +21,7 @@ import logging
 import uuid
 from typing import Any, Iterable, Iterator
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from langgraph.types import Command
 from pydantic import BaseModel, Field
@@ -41,6 +41,14 @@ from .decks import (
     normalize_uploaded_materials,
 )
 from ..llm import stream as stream_module
+from ..llm.runtime_config import (
+    RuntimeLLMConfig,
+    attach_runtime_config_id,
+    redact_secrets,
+    runtime_config_from_request,
+    use_runtime_config,
+)
+from .owners import Owner, assign_deck_to_owner, current_owner, require_deck_owner
 router = APIRouter()
 log = logging.getLogger(__name__)
 
@@ -70,6 +78,7 @@ def _stream_graph(
     so users can retry a mid-pipeline failure.
     """
     g = graph()
+    cfg = attach_runtime_config_id(cfg)
     cancel_event = stream_module.register_cancel_event(thread_id)
     try:
         for mode, chunk in g.stream(
@@ -108,7 +117,7 @@ def _stream_graph(
         mirror_to_disk(thread_id)
     except Exception as e:
         log.exception("stream failed for %s", thread_id)
-        yield _sse({"type": "error", "message": str(e)})
+        yield _sse({"type": "error", "message": redact_secrets(e)})
         if cleanup_on_error:
             delete_thread(thread_id)
         else:
@@ -200,7 +209,11 @@ def _parse_image_urls(raw: str | None) -> list[str]:
 
 
 @router.post("/decks/stream")
-def stream_create_deck(body: CreateDeckBody) -> StreamingResponse:
+def stream_create_deck(
+    body: CreateDeckBody,
+    owner: Owner = Depends(current_owner),
+    runtime_config: RuntimeLLMConfig = Depends(runtime_config_from_request),
+) -> StreamingResponse:
     thread_id = uuid.uuid4().hex[:12]
     cfg = config_for(thread_id)
     try:
@@ -222,10 +235,13 @@ def stream_create_deck(body: CreateDeckBody) -> StreamingResponse:
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    assign_deck_to_owner(thread_id, owner)
 
     def gen() -> Iterable[str]:
-        yield _sse({"type": "thread", "thread_id": thread_id})
-        yield from _stream_graph(initial, cfg, thread_id, cleanup_on_error=True)
+        with use_runtime_config(runtime_config) as runtime_id:
+            stream_cfg = attach_runtime_config_id(cfg, runtime_id)
+            yield _sse({"type": "thread", "thread_id": thread_id})
+            yield from _stream_graph(initial, stream_cfg, thread_id, cleanup_on_error=True)
 
     return StreamingResponse(gen(), headers=SSE_HEADERS)
 
@@ -245,9 +261,12 @@ async def stream_create_deck_uploads(
     model_overrides: str | None = Form(default=None),
     thinking_effort_overrides: str | None = Form(default=None),
     files: list[UploadFile] = File(...),
+    owner: Owner = Depends(current_owner),
+    runtime_config: RuntimeLLMConfig = Depends(runtime_config_from_request),
 ) -> StreamingResponse:
     thread_id = uuid.uuid4().hex[:12]
     cfg = config_for(thread_id)
+    assign_deck_to_owner(thread_id, owner)
     try:
         materials: list[Any] = []
         if text.strip():
@@ -279,8 +298,10 @@ async def stream_create_deck_uploads(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     def gen() -> Iterable[str]:
-        yield _sse({"type": "thread", "thread_id": thread_id})
-        yield from _stream_graph(initial, cfg, thread_id, cleanup_on_error=True)
+        with use_runtime_config(runtime_config) as runtime_id:
+            stream_cfg = attach_runtime_config_id(cfg, runtime_id)
+            yield _sse({"type": "thread", "thread_id": thread_id})
+            yield from _stream_graph(initial, stream_cfg, thread_id, cleanup_on_error=True)
 
     return StreamingResponse(gen(), headers=SSE_HEADERS)
 
@@ -290,10 +311,16 @@ class ResumeBody(BaseModel):
 
 
 @router.post("/decks/{thread_id}/resume/stream")
-def stream_resume(thread_id: str, body: ResumeBody) -> StreamingResponse:
+def stream_resume(
+    thread_id: str,
+    body: ResumeBody,
+    owner: Owner = Depends(current_owner),
+    runtime_config: RuntimeLLMConfig = Depends(runtime_config_from_request),
+) -> StreamingResponse:
     # Resume does not re-accept thinking_effort_overrides: effort is frozen at
     # lane/deck creation, persisted in lane_thinking_effort_overrides, and read
     # from state by each subagent. To change effort, create a new lane.
+    require_deck_owner(thread_id, owner)
     snap = graph().get_state(config_for(thread_id))  # type: ignore[arg-type]
     if not snap:
         raise HTTPException(status_code=404, detail="Unknown deck")
@@ -312,7 +339,9 @@ def stream_resume(thread_id: str, body: ResumeBody) -> StreamingResponse:
             input_payload = None
 
     def gen() -> Iterable[str]:
-        yield _sse({"type": "thread", "thread_id": thread_id})
-        yield from _stream_graph(input_payload, cfg, thread_id)
+        with use_runtime_config(runtime_config) as runtime_id:
+            stream_cfg = attach_runtime_config_id(cfg, runtime_id)
+            yield _sse({"type": "thread", "thread_id": thread_id})
+            yield from _stream_graph(input_payload, stream_cfg, thread_id)
 
     return StreamingResponse(gen(), headers=SSE_HEADERS)

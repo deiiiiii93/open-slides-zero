@@ -9,7 +9,7 @@ import pytest
 import httpx
 from fastapi.testclient import TestClient
 
-from app.api import decks, images
+from app.api import decks, images, owners
 from app.artifacts import store
 from app.graph import graph as graph_module
 from app.graph.nodes import image_insert
@@ -219,6 +219,13 @@ def isolated_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     graph_module._compiled = None
 
 
+def _assign_test_owner(thread_id: str) -> None:
+    owners.assign_deck_owner(
+        thread_id,
+        owners._owner_hash("test-owner-token-for-direct-endpoint-calls"),
+    )
+
+
 def test_generate_endpoint_calls_image_model_only_after_confirm(
     isolated_graph, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -249,6 +256,7 @@ def test_generate_endpoint_calls_image_model_only_after_confirm(
             }),
         },
     )
+    _assign_test_owner(thread_id)
 
     plan_response = client.post(f"/decks/{thread_id}/images/plan")
     assert plan_response.status_code == 200
@@ -300,6 +308,7 @@ def test_generate_batch_endpoint_serially_generates_multiple_slots(
             }),
         },
     )
+    _assign_test_owner(thread_id)
 
     response = client.post(
         f"/decks/{thread_id}/images/generate_batch",
@@ -361,6 +370,7 @@ def test_parallel_generate_requests_are_serialized_by_thread(
             }),
         },
     )
+    _assign_test_owner(thread_id)
 
     def post_generate(slot_id: str, slide_idx: int, prompt: str):
         return client.post(

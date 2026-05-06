@@ -10,10 +10,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from .common import config_for, graph
+from .owners import Owner, current_owner, require_deck_owner
 
 router = APIRouter()
 
@@ -338,7 +339,13 @@ async def export_pngs(body: PngExportIn, request: Request) -> Response:
 
 
 @router.post("/decks/{thread_id}/exports/pngs")
-async def export_thread_pngs(thread_id: str, body: ThreadPngExportIn, request: Request) -> Response:
+async def export_thread_pngs(
+    thread_id: str,
+    body: ThreadPngExportIn,
+    request: Request,
+    owner: Owner = Depends(current_owner),
+) -> Response:
+    require_deck_owner(thread_id, owner)
     snap = graph().get_state(config_for(thread_id))
     if not snap or not snap.values:
         raise HTTPException(status_code=404, detail="Unknown deck")

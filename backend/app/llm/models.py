@@ -9,6 +9,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from .runtime_config import get_model_override, get_thinking_effort_override
+
 # Defaults chosen from the ZenMux model catalog:
 #   - high-stakes reasoning / HTML composition → anthropic/claude-sonnet-4.6
 #   - merge / classification / cheap tasks     → openai/gpt-5.4-mini
@@ -101,12 +103,53 @@ _CURATED_THINKING_EFFORT_OPTIONS: list[dict[str, str]] = [
     },
 ]
 
+_RUNTIME_MODEL_LABELS: dict[str, str] = {
+    "ingest.ocr": "OCR",
+    "digest": "Digest",
+    "embeddings": "Embeddings",
+    "advanced_chat": "Advanced chat",
+    "outline": "Outline",
+    "style.text": "Style text",
+    "style.vision": "Style vision",
+    "layout": "Layout",
+    "consolidate": "Consolidate",
+    "html": "HTML",
+    "html.critic": "HTML critic",
+    "image_plan": "Image plan",
+    "edit.intent": "Edit intent",
+    "image_gen": "Image generation",
+}
+
+_EMBEDDING_MODEL_OPTIONS: list[dict[str, str]] = [
+    {
+        "id": "openai/text-embedding-3-small",
+        "label": "Text Embedding 3 Small",
+        "description": "Default embedding model for advanced-mode material retrieval.",
+    },
+    {
+        "id": "openai/text-embedding-3-large",
+        "label": "Text Embedding 3 Large",
+        "description": "Higher-capacity embedding model for retrieval-heavy decks.",
+    },
+]
+
+_IMAGE_MODEL_OPTIONS: list[dict[str, str]] = [
+    {
+        "id": "openai/gpt-image-2",
+        "label": "GPT Image 2",
+        "description": "Default image generation model routed through ZenMux.",
+    },
+]
+
 
 def _env_key(node: str) -> str:
     return "OSZ_MODEL_" + node.upper().replace(".", "_")
 
 
 def get_model(node: str) -> str:
+    runtime_override = get_model_override(node)
+    if runtime_override:
+        return runtime_override
     override = os.getenv(_env_key(node))
     if override:
         return override
@@ -141,6 +184,33 @@ def lane_model_options() -> dict[str, Any]:
                 "options": options,
             },
         },
+        "thinking_efforts": {
+            "default_effort": None,
+            "options": effort_options,
+        },
+    }
+
+
+def runtime_model_options() -> dict[str, Any]:
+    """Return user-facing runtime model choices for all ZenMux-backed stages."""
+    general_options = [dict(option) for option in _CURATED_LANE_MODEL_OPTIONS]
+    effort_options = [dict(option) for option in _CURATED_THINKING_EFFORT_OPTIONS]
+    stages: dict[str, Any] = {}
+    for node in _DEFAULTS:
+        options = general_options
+        if node == "embeddings":
+            options = [dict(option) for option in _EMBEDDING_MODEL_OPTIONS]
+        elif node == "image_gen":
+            options = [dict(option) for option in _IMAGE_MODEL_OPTIONS]
+        stages[node] = {
+            "label": _RUNTIME_MODEL_LABELS.get(node, node),
+            "default_model": _DEFAULTS[node],
+            "effective_model": get_model(node),
+            "options": options,
+            "supports_thinking_effort": node in {"style.text", "layout", "html"},
+        }
+    return {
+        "stages": stages,
         "thinking_efforts": {
             "default_effort": None,
             "options": effort_options,
@@ -225,7 +295,12 @@ def get_lane_thinking_effort(state: dict[str, Any], stage: str) -> str | None:
         effort = overrides.get(stage)
         if isinstance(effort, str) and effort.strip():
             return effort.strip().lower()
-    return None
+    runtime_effort = get_thinking_effort_override(stage)
+    if runtime_effort:
+        return runtime_effort
+    node_by_stage = {"style": "style.text", "layout": "layout", "html": "html"}
+    node = node_by_stage.get(stage)
+    return get_thinking_effort_override(node) if node else None
 
 
 # Known vision-capable model prefixes — used by vision_capable() as a fast path.

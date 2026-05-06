@@ -7,6 +7,10 @@ review gates and a comment-driven edit loop.
 The backend uses FastAPI, LangGraph, and the OpenAI SDK pointed at ZenMux for
 model routing. The frontend is a Vite + React app.
 
+Free hosted app: [www.artena.one](https://www.artena.one). Bring your own
+ZenMux API key; the hosted app keeps that key in your browser session and sends
+it only to the same-origin backend for active generation requests.
+
 ## Examples
 
 Open Slides Zero can produce dense analytical decks, product-explanation decks,
@@ -78,7 +82,7 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env
-# Edit .env and set ZENMUX_API_KEY.
+# Optional for local development: set ZENMUX_API_KEY as a server-side fallback.
 set -a && source .env && set +a
 uvicorn app.main:app --host 127.0.0.1 --port 8765 --reload
 ```
@@ -98,9 +102,23 @@ to `http://localhost:8765`.
 
 ## Secrets
 
-Do not commit real secrets. Copy `backend/.env.example` to `backend/.env` for
-local development and keep real API keys in that ignored file. The repository
+Do not commit real secrets. The public app expects each user to enter their own
+ZenMux key in the frontend Config panel. That runtime key is held in
+`sessionStorage`, sent through request headers, and not written to server
+checkpoints, mirrored thread files, or server environment files.
+
+For local development, you may copy `backend/.env.example` to `backend/.env`
+and set `ZENMUX_API_KEY` as a fallback so backend-only commands work without the
+frontend Config panel. Keep real API keys in ignored files only. The repository
 tracks only placeholder environment examples.
+
+## Public App Privacy
+
+The hosted app uses anonymous deck ownership. On first use, the backend issues a
+persistent random owner token in an HttpOnly cookie and stores only its SHA-256
+hash. Decks, playground lanes, comments, image assets, history, and thread
+exports are readable only from the browser profile that created them. Clearing
+browser cookies loses access to anonymous decks.
 
 Before publishing or opening a PR, verify that only the example env file is
 tracked:
@@ -174,8 +192,9 @@ against already-inserted `<img>` tags.
 
 ## Model Routing
 
-Default subagent models live in `backend/app/llm/models.py`. Override any node
-with environment variables:
+Default subagent models live in `backend/app/llm/models.py`. In the browser,
+the Config panel can override all ZenMux-backed stages for the current session.
+For local backend-only runs, override any node with environment variables:
 
 ```bash
 OSZ_MODEL_OUTLINE=anthropic/claude-sonnet-4.6

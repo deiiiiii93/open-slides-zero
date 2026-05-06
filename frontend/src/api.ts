@@ -1,12 +1,18 @@
 // Thin fetch wrapper. Vite dev server proxies /api/* to FastAPI on :8765.
 // In production, point API_BASE at the deployed backend.
 
+import { runtimeConfigHeaders } from "./runtimeConfig";
+
 const API_BASE = "/api";
 
 async function http<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const runtimeHeaders = runtimeConfigHeaders();
   const res = await fetch(API_BASE + path, {
     method,
-    headers: body ? { "Content-Type": "application/json" } : undefined,
+    headers: body
+      ? { "Content-Type": "application/json", ...runtimeHeaders }
+      : runtimeHeaders,
+    credentials: "same-origin",
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
@@ -196,6 +202,16 @@ export type PlaygroundModelOptions = {
 
 export type ModelOptions = PlaygroundModelOptions;
 
+export type RuntimeModelStageOptions = PlaygroundModelStageOptions & {
+  effective_model: string;
+  supports_thinking_effort: boolean;
+};
+
+export type RuntimeModelOptions = {
+  stages: Record<string, RuntimeModelStageOptions>;
+  thinking_efforts: PlaygroundModelOptions["thinking_efforts"];
+};
+
 export type CreatePlaygroundLaneBody = {
   creator_prompt: string;
   model_overrides?: Partial<Record<ModelStage, string>>;
@@ -311,6 +327,11 @@ export const api = {
 
   listModelOptions: () =>
     http<ModelOptions>("GET", "/playground/model-options"),
+
+  listRuntimeModelOptions: () =>
+    http<RuntimeModelOptions>("GET", "/runtime/model-options"),
+
+  ensureIdentity: () => http<{ ok: boolean }>("GET", "/identity"),
 
   createPlaygroundLaneStreamUrl: (id: string) =>
     `${STREAM_BASE}/decks/${id}/playground/lanes/stream`,

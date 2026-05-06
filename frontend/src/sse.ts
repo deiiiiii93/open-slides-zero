@@ -1,6 +1,8 @@
 // Minimal SSE reader using fetch + ReadableStream (EventSource doesn't support
 // POST requests with JSON bodies, which is what our streaming endpoints need).
 
+import { runtimeConfigHeaders } from "./runtimeConfig";
+
 export type StreamEvent =
   | { type: "thread"; thread_id: string; parent_thread_id?: string; lane_id?: string }
   | { type: "lane"; lane: any }
@@ -26,11 +28,13 @@ export async function* streamSSE(
   signal?: AbortSignal,
 ): AsyncGenerator<StreamEvent> {
   const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
+  const headers = runtimeConfigHeaders();
   const res = await fetch(url, {
     method: "POST",
     headers: isFormData
-      ? { Accept: "text/event-stream" }
-      : { "Content-Type": "application/json", Accept: "text/event-stream" },
+      ? { Accept: "text/event-stream", ...headers }
+      : { "Content-Type": "application/json", Accept: "text/event-stream", ...headers },
+    credentials: "same-origin",
     body: isFormData ? body : JSON.stringify(body),
     signal,
   });

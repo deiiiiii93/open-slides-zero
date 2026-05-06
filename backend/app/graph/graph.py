@@ -26,13 +26,15 @@ from __future__ import annotations
 import os
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send, interrupt
 
 from ..catalog.visual_presets import normalize_visual_style_preset_id, visual_style_preset_state
+from ..llm.runtime_config import runtime_config_from_graph_config, use_runtime_config
 from .layout_overrides import apply_layout_overrides
 from .nodes.advanced_chat import commit_advanced_chat_draft, init_advanced_chat_node
 from .nodes.consolidate import consolidate_node
@@ -239,25 +241,47 @@ def retry_html_node(_state: SlideState) -> dict[str, Any]:
 # Graph construction
 # ---------------------------------------------------------------------------
 
+def _runtime_node(fn: Callable[[Any], dict[str, Any]]) -> Callable[..., dict[str, Any]]:
+    """Install request runtime config around LangGraph worker-thread nodes.
+
+    FastAPI request contextvars do not automatically survive LangGraph's
+    internal executor threads. The graph config carries only a short ephemeral
+    runtime-config id; this wrapper resolves it in-memory and sets the normal
+    ContextVar for the duration of the node call. The raw user key is never
+    written into graph state or checkpoint config.
+    """
+
+    def wrapped(state: Any, config: RunnableConfig = None) -> dict[str, Any]:
+        runtime_config = runtime_config_from_graph_config(config)
+        if runtime_config is None:
+            return fn(state)
+        with use_runtime_config(runtime_config, register=False):
+            return fn(state)
+
+    wrapped.__name__ = getattr(fn, "__name__", "runtime_wrapped_node")
+    wrapped.__doc__ = getattr(fn, "__doc__", None)
+    return wrapped
+
+
 def build_graph(checkpointer: SqliteSaver | None = None):
     g: StateGraph[SlideState, SlideState, SlideState] = StateGraph(SlideState)
 
-    g.add_node("ingest", ingest_node)
-    g.add_node("digest_materials", digest_materials_node)
-    g.add_node("advanced_chat", init_advanced_chat_node)
-    g.add_node("await_advanced_chat", await_advanced_chat)
-    g.add_node("propose_structure", propose_structures_node)
-    g.add_node("await_structure", await_structure)
-    g.add_node("outline", outline_node)
-    g.add_node("await_outline", await_outline_review)
-    g.add_node("style", style_node)
-    g.add_node("await_style", await_style_review)
-    g.add_node("layout", layout_node)
-    g.add_node("await_layout", await_layout_review)
-    g.add_node("consolidate", consolidate_node)
-    g.add_node("html_one", html_one_node)
-    g.add_node("post_html", post_html)
-    g.add_node("retry_html", retry_html_node)
+    g.add_node("ingest", _runtime_node(ingest_node))
+    g.add_node("digest_materials", _runtime_node(digest_materials_node))
+    g.add_node("advanced_chat", _runtime_node(init_advanced_chat_node))
+    g.add_node("await_advanced_chat", _runtime_node(await_advanced_chat))
+    g.add_node("propose_structure", _runtime_node(propose_structures_node))
+    g.add_node("await_structure", _runtime_node(await_structure))
+    g.add_node("outline", _runtime_node(outline_node))
+    g.add_node("await_outline", _runtime_node(await_outline_review))
+    g.add_node("style", _runtime_node(style_node))
+    g.add_node("await_style", _runtime_node(await_style_review))
+    g.add_node("layout", _runtime_node(layout_node))
+    g.add_node("await_layout", _runtime_node(await_layout_review))
+    g.add_node("consolidate", _runtime_node(consolidate_node))
+    g.add_node("html_one", _runtime_node(html_one_node))
+    g.add_node("post_html", _runtime_node(post_html))
+    g.add_node("retry_html", _runtime_node(retry_html_node))
     g.add_node("edit_intent", edit_intent_node)
 
     g.add_edge(START, "ingest")

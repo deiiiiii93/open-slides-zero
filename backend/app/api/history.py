@@ -16,7 +16,7 @@ import uuid
 from typing import Any
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from langgraph.types import Command
 from pydantic import BaseModel, Field
 
@@ -25,7 +25,14 @@ from ..catalog.visual_presets import normalize_visual_style_preset_id, visual_st
 from ..graph import graph as graph_module
 from ..graph.layout_overrides import apply_layout_overrides
 from ..graph.nodes.style import style_node
+from ..llm.runtime_config import (
+    RuntimeLLMConfig,
+    attach_runtime_config_id,
+    runtime_config_from_request,
+    use_runtime_config,
+)
 from .common import config_for, current_state, graph, mirror_to_disk
+from .owners import Owner, assign_deck_to_owner, current_owner, require_deck_owner
 
 router = APIRouter()
 
@@ -272,7 +279,7 @@ def _regenerate_from(
 
     # 4. Resume forward from the historical checkpoint — the target node runs
     #    fresh, everything downstream re-executes.
-    g.invoke(None, new_cfg)  # type: ignore[arg-type]
+    g.invoke(None, attach_runtime_config_id(new_cfg))  # type: ignore[arg-type]
 
     # 5. File-mirror invalidation + fresh write.
     store.invalidate_downstream(thread_id, from_stage)
@@ -326,7 +333,7 @@ def _fork_from_review(
             {**update_seed, **style_update},
             as_node="style",
         )
-        g.invoke(None, new_cfg)  # type: ignore[arg-type]
+        g.invoke(None, attach_runtime_config_id(new_cfg))  # type: ignore[arg-type]
         mirror_to_disk(new_thread_id)
         return current_state(new_thread_id, source_thread_id=thread_id)
 
@@ -367,7 +374,7 @@ def _fork_from_review(
             }
             new_target_cfg = _clone_checkpoint_lineage(thread_id, source_target_cfg, new_thread_id)
             new_cfg = g.update_state(new_target_cfg, patch)  # type: ignore[arg-type]
-            g.invoke(None, new_cfg)  # type: ignore[arg-type]
+            g.invoke(None, attach_runtime_config_id(new_cfg))  # type: ignore[arg-type]
             mirror_to_disk(new_thread_id)
             return current_state(new_thread_id, source_thread_id=thread_id)
 
@@ -404,7 +411,7 @@ def _fork_from_review(
     }
     new_target_cfg = _clone_checkpoint_lineage(thread_id, source_target_cfg, new_thread_id)
     new_cfg = g.update_state(new_target_cfg, patch)  # type: ignore[arg-type]
-    g.invoke(None, new_cfg)  # type: ignore[arg-type]
+    g.invoke(None, attach_runtime_config_id(new_cfg))  # type: ignore[arg-type]
     if review_stage == "structure":
         fork_snap = g.get_state(config_for(new_thread_id))  # type: ignore[arg-type]
         interrupts = list(fork_snap.interrupts or []) if fork_snap else []
@@ -455,46 +462,64 @@ ForkFromReviewBody = Annotated[
 
 
 @router.post("/decks/{thread_id}/regenerate")
-def regenerate(thread_id: str, body: RegenerateBody) -> dict[str, Any]:
-    return _regenerate_from(
-        thread_id,
-        body.from_stage,
-        body.patch,
-        affected_slides=body.affected_slides,
-    )
+def regenerate(
+    thread_id: str,
+    body: RegenerateBody,
+    owner: Owner = Depends(current_owner),
+    runtime_config: RuntimeLLMConfig = Depends(runtime_config_from_request),
+) -> dict[str, Any]:
+    require_deck_owner(thread_id, owner)
+    with use_runtime_config(runtime_config):
+        return _regenerate_from(
+            thread_id,
+            body.from_stage,
+            body.patch,
+            affected_slides=body.affected_slides,
+        )
 
 
 @router.post("/decks/{thread_id}/fork_from_review")
-def fork_from_review(thread_id: str, body: ForkFromReviewBody) -> dict[str, Any]:
+def fork_from_review(
+    thread_id: str,
+    body: ForkFromReviewBody,
+    owner: Owner = Depends(current_owner),
+    runtime_config: RuntimeLLMConfig = Depends(runtime_config_from_request),
+) -> dict[str, Any]:
+    require_deck_owner(thread_id, owner)
     try:
-        if body.review_stage == "structure":
-            return _fork_from_review(
-                thread_id,
-                "structure",
-                scenario_id=body.scenario_id,
-                structure_id=body.structure_id,
-                deck_name=body.deck_name,
-            )
-        if body.review_stage == "style":
-            return _fork_from_review(
-                thread_id,
-                "style",
-                feedback=body.feedback,
-                deck_name=body.deck_name,
-            )
-        return _fork_from_review(
-            thread_id,
-            "layout",
-            overrides=body.overrides,
-            visual_style_preset_id=body.visual_style_preset_id,
-            deck_name=body.deck_name,
-        )
+        with use_runtime_config(runtime_config):
+            if body.review_stage == "structure":
+                result = _fork_from_review(
+                    thread_id,
+                    "structure",
+                    scenario_id=body.scenario_id,
+                    structure_id=body.structure_id,
+                    deck_name=body.deck_name,
+                )
+            elif body.review_stage == "style":
+                result = _fork_from_review(
+                    thread_id,
+                    "style",
+                    feedback=body.feedback,
+                    deck_name=body.deck_name,
+                )
+            else:
+                result = _fork_from_review(
+                    thread_id,
+                    "layout",
+                    overrides=body.overrides,
+                    visual_style_preset_id=body.visual_style_preset_id,
+                    deck_name=body.deck_name,
+                )
+        assign_deck_to_owner(result["thread_id"], owner)
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/decks/{thread_id}/history")
-def history(thread_id: str) -> dict[str, Any]:
+def history(thread_id: str, owner: Owner = Depends(current_owner)) -> dict[str, Any]:
+    require_deck_owner(thread_id, owner)
     g = graph()
     cfg = config_for(thread_id)
     snaps = list(g.get_state_history(cfg))  # type: ignore[arg-type]
@@ -513,8 +538,14 @@ def history(thread_id: str) -> dict[str, Any]:
 
 
 @router.post("/decks/{thread_id}/rewind")
-def rewind(thread_id: str, body: dict[str, str]) -> dict[str, Any]:
+def rewind(
+    thread_id: str,
+    body: dict[str, str],
+    owner: Owner = Depends(current_owner),
+    runtime_config: RuntimeLLMConfig = Depends(runtime_config_from_request),
+) -> dict[str, Any]:
     """Jump back to an earlier checkpoint id (full conversation reload)."""
+    require_deck_owner(thread_id, owner)
     checkpoint_id = body.get("checkpoint_id")
     if not checkpoint_id:
         raise HTTPException(status_code=400, detail="checkpoint_id required")
@@ -524,6 +555,7 @@ def rewind(thread_id: str, body: dict[str, str]) -> dict[str, Any]:
     if not snap:
         raise HTTPException(status_code=404, detail="Unknown checkpoint")
     # Running invoke(None, cfg) from this checkpoint forks history and resumes.
-    g.invoke(None, cfg)  # type: ignore[arg-type]
+    with use_runtime_config(runtime_config):
+        g.invoke(None, attach_runtime_config_id(cfg))  # type: ignore[arg-type]
     mirror_to_disk(thread_id)
     return current_state(thread_id)

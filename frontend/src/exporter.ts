@@ -10,6 +10,7 @@ import JSZip from "jszip";
 import PptxGenJS from "pptxgenjs";
 import type { DeckState } from "./api";
 import { normalizeImagePlaceholders } from "./imagePlaceholders";
+import { runtimeConfigHeaders } from "./runtimeConfig";
 
 // Keep in sync with DeckCanvas.tsx:17-21. Duplicated rather than shared because
 // it's four lines and importing DeckCanvas just for a constant is overkill.
@@ -329,7 +330,8 @@ export async function buildPngZipArtifact(deck: DeckState, options: ExportNameOp
 
   const res = await fetch(`${API_BASE}/decks/${encodeURIComponent(deck.thread_id)}/exports/pngs`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...runtimeConfigHeaders() },
+    credentials: "same-origin",
     body: JSON.stringify({
       deck_name: deckName,
       aspect_ratio: aspectRatio,

@@ -56,9 +56,26 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
         """
         CREATE TABLE IF NOT EXISTS masterpieces (
             id TEXT PRIMARY KEY,
-            prompt TEXT NOT NULL UNIQUE,
+            owner_hash TEXT,
+            prompt TEXT NOT NULL,
             created_at TEXT NOT NULL
         )
+        """
+    )
+    try:
+        conn.execute("ALTER TABLE masterpieces ADD COLUMN owner_hash TEXT")
+    except sqlite3.OperationalError:
+        pass
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_masterpieces_owner
+        ON masterpieces(owner_hash, created_at)
+        """
+    )
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_masterpieces_owner_prompt
+        ON masterpieces(owner_hash, prompt)
         """
     )
     conn.commit()
@@ -218,27 +235,33 @@ def _masterpiece_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-def list_masterpieces() -> list[dict[str, Any]]:
+def list_masterpieces(owner_hash: str) -> list[dict[str, Any]]:
     with _connect() as conn:
         rows = conn.execute(
             """
             SELECT id, prompt, created_at
             FROM masterpieces
+            WHERE owner_hash = ?
             ORDER BY created_at DESC
-            """
+            """,
+            (owner_hash,),
         ).fetchall()
     return [_masterpiece_to_dict(row) for row in rows]
 
 
-def save_masterpiece(prompt: str) -> dict[str, Any]:
+def save_masterpiece(owner_hash: str, prompt: str) -> dict[str, Any]:
     clean_prompt = prompt.strip()
     if not clean_prompt:
         raise ValueError("Cannot save a blank masterpiece prompt.")
 
     with _connect() as conn:
         existing = conn.execute(
-            "SELECT id, prompt, created_at FROM masterpieces WHERE prompt = ?",
-            (clean_prompt,),
+            """
+            SELECT id, prompt, created_at
+            FROM masterpieces
+            WHERE owner_hash = ? AND prompt = ?
+            """,
+            (owner_hash, clean_prompt),
         ).fetchone()
         if existing:
             return _masterpiece_to_dict(existing)
@@ -246,17 +269,20 @@ def save_masterpiece(prompt: str) -> dict[str, Any]:
         created_at = _now()
         conn.execute(
             """
-            INSERT INTO masterpieces (id, prompt, created_at)
-            VALUES (?, ?, ?)
+            INSERT INTO masterpieces (id, owner_hash, prompt, created_at)
+            VALUES (?, ?, ?, ?)
             """,
-            (masterpiece_id, clean_prompt, created_at),
+            (masterpiece_id, owner_hash, clean_prompt, created_at),
         )
         conn.commit()
     return {"id": masterpiece_id, "prompt": clean_prompt, "created_at": created_at}
 
 
-def delete_masterpiece(masterpiece_id: str) -> bool:
+def delete_masterpiece(owner_hash: str, masterpiece_id: str) -> bool:
     with _connect() as conn:
-        cursor = conn.execute("DELETE FROM masterpieces WHERE id = ?", (masterpiece_id,))
+        cursor = conn.execute(
+            "DELETE FROM masterpieces WHERE owner_hash = ? AND id = ?",
+            (owner_hash, masterpiece_id),
+        )
         conn.commit()
         return cursor.rowcount > 0

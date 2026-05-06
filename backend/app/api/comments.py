@@ -23,7 +23,7 @@ import threading
 from datetime import datetime, timezone
 from typing import Any, Iterable, Iterator
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -31,9 +31,16 @@ from ..artifacts import store
 from ..graph.nodes.edit import collapse_edit_ops, edit_intent_node
 from ..graph.nodes.html_one import html_one_node
 from ..graph.nodes.image_insert import apply_image_mappings
+from ..llm.runtime_config import (
+    RuntimeLLMConfig,
+    redact_secrets,
+    runtime_config_from_request,
+    use_runtime_config,
+)
 from ..llm.stream import tagged_stream, writer_override
 from .common import config_for, current_state, graph, mirror_to_disk
 from .history import _regenerate_from
+from .owners import Owner, current_owner, require_deck_owner
 from .streaming import SSE_HEADERS, _sse
 
 router = APIRouter()
@@ -240,14 +247,26 @@ def _run_apply_edits(thread_id: str) -> dict[str, Any]:
 
 
 @router.post("/decks/{thread_id}/slides/{slide_idx}/comments")
-def add_comment(thread_id: str, slide_idx: int, body: CommentIn) -> dict[str, Any]:
+def add_comment(
+    thread_id: str,
+    slide_idx: int,
+    body: CommentIn,
+    owner: Owner = Depends(current_owner),
+) -> dict[str, Any]:
+    require_deck_owner(thread_id, owner)
     comment = _persist_comment(thread_id, slide_idx, body)
     return {"ok": True, "comment": comment}
 
 
 @router.post("/decks/{thread_id}/apply_edits")
-def apply_edits(thread_id: str) -> dict[str, Any]:
-    return _run_apply_edits(thread_id)
+def apply_edits(
+    thread_id: str,
+    owner: Owner = Depends(current_owner),
+    runtime_config: RuntimeLLMConfig = Depends(runtime_config_from_request),
+) -> dict[str, Any]:
+    require_deck_owner(thread_id, owner)
+    with use_runtime_config(runtime_config):
+        return _run_apply_edits(thread_id)
 
 
 # ---------------------------------------------------------------------------
@@ -281,7 +300,7 @@ def _run_with_streaming(
             q.put({"__done": True, "result": result})
         except Exception as e:  # noqa: BLE001
             log.exception("streaming worker failed")
-            q.put({"__error": str(e)})
+            q.put({"__error": redact_secrets(e)})
         finally:
             q.put(_SENTINEL)
 
@@ -319,9 +338,16 @@ def _run_with_streaming(
 
 
 @router.post("/decks/{thread_id}/apply_edits/stream")
-def apply_edits_stream(thread_id: str) -> StreamingResponse:
+def apply_edits_stream(
+    thread_id: str,
+    owner: Owner = Depends(current_owner),
+    runtime_config: RuntimeLLMConfig = Depends(runtime_config_from_request),
+) -> StreamingResponse:
+    require_deck_owner(thread_id, owner)
+
     def gen() -> Iterable[str]:
-        yield from _run_with_streaming(thread_id, _run_apply_edits)
+        with use_runtime_config(runtime_config):
+            yield from _run_with_streaming(thread_id, _run_apply_edits)
     return StreamingResponse(gen(), headers=SSE_HEADERS)
 
 
@@ -330,18 +356,22 @@ def add_comment_then_apply_stream(
     thread_id: str,
     slide_idx: int,
     body: CommentIn,
+    owner: Owner = Depends(current_owner),
+    runtime_config: RuntimeLLMConfig = Depends(runtime_config_from_request),
 ) -> StreamingResponse:
     """Combined endpoint: persist the comment, then stream the edit-apply work.
     Saves the frontend from having to do two round-trips and avoids a race
     where apply_edits could fire before the comment is persisted.
     """
+    require_deck_owner(thread_id, owner)
     _persist_comment(thread_id, slide_idx, body)
 
     def gen() -> Iterable[str]:
-        yield _sse({
-            "type": "comment_saved",
-            "slide_idx": slide_idx,
-            "text": body.text,
-        })
-        yield from _run_with_streaming(thread_id, _run_apply_edits)
+        with use_runtime_config(runtime_config):
+            yield _sse({
+                "type": "comment_saved",
+                "slide_idx": slide_idx,
+                "text": body.text,
+            })
+            yield from _run_with_streaming(thread_id, _run_apply_edits)
     return StreamingResponse(gen(), headers=SSE_HEADERS)

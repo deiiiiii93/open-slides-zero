@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from typing import Any, Iterable
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -19,10 +19,13 @@ from ..llm.models import (
     lane_model_options,
     normalize_lane_model_overrides,
     normalize_lane_thinking_effort_overrides,
+    runtime_model_options,
 )
+from ..llm.runtime_config import RuntimeLLMConfig, runtime_config_from_request, use_runtime_config
 from . import playground_store
 from .common import config_for, current_state, delete_thread, graph
 from .history import _clone_checkpoint_lineage
+from .owners import Owner, assign_deck_to_owner, current_owner, require_deck_owner
 from .streaming import SSE_HEADERS, _sse, _stream_graph
 
 router = APIRouter()
@@ -123,8 +126,17 @@ def get_playground_model_options() -> dict[str, Any]:
     return lane_model_options()
 
 
+@router.get("/runtime/model-options")
+def get_runtime_model_options() -> dict[str, Any]:
+    return runtime_model_options()
+
+
 @router.get("/decks/{thread_id}/playground/lanes")
-def list_playground_lanes(thread_id: str) -> dict[str, Any]:
+def list_playground_lanes(
+    thread_id: str,
+    owner: Owner = Depends(current_owner),
+) -> dict[str, Any]:
+    require_deck_owner(thread_id, owner)
     _require_playground_base(thread_id)
     rows = playground_store.list_lanes(thread_id)
     return {
@@ -137,24 +149,34 @@ def list_playground_lanes(thread_id: str) -> dict[str, Any]:
 def create_playground_lane_stream(
     thread_id: str,
     body: CreateLaneBody,
+    owner: Owner = Depends(current_owner),
+    runtime_config: RuntimeLLMConfig = Depends(runtime_config_from_request),
 ) -> StreamingResponse:
+    require_deck_owner(thread_id, owner)
     lane, lane_cfg = _prepare_lane(thread_id, body)
+    assign_deck_to_owner(lane["lane_thread_id"], owner)
 
     def gen() -> Iterable[str]:
-        yield _sse({
-            "type": "thread",
-            "thread_id": lane["lane_thread_id"],
-            "parent_thread_id": thread_id,
-            "lane_id": lane["lane_id"],
-        })
-        yield _sse({"type": "lane", "lane": _lane_response(lane)})
-        yield from _stream_graph(None, lane_cfg, lane["lane_thread_id"])
+        with use_runtime_config(runtime_config):
+            yield _sse({
+                "type": "thread",
+                "thread_id": lane["lane_thread_id"],
+                "parent_thread_id": thread_id,
+                "lane_id": lane["lane_id"],
+            })
+            yield _sse({"type": "lane", "lane": _lane_response(lane)})
+            yield from _stream_graph(None, lane_cfg, lane["lane_thread_id"])
 
     return StreamingResponse(gen(), headers=SSE_HEADERS)
 
 
 @router.delete("/decks/{thread_id}/playground/lanes/{lane_id}")
-def delete_playground_lane(thread_id: str, lane_id: str) -> dict[str, Any]:
+def delete_playground_lane(
+    thread_id: str,
+    lane_id: str,
+    owner: Owner = Depends(current_owner),
+) -> dict[str, Any]:
+    require_deck_owner(thread_id, owner)
     _require_playground_base(thread_id)
     row = playground_store.delete_lane_record(thread_id, lane_id)
     if row is None:
@@ -172,25 +194,33 @@ def delete_playground_lane(thread_id: str, lane_id: str) -> dict[str, Any]:
 
 
 @router.get("/masterpieces")
-def list_masterpieces() -> dict[str, Any]:
-    return {"masterpieces": playground_store.list_masterpieces()}
+def list_masterpieces(owner: Owner = Depends(current_owner)) -> dict[str, Any]:
+    return {"masterpieces": playground_store.list_masterpieces(owner.owner_hash)}
 
 
 @router.post("/decks/{thread_id}/playground/lanes/{lane_id}/masterpiece")
-def save_lane_masterpiece(thread_id: str, lane_id: str) -> dict[str, Any]:
+def save_lane_masterpiece(
+    thread_id: str,
+    lane_id: str,
+    owner: Owner = Depends(current_owner),
+) -> dict[str, Any]:
+    require_deck_owner(thread_id, owner)
     _require_playground_base(thread_id)
     row = playground_store.get_lane(thread_id, lane_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Unknown playground lane")
     try:
-        masterpiece = playground_store.save_masterpiece(row["creator_prompt"])
+        masterpiece = playground_store.save_masterpiece(owner.owner_hash, row["creator_prompt"])
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True, "masterpiece": masterpiece}
 
 
 @router.delete("/masterpieces/{masterpiece_id}")
-def delete_masterpiece(masterpiece_id: str) -> dict[str, Any]:
-    if not playground_store.delete_masterpiece(masterpiece_id):
+def delete_masterpiece(
+    masterpiece_id: str,
+    owner: Owner = Depends(current_owner),
+) -> dict[str, Any]:
+    if not playground_store.delete_masterpiece(owner.owner_hash, masterpiece_id):
         raise HTTPException(status_code=404, detail="Unknown masterpiece")
     return {"ok": True}

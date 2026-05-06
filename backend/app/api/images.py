@@ -14,7 +14,7 @@ from typing import Any, Iterator
 from urllib.parse import urljoin, urlparse
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
@@ -25,7 +25,14 @@ from ..graph.nodes.image_insert import (
     create_image_insertion_plan,
     generate_slot_image,
 )
+from ..llm.runtime_config import (
+    RuntimeLLMConfig,
+    redact_secrets,
+    runtime_config_from_request,
+    use_runtime_config,
+)
 from .common import config_for, current_state, graph, mirror_to_disk
+from .owners import Owner, current_owner, require_deck_owner
 
 router = APIRouter()
 _GENERATION_LOCKS: dict[str, threading.Lock] = {}
@@ -245,9 +252,15 @@ def proxy_image(url: str = Query(..., min_length=1, max_length=4096)) -> Respons
 
 
 @router.post("/decks/{thread_id}/images/plan")
-def plan_images(thread_id: str) -> dict[str, Any]:
+def plan_images(
+    thread_id: str,
+    owner: Owner = Depends(current_owner),
+    runtime_config: RuntimeLLMConfig = Depends(runtime_config_from_request),
+) -> dict[str, Any]:
+    require_deck_owner(thread_id, owner)
     values = _snapshot_values(thread_id)
-    plan = create_image_insertion_plan(values)
+    with use_runtime_config(runtime_config):
+        plan = create_image_insertion_plan(values)
     update = {
         "image_assets": plan.get("assets") or build_image_assets(
             values.get("materials") or [],
@@ -261,7 +274,12 @@ def plan_images(thread_id: str) -> dict[str, Any]:
 
 
 @router.post("/decks/{thread_id}/images/apply")
-def apply_images(thread_id: str, body: ApplyImagesBody) -> dict[str, Any]:
+def apply_images(
+    thread_id: str,
+    body: ApplyImagesBody,
+    owner: Owner = Depends(current_owner),
+) -> dict[str, Any]:
+    require_deck_owner(thread_id, owner)
     with _serial_image_generation(thread_id):
         values = _snapshot_values(thread_id)
         update = apply_image_mappings(
@@ -277,38 +295,52 @@ def apply_images(thread_id: str, body: ApplyImagesBody) -> dict[str, Any]:
 
 
 @router.post("/decks/{thread_id}/images/generate")
-def generate_image(thread_id: str, body: GenerateImageBody) -> dict[str, Any]:
+def generate_image(
+    thread_id: str,
+    body: GenerateImageBody,
+    owner: Owner = Depends(current_owner),
+    runtime_config: RuntimeLLMConfig = Depends(runtime_config_from_request),
+) -> dict[str, Any]:
+    require_deck_owner(thread_id, owner)
     if not body.prompt.strip():
         raise HTTPException(status_code=400, detail="Prompt is required.")
     with _serial_image_generation(thread_id):
         values = _snapshot_values(thread_id)
         try:
-            update = generate_slot_image(
-                values,
-                slot_id=body.slot_id,
-                prompt=body.prompt.strip(),
-            )
+            with use_runtime_config(runtime_config):
+                update = generate_slot_image(
+                    values,
+                    slot_id=body.slot_id,
+                    prompt=body.prompt.strip(),
+                )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
+            message = redact_secrets(exc)
             graph().update_state(  # type: ignore[arg-type]
                 config_for(thread_id),
                 {
                     "image_generation_errors": [{
                         "slot_id": body.slot_id,
                         "slide_idx": body.slide_idx,
-                        "message": str(exc),
+                        "message": message,
                     }]
                 },
             )
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            raise HTTPException(status_code=502, detail=message) from exc
         generated_asset = update.pop("generated_asset")
         state = _persist(thread_id, update)
     return {"ok": True, "asset": generated_asset, "state": state}
 
 
 @router.post("/decks/{thread_id}/images/generate_batch")
-def generate_images(thread_id: str, body: GenerateImagesBody) -> dict[str, Any]:
+def generate_images(
+    thread_id: str,
+    body: GenerateImagesBody,
+    owner: Owner = Depends(current_owner),
+    runtime_config: RuntimeLLMConfig = Depends(runtime_config_from_request),
+) -> dict[str, Any]:
+    require_deck_owner(thread_id, owner)
     if not body.items:
         raise HTTPException(status_code=400, detail="At least one image prompt is required.")
 
@@ -327,7 +359,8 @@ def generate_images(thread_id: str, body: GenerateImagesBody) -> dict[str, Any]:
                 })
                 continue
             try:
-                update = generate_slot_image(values, slot_id=item.slot_id, prompt=prompt)
+                with use_runtime_config(runtime_config):
+                    update = generate_slot_image(values, slot_id=item.slot_id, prompt=prompt)
             except ValueError as exc:
                 errors.append({
                     "slot_id": item.slot_id,
@@ -339,7 +372,7 @@ def generate_images(thread_id: str, body: GenerateImagesBody) -> dict[str, Any]:
                 errors.append({
                     "slot_id": item.slot_id,
                     "slide_idx": item.slide_idx,
-                    "message": str(exc),
+                    "message": redact_secrets(exc),
                 })
                 continue
             generated_assets.append(update.pop("generated_asset"))
@@ -365,7 +398,12 @@ def generate_images(thread_id: str, body: GenerateImagesBody) -> dict[str, Any]:
 
 
 @router.get("/decks/{thread_id}/images/assets/{asset_id}/content")
-def image_asset_content(thread_id: str, asset_id: str):
+def image_asset_content(
+    thread_id: str,
+    asset_id: str,
+    owner: Owner = Depends(current_owner),
+):
+    require_deck_owner(thread_id, owner)
     values = _snapshot_values(thread_id)
     assets = values.get("image_assets") or build_image_assets(
         values.get("materials") or [],

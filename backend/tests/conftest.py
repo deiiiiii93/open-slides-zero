@@ -11,3 +11,4 @@ def _clear_glm_ocr_env(monkeypatch: pytest.MonkeyPatch):
     """
     for key in ("OSZ_MODEL_OCR", "OSZ_MODEL_OCR_BASE_URL", "OSZ_MODEL_OCR_KEY"):
         monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("OSZ_TEST_OWNER_TOKEN", "test-owner-token-for-direct-endpoint-calls")

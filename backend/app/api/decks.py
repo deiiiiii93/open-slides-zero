@@ -10,13 +10,12 @@ POST /decks/{id}/materials — upload a file to attach as material.
 from __future__ import annotations
 
 import os
-import sqlite3
 import uuid
 from pathlib import Path
 from typing import Any, Literal, Sequence
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from ..artifacts import store
@@ -25,9 +24,16 @@ from ..catalog.scenarios import SCENARIO_DEFINITIONS
 from ..catalog.structures import STRUCTURE_DEFINITIONS
 from ..catalog.visual_presets import list_visual_style_presets, visual_style_preset_state
 from ..graph.graph import DB_PATH
+from ..llm.runtime_config import (
+    RuntimeLLMConfig,
+    attach_runtime_config_id,
+    runtime_config_from_request,
+    use_runtime_config,
+)
 from ..llm.models import normalize_lane_model_overrides, normalize_lane_thinking_effort_overrides
 from . import playground_store
 from .common import config_for, current_state, delete_thread, graph, mirror_to_disk
+from .owners import Owner, assign_deck_to_owner, current_owner, owned_thread_ids, require_deck_owner
 
 router = APIRouter()
 SUPPORTED_UPLOAD_EXTENSIONS = {
@@ -261,19 +267,12 @@ async def normalize_uploaded_materials(
 
 
 @router.get("/decks")
-def list_decks() -> dict[str, Any]:
+def list_decks(owner: Owner = Depends(current_owner)) -> dict[str, Any]:
     """Return all thread IDs from the checkpointer DB with basic metadata."""
     db = DB_PATH
     if not db.exists():
         return {"decks": []}
-    conn = sqlite3.connect(str(db))
-    try:
-        cursor = conn.execute(
-            "SELECT DISTINCT thread_id FROM checkpoints ORDER BY thread_id"
-        )
-        thread_ids = [row[0] for row in cursor.fetchall()]
-    finally:
-        conn.close()
+    thread_ids = owned_thread_ids(owner)
 
     decks = []
     for tid in thread_ids:
@@ -304,7 +303,11 @@ def list_decks() -> dict[str, Any]:
 
 
 @router.post("/decks")
-def create_deck(body: CreateDeckBody) -> dict[str, Any]:
+def create_deck(
+    body: CreateDeckBody,
+    owner: Owner = Depends(current_owner),
+    runtime_config: RuntimeLLMConfig = Depends(runtime_config_from_request),
+) -> dict[str, Any]:
     thread_id = uuid.uuid4().hex[:12]
     cfg = config_for(thread_id)
     try:
@@ -326,9 +329,14 @@ def create_deck(body: CreateDeckBody) -> dict[str, Any]:
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    assign_deck_to_owner(thread_id, owner)
     # Invoke runs until the first interrupt (structure gate).
     try:
-        graph().invoke(initial, cfg)  # type: ignore[arg-type]
+        with use_runtime_config(runtime_config):
+            graph().invoke(initial, attach_runtime_config_id(cfg))  # type: ignore[arg-type]
+    except HTTPException:
+        delete_thread(thread_id)
+        raise
     except ValueError as exc:
         delete_thread(thread_id)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -337,7 +345,8 @@ def create_deck(body: CreateDeckBody) -> dict[str, Any]:
 
 
 @router.get("/decks/{thread_id}")
-def get_deck(thread_id: str) -> dict[str, Any]:
+def get_deck(thread_id: str, owner: Owner = Depends(current_owner)) -> dict[str, Any]:
+    require_deck_owner(thread_id, owner)
     state = current_state(thread_id)
     if not state["values"]:
         raise HTTPException(status_code=404, detail="Unknown deck")
@@ -345,7 +354,8 @@ def get_deck(thread_id: str) -> dict[str, Any]:
 
 
 @router.delete("/decks/{thread_id}")
-def delete_deck(thread_id: str) -> dict[str, Any]:
+def delete_deck(thread_id: str, owner: Owner = Depends(current_owner)) -> dict[str, Any]:
+    require_deck_owner(thread_id, owner)
     snap = graph().get_state(config_for(thread_id))  # type: ignore[arg-type]
     if not snap or not snap.values:
         raise HTTPException(status_code=404, detail="Unknown deck")
@@ -391,13 +401,23 @@ def get_catalog(thread_id: str) -> dict[str, Any]:
 
 
 @router.post("/decks/{thread_id}/materials")
-async def upload_material(thread_id: str, file: UploadFile = File(...)) -> dict[str, Any]:
+async def upload_material(
+    thread_id: str,
+    file: UploadFile = File(...),
+    owner: Owner = Depends(current_owner),
+) -> dict[str, Any]:
+    require_deck_owner(thread_id, owner)
     material, size = await _store_upload(thread_id, file)
     return {**material.model_dump(), "bytes": size}
 
 
 @router.get("/decks/{thread_id}/slides/{slide_idx}")
-def get_slide_html(thread_id: str, slide_idx: int) -> dict[str, Any]:
+def get_slide_html(
+    thread_id: str,
+    slide_idx: int,
+    owner: Owner = Depends(current_owner),
+) -> dict[str, Any]:
+    require_deck_owner(thread_id, owner)
     snap = graph().get_state(config_for(thread_id))  # type: ignore[arg-type]
     if not snap or not snap.values:
         raise HTTPException(status_code=404, detail="Unknown deck")
