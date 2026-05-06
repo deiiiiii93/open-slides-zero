@@ -43,7 +43,7 @@ export function LiveStream({
   elapsedByTag,
   title = "Live",
   subtitle,
-  isActive = false,
+  isActive: _isActive = false,
   maxHeight = "calc(100vh - 120px)",
 }: Props) {
   const tagsInOrder = ["advanced_chat", "propose_structure", "outline", "style", "layout"];
@@ -61,11 +61,11 @@ export function LiveStream({
   return (
     <div
       style={{
-        padding: 12,
-        border: isActive ? "1px solid #2563eb" : "1px solid #e5e5e5",
-        borderRadius: 8,
-        background: "#fff",
-        fontFamily: "ui-sans-serif, -apple-system, sans-serif",
+        border: "1.5px solid #0a0a0a",
+        borderRadius: 0,
+        background: "#f5f3ee",
+        boxShadow: "none",
+        padding: 16,
         display: "flex",
         flexDirection: "column",
         gap: 10,
@@ -75,30 +75,51 @@ export function LiveStream({
     >
       <div
         style={{
+          color: "#5c5852",
           fontSize: 11,
-          letterSpacing: 0.8,
+          fontWeight: 700,
+          letterSpacing: 2.5,
           textTransform: "uppercase",
-          color: "#6b7280",
+          fontFamily: "ui-sans-serif, -apple-system, sans-serif",
         }}
       >
         {title}
       </div>
       {subtitle && (
-        <div style={{ fontSize: 12, color: "#64748b", marginTop: -6 }}>
+        <div
+          style={{
+            color: "#5c5852",
+            fontSize: 12,
+            marginTop: 4,
+          }}
+        >
           {subtitle}
         </div>
       )}
-      <div style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{label}</div>
+      <div
+        style={{
+          fontFamily: "'Playfair Display', Georgia, serif",
+          fontWeight: 700,
+          fontSize: 18,
+          color: "#0a0a0a",
+          letterSpacing: -0.012,
+          lineHeight: 1.15,
+          marginTop: 12,
+        }}
+      >
+        {label}
+      </div>
 
       {commentBuf && (
         <div
           style={{
-            fontSize: 12,
-            padding: 8,
-            background: "#eff6ff",
-            border: "1px solid #bfdbfe",
-            borderRadius: 4,
-            color: "#1e3a8a",
+            background: "#e8e3d8",
+            border: "1px solid #0a0a0a",
+            borderRadius: 0,
+            color: "#1c1c1e",
+            padding: "10px 12px",
+            fontSize: 13,
+            lineHeight: 1.55,
             whiteSpace: "pre-wrap",
           }}
         >
@@ -108,35 +129,50 @@ export function LiveStream({
 
       {tagsInOrder.map((tag) =>
         buffersByTag[tag] ? (
-          <details key={tag} open={activeNode === tag}>
+          <details
+            key={tag}
+            open={activeNode === tag}
+            style={{
+              borderBottom: "1px solid #0a0a0a",
+              padding: 0,
+            }}
+          >
             <summary
               style={{
-                fontSize: 12,
-                cursor: "pointer",
-                color: "#374151",
-                padding: "2px 0",
                 display: "flex",
-                justifyContent: "space-between",
                 alignItems: "center",
+                justifyContent: "space-between",
+                padding: "10px 14px",
+                cursor: "pointer",
+                listStyle: "none",
               }}
             >
-              <span>{NODE_LABELS[tag] ?? tag}</span>
+              <span
+                style={{
+                  color: "#1c1c1e",
+                  fontWeight: 600,
+                  fontSize: 13,
+                }}
+              >
+                {NODE_LABELS[tag] ?? tag}
+              </span>
               {elapsedByTag[tag] && (
-                <span style={{ color: "#6b7280", fontSize: 10, marginLeft: 8 }}>
+                <span
+                  style={{
+                    color: "#948e83",
+                    fontFamily: "ui-monospace, 'SF Mono', monospace",
+                    fontSize: 10,
+                  }}
+                >
                   {fmtMs(elapsedByTag[tag])}
                 </span>
               )}
             </summary>
             <div
               style={{
-                maxHeight: 260,
-                overflow: "auto",
-                padding: 8,
-                background: "#fafafa",
-                border: "1px solid #e5e7eb",
-                borderRadius: 4,
-                marginTop: 4,
-                fontSize: 12,
+                background: "#e8e3d8",
+                padding: "12px 14px",
+                borderTop: "1px solid #0a0a0a",
               }}
             >
               <Markdown>{buffersByTag[tag]}</Markdown>
@@ -146,80 +182,132 @@ export function LiveStream({
       )}
 
       {htmlTags.length > 0 && (
-        <details open={activeNode === "html_one"}>
+        <details
+          open={activeNode === "html_one"}
+          style={{
+            borderBottom: "1px solid #0a0a0a",
+            padding: 0,
+          }}
+        >
           <summary
             style={{
-              fontSize: 12,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "10px 14px",
               cursor: "pointer",
-              color: "#374151",
-              padding: "2px 0",
+              listStyle: "none",
             }}
           >
-            ⑤ Slide HTML · {htmlTags.length} slide{htmlTags.length > 1 ? "s" : ""}
+            <span
+              style={{
+                color: "#1c1c1e",
+                fontWeight: 600,
+                fontSize: 13,
+              }}
+            >
+              ⑤ Slide HTML · {htmlTags.length} slide{htmlTags.length > 1 ? "s" : ""}
+            </span>
           </summary>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
-            {htmlTags.map((tag) => {
-              const idx = Number(tag.split(":")[1]);
-              const buf = buffersByTag[tag] ?? "";
-              const isActive = activeSlide === idx && activeNode === "html_one";
-              const elapsed = elapsedByTag[tag];
-              const isDone = buf.includes("</html>");
-              return (
-                <div
-                  key={tag}
-                  style={{
-                    border: isActive ? "1px solid #2563eb" : "1px solid #e5e7eb",
-                    borderRadius: 4,
-                    overflow: "hidden",
-                  }}
-                >
+          <div
+            style={{
+              background: "#e8e3d8",
+              padding: "12px 14px",
+              borderTop: "1px solid #0a0a0a",
+            }}
+          >
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {htmlTags.map((tag) => {
+                const idx = Number(tag.split(":")[1]);
+                const buf = buffersByTag[tag] ?? "";
+                const isSlideActive = activeSlide === idx && activeNode === "html_one";
+                const elapsed = elapsedByTag[tag];
+                const isDone = buf.includes("</html>");
+                const isStreaming = buf.length > 0;
+                return (
                   <div
+                    key={tag}
                     style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      padding: "4px 8px",
-                      background: isActive ? "#eff6ff" : "#f9fafb",
-                      fontSize: 11,
-                      color: "#374151",
+                      border: (isDone || isStreaming) ? "1px solid #0a0a0a" : "1px solid #948e83",
+                      borderRadius: 0,
+                      background: isSlideActive ? "#e8e3d8" : "#f5f3ee",
+                      marginBottom: 8,
                     }}
                   >
-                    <span>slide {idx + 1}</span>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      {elapsed && (
-                        <span style={{ color: "#6b7280", fontSize: 10 }}>
-                          {fmtMs(elapsed)}
+                    <div
+                      style={{
+                        padding: "10px 14px",
+                        borderBottom: "1px solid #0a0a0a",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontFamily: "'Playfair Display', Georgia, serif",
+                            fontWeight: 700,
+                            fontSize: 13,
+                            color: "#0a0a0a",
+                          }}
+                        >
+                          SLIDE {idx + 1}
                         </span>
-                      )}
-                      <span style={{ color: "#6b7280" }}>
-                        {buf.length.toLocaleString()} chars
-                      </span>
-                      {isDone && (
-                        <span style={{ color: "#16a34a", fontSize: 13, fontWeight: 700 }}>
-                          &#10003;
-                        </span>
-                      )}
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          {elapsed && (
+                            <span
+                              style={{
+                                color: "#948e83",
+                                fontFamily: "ui-monospace, 'SF Mono', monospace",
+                                fontSize: 10,
+                              }}
+                            >
+                              {fmtMs(elapsed)}
+                            </span>
+                          )}
+                          <span
+                            style={{
+                              color: "#948e83",
+                              fontFamily: "ui-monospace, 'SF Mono', monospace",
+                              fontSize: 10,
+                            }}
+                          >
+                            {buf.length.toLocaleString()} chars
+                          </span>
+                          {isDone && (
+                            <span style={{ color: "#3d5a2a", fontSize: 13, fontWeight: 700 }}>
+                              &#10003;
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
+                    <pre
+                      style={{
+                        background: "#0b1020",
+                        color: "#cfc8b9",
+                        padding: 12,
+                        borderRadius: 0,
+                        fontFamily: "ui-monospace, 'SF Mono', monospace",
+                        fontSize: 11,
+                        lineHeight: 1.45,
+                        overflow: "auto",
+                        margin: 0,
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-all",
+                        maxHeight: 140,
+                      }}
+                    >
+                      {buf.slice(-300)}
+                    </pre>
                   </div>
-                  <pre
-                    style={{
-                      margin: 0,
-                      padding: 6,
-                      background: "#0b1020",
-                      color: "#d1d5db",
-                      fontSize: 10,
-                      lineHeight: 1.35,
-                      maxHeight: 140,
-                      overflow: "auto",
-                      whiteSpace: "pre-wrap",
-                      wordBreak: "break-all",
-                    }}
-                  >
-                    {buf.slice(-300)}
-                  </pre>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         </details>
       )}
