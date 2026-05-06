@@ -345,9 +345,9 @@ function buildFontLinksHtml(deckName: string, info: FontPackageInfo, cssAssets: 
 ${localLinks}
 ${externalLinks}
   <style>
-    body { margin: 0; padding: 24px; color: #111827; font-family: Georgia, serif; line-height: 1.45; }
+    body { margin: 0; padding: 24px; color: #1c1c1e; font-family: Georgia, serif; line-height: 1.45; }
     h1 { margin: 0 0 12px; }
-    code { color: #475569; }
+    code { color: #5c5852; }
     p { font-size: 22px; margin: 14px 0; }
   </style>
 </head>
@@ -524,11 +524,11 @@ function buildHtmlSingleDocument(deck: DeckState, options: ExportNameOptions = {
   <meta charset="utf-8" />
   <title>${escapeText(deckName)}</title>
   <style>
-    body { margin: 0; padding: 24px; background: #f5f5f5; font-family: Georgia, serif; color: #111; }
+    body { margin: 0; padding: 24px; background: #f5f3ee; font-family: Georgia, serif; color: #1c1c1e; }
     h1 { margin: 0 0 16px; }
     .slide { margin: 0 0 24px; }
-    .slide h2 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: #555; }
-    iframe { border: 1px solid #ccc; background: #fff; display: block; }
+    .slide h2 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: #5c5852; }
+    iframe { border: 1px solid #cfc8b9; background: #f5f3ee; display: block; }
   </style>
 </head>
 <body>
@@ -576,13 +576,13 @@ function buildZipIndexHtml(
   <title>${escapeText(deckName)}</title>
   <style>
     body { margin: 0; font-family: Georgia, serif; display: grid; grid-template-columns: 180px 1fr; min-height: 100vh; }
-    nav { background: #f5f5f5; border-right: 1px solid #e5e5e5; padding: 16px; overflow-y: auto; }
+    nav { background: #f5f3ee; border-right: 1px solid #cfc8b9; padding: 16px; overflow-y: auto; }
     nav h1 { font-size: 16px; margin: 0 0 12px; }
     nav ul { list-style: none; padding: 0; margin: 0; }
-    nav a { display: block; padding: 6px 8px; border-radius: 4px; color: #111; text-decoration: none; font-size: 13px; }
-    nav a:hover { background: #e5e5e5; }
+    nav a { display: block; padding: 6px 8px; border-radius: 4px; color: #1c1c1e; text-decoration: none; font-size: 13px; }
+    nav a:hover { background: #e8e3d8; }
     main { padding: 16px; }
-    iframe { width: ${w}px; height: ${h}px; border: 1px solid #ccc; background: #fff; }
+    iframe { width: ${w}px; height: ${h}px; border: 1px solid #cfc8b9; background: #f5f3ee; }
   </style>
 </head>
 <body>
@@ -2191,14 +2191,14 @@ function buildPackageIndexHtml(packageName: string, rows: PackageIndexRow[]): st
   <meta charset="utf-8" />
   <title>${escapeText(packageName)}</title>
   <style>
-    body { margin: 0; padding: 24px; background: #f8fafc; color: #111827; font-family: Georgia, serif; }
+    body { margin: 0; padding: 24px; background: #f5f3ee; color: #1c1c1e; font-family: Georgia, serif; }
     h1 { margin: 0 0 16px; font-size: 24px; }
-    table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #e5e7eb; }
-    th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 14px; }
-    th { background: #f3f4f6; font-weight: 600; }
-    a { color: #1d4ed8; }
-    code { color: #64748b; font-size: 12px; }
-    pre { margin: 0; white-space: pre-wrap; font: inherit; color: #374151; }
+    table { width: 100%; border-collapse: collapse; background: #f5f3ee; border: 1px solid #cfc8b9; }
+    th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid #cfc8b9; font-size: 14px; }
+    th { background: #e8e3d8; font-weight: 600; }
+    a { color: #8b1a1a; }
+    code { color: #5c5852; font-size: 12px; }
+    pre { margin: 0; white-space: pre-wrap; font: inherit; color: #1c1c1e; }
   </style>
 </head>
 <body>

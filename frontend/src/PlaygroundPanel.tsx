@@ -786,7 +786,7 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
                           style={{
                             width: "100%",
                             minHeight: 34,
-                            border: "1px solid #d1d5db",
+                            border: "1px solid #cfc8b9",
                             borderRadius: 6,
                             padding: "6px 8px",
                             background: "#fff",
@@ -815,7 +815,7 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
                           style={{
                             width: "100%",
                             minHeight: 34,
-                            border: "1px solid #d1d5db",
+                            border: "1px solid #cfc8b9",
                             borderRadius: 6,
                             padding: "6px 8px",
                             background: "#fff",
