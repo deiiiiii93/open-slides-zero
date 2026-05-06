@@ -50,10 +50,28 @@ export function DeckCanvas({
           display: "flex",
           flexDirection: "column",
           gap: 8,
-          padding: 8,
-          borderRight: "1px solid #e5e5e5",
+          height: scaledH,
+          background: "#f5f3ee",
+          borderRight: "1.5px solid #0a0a0a",
+          padding: 16,
         }}
       >
+        <div
+          style={{
+            paddingBottom: 12,
+            marginBottom: 14,
+            borderBottom: "1px solid #0a0a0a",
+            fontFamily: "ui-sans-serif, -apple-system, sans-serif",
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: 2.5,
+            textTransform: "uppercase",
+            color: "#5c5852",
+            lineHeight: 1.0,
+          }}
+        >
+          Slides · {sortedIdx.length}
+        </div>
         {sortedIdx.map((i) => {
           const isReady = typeof slides[i] === "string" && slides[i].length > 0;
           return (
@@ -61,18 +79,46 @@ export function DeckCanvas({
               key={i}
               onClick={() => onSelectSlide(i)}
               style={{
-                padding: 8,
-                borderRadius: 4,
-                border: i === currentSlide ? "2px solid #2563eb" : "1px solid #e5e5e5",
-                background: isReady ? "white" : "#f8fafc",
-                cursor: "pointer",
-                fontSize: 12,
+                display: "block",
+                width: "100%",
                 textAlign: "left",
-                color: isReady ? "#111" : "#64748b",
+                padding: "12px 14px",
+                marginBottom: 8,
+                border: i === currentSlide
+                  ? "2px solid #0a0a0a"
+                  : isReady
+                  ? "1.5px solid #0a0a0a"
+                  : "1.5px solid #948e83",
+                borderRadius: 0,
+                background: "#f5f3ee",
+                color: isReady ? "#0a0a0a" : "#948e83",
+                cursor: "pointer",
+                transition: "border-color 100ms linear, background 100ms linear",
               }}
             >
-              Slide {i + 1}
-              {!isReady ? " · rendering" : ""}
+              <div
+                style={{
+                  fontFamily: "'Playfair Display', Georgia, serif",
+                  fontWeight: 700,
+                  fontSize: 14,
+                  color: isReady ? "#0a0a0a" : "#948e83",
+                  lineHeight: 1.0,
+                }}
+              >
+                Slide {i + 1}
+              </div>
+              {!isReady && (
+                <div
+                  style={{
+                    fontSize: 10,
+                    color: "#948e83",
+                    marginTop: 4,
+                    letterSpacing: 0.4,
+                  }}
+                >
+                  rendering
+                </div>
+              )}
             </button>
           );
         })}
@@ -94,7 +140,8 @@ export function DeckCanvas({
             style={{
               width: baseW,
               height: baseH,
-              border: "1px solid #111",
+              border: "2px solid #0a0a0a",
+              borderRadius: 0,
               background: "white",
             }}
           />
@@ -106,60 +153,56 @@ export function DeckCanvas({
 }
 
 function pendingSlideHtml(width: number, height: number, slideIdx: number): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <title>Slide ${slideIdx + 1}</title>
-    <style>
-      body {
-        margin: 0;
-        background: #f3f4f6;
-        font-family: Georgia, serif;
-      }
-      .slide {
-        width: ${width}px;
-        height: ${height}px;
-        box-sizing: border-box;
-        padding: 40px;
-        display: grid;
-        place-items: center;
-        color: #475569;
-        background:
-          linear-gradient(135deg, rgba(255,255,255,0.92), rgba(241,245,249,0.96)),
-          repeating-linear-gradient(
-            -45deg,
-            rgba(148,163,184,0.08) 0,
-            rgba(148,163,184,0.08) 12px,
-            transparent 12px,
-            transparent 24px
-          );
-      }
-      .card {
-        padding: 22px 28px;
-        border: 1px solid rgba(100,116,139,0.25);
-        background: rgba(255,255,255,0.82);
-        letter-spacing: 0.02em;
-      }
-      .label {
-        font-size: 12px;
-        text-transform: uppercase;
-        color: #64748b;
-        margin-bottom: 8px;
-      }
-      .title {
-        font-size: 28px;
-        color: #0f172a;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="slide">
-      <div class="card">
-        <div class="label">Rendering</div>
-        <div class="title">Slide ${slideIdx + 1} is still generating</div>
-      </div>
-    </div>
-  </body>
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body { margin: 0; height: 100%; }
+  body {
+    display: grid;
+    place-items: center;
+    background: #f5f3ee;
+    font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color: #1c1c1e;
+  }
+  .card {
+    border: 2px solid #0a0a0a;
+    background: #f5f3ee;
+    padding: 32px 40px;
+    max-width: 460px;
+    text-align: center;
+  }
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    color: #5c5852;
+    margin-bottom: 14px;
+  }
+  h2 {
+    font-family: Georgia, serif;
+    font-weight: 700;
+    font-size: 26px;
+    margin: 0 0 10px 0;
+    color: #0a0a0a;
+    line-height: 1.15;
+  }
+  p {
+    font-size: 14px;
+    color: #5c5852;
+    margin: 0;
+    line-height: 1.55;
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="eyebrow">Rendering</div>
+    <h2>Slide ${slideIdx + 1} is generating</h2>
+    <p>The agent is producing this slide's HTML.</p>
+  </div>
+</body>
 </html>`;
 }
