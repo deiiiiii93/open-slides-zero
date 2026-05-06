@@ -977,7 +977,7 @@ export function App() {
       </header>
 
       {err && (
-        <div style={{ color: "#b42318", padding: 8, border: "1px solid #fecaca", borderRadius: 6, marginBottom: 8, background: "#fff5f5" }}>
+        <div style={{ color: "#8b1a1a", padding: 8, border: "1.5px solid #8b1a1a", borderRadius: 0, marginBottom: 8, background: "#f5f3ee" }}>
           {err}
         </div>
       )}
@@ -992,10 +992,10 @@ export function App() {
       {materialWarnings.length > 0 && (
         <div
           style={{
-            color: "#92400e",
-            background: "#fffbeb",
-            border: "1px solid #fcd34d",
-            borderRadius: 6,
+            color: "#8a5a14",
+            background: "#f5f3ee",
+            border: "1px solid #8a5a14",
+            borderRadius: 0,
             padding: 10,
             marginBottom: 12,
           }}
@@ -1142,15 +1142,16 @@ export function App() {
                   style={{
                     padding: 12,
                     marginBottom: 12,
-                    border: "1px solid #fbbf24",
-                    borderRadius: 6,
-                    background: "#fffbeb",
+                    border: "1px solid #8a5a14",
+                    borderRadius: 0,
+                    background: "#f5f3ee",
+                    color: "#8a5a14",
                     display: "flex",
                     alignItems: "center",
                     gap: 12,
                   }}
                 >
-                  <span style={{ fontSize: 13, color: "#92400e" }}>
+                  <span style={{ fontSize: 13, color: "#8a5a14" }}>
                     {renderedCount < expectedCount
                       ? `Rendering paused: ${renderedCount}/${expectedCount} slides complete.`
                       : "Generation is paused — resume to continue."}
@@ -1159,11 +1160,14 @@ export function App() {
                     style={{
                       padding: "4px 12px",
                       fontSize: 13,
-                      background: "#f59e0b",
-                      color: "#fff",
-                      border: "none",
-                      borderRadius: 4,
+                      background: "#8a5a14",
+                      color: "#f5f3ee",
+                      border: "1.5px solid #8a5a14",
+                      borderRadius: 0,
                       cursor: "pointer",
+                      fontWeight: 700,
+                      letterSpacing: 1.4,
+                      textTransform: "uppercase",
                     }}
                     onClick={() => onResume({})}
                   >
@@ -1734,7 +1738,7 @@ function MasterpieceManager({
       </div>
 
       {err && (
-        <div style={{ color: "#b42318", padding: 8, border: "1px solid #fecaca", borderRadius: 6, marginTop: 12, background: "#fff5f5" }}>
+        <div style={{ color: "#8b1a1a", padding: 8, border: "1.5px solid #8b1a1a", borderRadius: 0, marginTop: 12, background: "#f5f3ee" }}>
           {err}
         </div>
       )}
