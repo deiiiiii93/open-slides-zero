@@ -877,10 +877,10 @@ export function App() {
                 top: "calc(100% + 4px)",
                 right: 0,
                 minWidth: 200,
-                background: "#fff",
-                border: "1px solid #ebebeb",
-                borderRadius: 6,
-                boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                background: "#f5f3ee",
+                border: "1.5px solid #0a0a0a",
+                borderRadius: 0,
+                boxShadow: "none",
                 zIndex: 100,
                 padding: "4px 0",
               }}
@@ -902,7 +902,7 @@ export function App() {
 
                 if (merged.size === 0) {
                   return (
-                    <div style={{ padding: "8px 12px", color: "#aeaeb2", fontSize: 13 }}>
+                    <div style={{ padding: "8px 12px", color: "#948e83", fontSize: 13 }}>
                       No history yet
                     </div>
                   );
@@ -914,7 +914,7 @@ export function App() {
                       display: "flex",
                       alignItems: "stretch",
                       width: "100%",
-                      borderBottom: "1px solid #f0f0f0",
+                      borderBottom: "1px solid #0a0a0a",
                     }}
                   >
                     <button
@@ -935,17 +935,17 @@ export function App() {
                         fontFamily: "inherit",
                       }}
                       onMouseEnter={(e) => {
-                        if (!deletingDeckId) e.currentTarget.style.background = "#f5f5f5";
+                        if (!deletingDeckId) e.currentTarget.style.background = "#e8e3d8";
                       }}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                     >
                       <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 260 }}>
                         {info.name}
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <code style={{ fontSize: 11, color: "#aeaeb2" }}>{id}</code>
+                        <code style={{ fontSize: 11, color: "#948e83" }}>{id}</code>
                         {info.stage && (
-                          <span style={{ fontSize: 10, color: "#6e6e73", background: "#f5f5f5", padding: "1px 4px", borderRadius: 4 }}>
+                          <span style={{ fontSize: 10, color: "#5c5852", background: "transparent", padding: "1px 4px" }}>
                             {info.stage}
                           </span>
                         )}
@@ -957,9 +957,9 @@ export function App() {
                       style={{
                         flex: "0 0 auto",
                         border: "none",
-                        borderLeft: "1px solid #f0f0f0",
-                        background: "#fff",
-                        color: "#b91c1c",
+                        borderLeft: "1px solid #0a0a0a",
+                        background: "transparent",
+                        color: "#8b1a1a",
                         cursor: busy || deletingDeckId ? "default" : "pointer",
                         fontSize: 12,
                         fontFamily: "inherit",
@@ -1034,9 +1034,9 @@ export function App() {
                 gap: 12,
                 padding: 12,
                 marginBottom: 12,
-                border: "1px solid #ebebeb",
-                borderRadius: 6,
-                background: "#fff",
+                border: "1.5px solid #0a0a0a",
+                borderRadius: 0,
+                background: "#f5f3ee",
               }}
             >
               <button
@@ -1174,7 +1174,7 @@ export function App() {
 
               {!hasInterrupt && !hasSlides && outlineMd && (
                 <section
-                  style={{ padding: 12, border: "1px solid #ebebeb", borderRadius: 6 }}
+                  style={{ padding: 12, border: "1.5px solid #0a0a0a", borderRadius: 0 }}
                 >
                   <Markdown>{outlineMd}</Markdown>
                 </section>
@@ -1187,8 +1187,8 @@ export function App() {
                     style={{
                       marginTop: 8,
                       padding: 12,
-                      border: "1px solid #ebebeb",
-                      borderRadius: 6,
+                      border: "1.5px solid #0a0a0a",
+                      borderRadius: 0,
                     }}
                   >
                     <Markdown>{briefMd}</Markdown>
@@ -1418,15 +1418,15 @@ function ImageInsertionPanel({
       style={{
         padding: 12,
         marginBottom: 12,
-        border: "1px solid #ebebeb",
-        borderRadius: 8,
-        background: "#fafafa",
+        border: "1.5px solid #0a0a0a",
+        borderRadius: 0,
+        background: "#f5f3ee",
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
         <div>
           <h3 style={{ margin: "0 0 4px", fontSize: 16 }}>Insert images</h3>
-          <div style={{ fontSize: 13, color: "#6e6e73" }}>
+          <div style={{ fontSize: 13, color: "#5c5852" }}>
             Keep exporting the placeholder deck, or review matches and apply real images.
           </div>
         </div>
@@ -1447,7 +1447,7 @@ function ImageInsertionPanel({
         </div>
       </div>
 
-      {panelBusy && <div style={{ marginTop: 8, fontSize: 12, color: "#6e6e73" }}>{panelBusy}...</div>}
+      {panelBusy && <div style={{ marginTop: 8, fontSize: 12, color: "#5c5852" }}>{panelBusy}...</div>}
 
       {plan && (
         <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
@@ -1463,13 +1463,13 @@ function ImageInsertionPanel({
                   gridTemplateColumns: "minmax(160px, 1fr) minmax(220px, 1.2fr)",
                   gap: 10,
                   padding: 10,
-                  border: "1px solid #ebebeb",
-                  borderRadius: 6,
-                  background: "#fff",
+                  border: "1.5px solid #0a0a0a",
+                  borderRadius: 0,
+                  background: "#f5f3ee",
                 }}
               >
                 <div>
-                  <div style={{ fontSize: 12, color: "#6e6e73" }}>Slide {slot.slide_idx + 1}</div>
+                  <div style={{ fontSize: 12, color: "#5c5852" }}>Slide {slot.slide_idx + 1}</div>
                   <div style={{ fontSize: 14, fontWeight: 600 }}>{slot.hint}</div>
                 </div>
                 <div style={{ display: "grid", gap: 8, position: "relative" }}>
@@ -1483,9 +1483,9 @@ function ImageInsertionPanel({
                       gap: 10,
                       width: "100%",
                       padding: "7px 9px",
-                      border: "1px solid #e0e0e0",
-                      borderRadius: 4,
-                      background: "#fff",
+                      border: "1.5px solid #0a0a0a",
+                      borderRadius: 0,
+                      background: "#f5f3ee",
                       fontFamily: "inherit",
                       fontSize: 13,
                       cursor: "pointer",
@@ -1495,7 +1495,7 @@ function ImageInsertionPanel({
                     <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {selectedAsset ? assetLabel(selectedAsset) : "No user image"}
                     </span>
-                    <span aria-hidden="true" style={{ color: "#6e6e73" }}>▾</span>
+                    <span aria-hidden="true" style={{ color: "#5c5852" }}>▾</span>
                   </button>
                   {openPickerSlot === slot.slot_id && (
                     <div
@@ -1511,10 +1511,10 @@ function ImageInsertionPanel({
                         gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))",
                         gap: 8,
                         padding: 10,
-                        border: "1px solid #e0e0e0",
-                        borderRadius: 8,
-                        background: "#fff",
-                        boxShadow: "0 8px 24px rgba(0, 0, 0, 0.1)",
+                        border: "1.5px solid #0a0a0a",
+                        borderRadius: 0,
+                        background: "#f5f3ee",
+                        boxShadow: "none",
                       }}
                     >
                       <button
@@ -1526,9 +1526,9 @@ function ImageInsertionPanel({
                         style={{
                           gridColumn: "1 / -1",
                           padding: 8,
-                          border: selectedAsset ? "1px solid #ebebeb" : "2px solid #c8c8c8",
-                          borderRadius: 6,
-                          background: selectedAsset ? "#fff" : "#f5f5f5",
+                          border: selectedAsset ? "1.5px solid #0a0a0a" : "2px solid #0a0a0a",
+                          borderRadius: 0,
+                          background: selectedAsset ? "#f5f3ee" : "#e8e3d8",
                           textAlign: "left",
                           fontFamily: "inherit",
                           cursor: "pointer",
@@ -1556,9 +1556,9 @@ function ImageInsertionPanel({
                               alignItems: "center",
                               minHeight: 72,
                               padding: 7,
-                              border: selected ? "2px solid #c8c8c8" : "1px solid #ebebeb",
-                              borderRadius: 6,
-                              background: selected ? "#f5f5f5" : "#fff",
+                              border: selected ? "2px solid #0a0a0a" : "1.5px solid #0a0a0a",
+                              borderRadius: 0,
+                              background: selected ? "#e8e3d8" : "#f5f3ee",
                               cursor: "pointer",
                               textAlign: "left",
                               fontFamily: "inherit",
@@ -1572,9 +1572,9 @@ function ImageInsertionPanel({
                                 width: 70,
                                 height: 54,
                                 objectFit: "cover",
-                                borderRadius: 4,
-                                border: "1px solid #ebebeb",
-                                background: "#fafafa",
+                                borderRadius: 0,
+                                border: "1px solid #0a0a0a",
+                                background: "#e8e3d8",
                               }}
                             />
                             <span
@@ -1601,8 +1601,8 @@ function ImageInsertionPanel({
                         width: 96,
                         height: 54,
                         objectFit: "cover",
-                        border: "1px solid #ebebeb",
-                        borderRadius: 4,
+                        border: "1.5px solid #0a0a0a",
+                        borderRadius: 0,
                       }}
                     />
                   )}
@@ -1631,9 +1631,9 @@ function ImageInsertionPanel({
                           style={{
                             gridColumn: "1 / -1",
                             padding: "6px 8px",
-                            border: "1px solid #e0e0e0",
-                            borderRadius: 4,
-                            background: "#f5f5f5",
+                            border: "1px solid #0a0a0a",
+                            borderRadius: 0,
+                            background: "#e8e3d8",
                             color: "#1c1c1e",
                             fontSize: 12,
                           }}
@@ -1720,12 +1720,12 @@ function MasterpieceManager({
   }
 
   return (
-    <section style={{ border: "1px solid #ebebeb", borderRadius: 6, background: "#fff", padding: 16 }}>
+    <section style={{ border: "1.5px solid #0a0a0a", borderRadius: 0, background: "#f5f3ee", padding: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
         <div>
           <h3 style={{ margin: 0 }}>Masterpieces</h3>
           {playgroundOpen && laneCount != null && (
-            <div style={{ color: "#6e6e73", fontSize: 13, marginTop: 4 }}>
+            <div style={{ color: "#5c5852", fontSize: 13, marginTop: 4 }}>
               Playground lanes: {laneCount}/{maxLanes}
             </div>
           )}
@@ -1741,7 +1741,7 @@ function MasterpieceManager({
 
       <div style={{ display: "grid", gap: 10, marginTop: 14 }}>
         {items.length === 0 && (
-          <div style={{ color: "#6e6e73", padding: 12, border: "1px solid #ebebeb", borderRadius: 6 }}>
+          <div style={{ color: "#5c5852", padding: 12, border: "1.5px solid #0a0a0a", borderRadius: 0 }}>
             No saved masterpiece prompts yet.
           </div>
         )}
@@ -1749,15 +1749,15 @@ function MasterpieceManager({
           <div
             key={item.id}
             style={{
-              border: "1px solid #ebebeb",
-              borderRadius: 6,
+              border: "1.5px solid #0a0a0a",
+              borderRadius: 0,
               padding: 12,
-              background: "#fafafa",
+              background: "#f5f3ee",
             }}
           >
             <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{item.prompt}</div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginTop: 10 }}>
-              <span style={{ color: "#6e6e73", fontSize: 12 }}>
+              <span style={{ color: "#5c5852", fontSize: 12 }}>
                 {new Date(item.created_at).toLocaleString()}
               </span>
               <div style={{ display: "flex", gap: 8 }}>
@@ -2331,13 +2331,13 @@ function CreateForm({
           </div>
           <div
             style={{
-              border: "1px solid #ebebeb",
-              borderRadius: 8,
+              border: "1.5px solid #0a0a0a",
+              borderRadius: 0,
               overflow: "hidden",
             }}
           >
             {visibleRecentDecks.length === 0 && (
-              <div style={{ padding: "12px 14px", color: "#6e6e73", fontSize: 13 }}>
+              <div style={{ padding: "12px 14px", color: "#5c5852", fontSize: 13 }}>
                 No decks match "{recentSearch.trim()}".
               </div>
             )}
@@ -2348,8 +2348,8 @@ function CreateForm({
                   display: "flex",
                   alignItems: "stretch",
                   width: "100%",
-                  background: "#fff",
-                  borderBottom: idx === visibleRecentDecks.length - 1 ? "none" : "1px solid #f0f0f0",
+                  background: "#f5f3ee",
+                  borderBottom: idx === visibleRecentDecks.length - 1 ? "none" : "1px solid #0a0a0a",
                 }}
               >
                 <button
@@ -2360,7 +2360,7 @@ function CreateForm({
                     minWidth: 0,
                     textAlign: "left",
                     padding: "10px 14px",
-                    background: "#fff",
+                    background: "#f5f3ee",
                     border: "none",
                     cursor: busy || deletingDeckId ? "default" : "pointer",
                     fontFamily: "inherit",
@@ -2368,10 +2368,10 @@ function CreateForm({
                     opacity: busy || deletingDeckId ? 0.6 : 1,
                   }}
                   onMouseEnter={(e) => {
-                    if (!busy && !deletingDeckId) e.currentTarget.style.background = "#f5f5f5";
+                    if (!busy && !deletingDeckId) e.currentTarget.style.background = "#e8e3d8";
                   }}
                   onMouseLeave={(e) => {
-                    e.currentTarget.style.background = "#fff";
+                    e.currentTarget.style.background = "#f5f3ee";
                   }}
                 >
                   <div
@@ -2385,22 +2385,21 @@ function CreateForm({
                     {d.deck_name || d.thread_id}
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-                    <code style={{ fontSize: 11, color: "#aeaeb2" }}>{d.thread_id}</code>
+                    <code style={{ fontSize: 11, color: "#948e83" }}>{d.thread_id}</code>
                     {d.stage && (
                       <span
                         style={{
                           fontSize: 10,
-                          color: "#6e6e73",
-                          background: "#f5f5f5",
+                          color: "#5c5852",
+                          background: "transparent",
                           padding: "1px 5px",
-                          borderRadius: 4,
                         }}
                       >
                         {d.stage}
                       </span>
                     )}
                     {d.created_at && (
-                      <span style={{ fontSize: 11, color: "#aeaeb2" }}>
+                      <span style={{ fontSize: 11, color: "#948e83" }}>
                         {recentDeckDateText(d.created_at)}
                       </span>
                     )}
@@ -2413,9 +2412,9 @@ function CreateForm({
                   style={{
                     flex: "0 0 auto",
                     border: "none",
-                    borderLeft: "1px solid #f0f0f0",
-                    background: "#fff",
-                    color: "#b91c1c",
+                    borderLeft: "1px solid #0a0a0a",
+                    background: "#f5f3ee",
+                    color: "#8b1a1a",
                     cursor: busy || deletingDeckId ? "default" : "pointer",
                     fontFamily: "inherit",
                     fontSize: 13,
@@ -2435,7 +2434,7 @@ function CreateForm({
               justifyContent: "space-between",
               gap: 12,
               marginTop: 10,
-              color: "#6e6e73",
+              color: "#5c5852",
               fontSize: 12,
             }}
           >
