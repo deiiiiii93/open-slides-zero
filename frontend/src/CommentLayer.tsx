@@ -71,8 +71,8 @@ export function CommentLayer({ width, height, onSubmit }: Props) {
           style={{
             position: "absolute",
             ...live,
-            border: "2px dashed #2563eb",
-            background: "rgba(37,99,235,0.1)",
+            border: "2px dashed #0a0a0a",
+            background: "rgba(10,10,10,0.06)",
             pointerEvents: "none",
           }}
         />
@@ -85,8 +85,8 @@ export function CommentLayer({ width, height, onSubmit }: Props) {
             top: `${pendingBox.y * 100}%`,
             width: `${pendingBox.w * 100}%`,
             height: `${pendingBox.h * 100}%`,
-            border: "2px solid #2563eb",
-            background: "rgba(37,99,235,0.08)",
+            border: "2px solid #0a0a0a",
+            background: "rgba(10,10,10,0.05)",
             display: "flex",
             alignItems: "flex-end",
             justifyContent: "center",
@@ -94,13 +94,14 @@ export function CommentLayer({ width, height, onSubmit }: Props) {
         >
           <div
             style={{
-              background: "white",
-              padding: 6,
-              border: "1px solid #e5e5e5",
-              borderRadius: 4,
+              position: "absolute",
+              background: "#f5f3ee",
+              padding: 8,
+              border: "1.5px solid #0a0a0a",
+              borderRadius: 0,
               display: "flex",
-              gap: 4,
-              minWidth: 220,
+              gap: 6,
+              alignItems: "center",
             }}
             onMouseDown={(e) => e.stopPropagation()}
           >
@@ -109,13 +110,33 @@ export function CommentLayer({ width, height, onSubmit }: Props) {
               placeholder="Your comment…"
               value={text}
               onChange={(e) => setText(e.target.value)}
-              style={{ flex: 1, border: "1px solid #e5e5e5", padding: 4 }}
+              style={{
+                border: "1px solid #0a0a0a",
+                borderRadius: 0,
+                padding: 6,
+                fontSize: 13,
+                color: "#1c1c1e",
+                background: "#e8e3d8",
+                minWidth: 240,
+              }}
             />
             <button
               onClick={() => {
                 if (text.trim()) onSubmit(text.trim(), pendingBox);
                 setPendingBox(null);
                 setText("");
+              }}
+              style={{
+                border: "1.5px solid #0a0a0a",
+                borderRadius: 0,
+                background: "#0a0a0a",
+                color: "#f5f3ee",
+                padding: "6px 12px",
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: 1.4,
+                textTransform: "uppercase",
+                cursor: "pointer",
               }}
             >
               Send
@@ -124,6 +145,18 @@ export function CommentLayer({ width, height, onSubmit }: Props) {
               onClick={() => {
                 setPendingBox(null);
                 setText("");
+              }}
+              style={{
+                border: "1.5px solid #0a0a0a",
+                borderRadius: 0,
+                background: "#f5f3ee",
+                color: "#0a0a0a",
+                padding: "6px 10px",
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: 1.4,
+                textTransform: "uppercase",
+                cursor: "pointer",
               }}
             >
               ✕
