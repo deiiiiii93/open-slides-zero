@@ -639,10 +639,13 @@ export function App() {
   const imagePlan = deck.values?.image_insertion_plan as ImageInsertionPlan | undefined;
   const imageAssets = (deck.values?.image_assets as ImageAsset[] | undefined) ?? [];
   const imageInsertionStatus = deck.values?.image_insertion_status as string | undefined;
+  // Backend resets image_insertion_plan to {} after a regenerate-from-stage
+  // rewind, and {} is truthy — so test for actual content, not just presence.
+  const hasImagePlan = Boolean(imagePlan && Object.keys(imagePlan).length > 0);
   const showImageInsertion =
     readyReviewEnabled &&
     hasSlides &&
-    (imageInsertionStatus !== "unavailable" || Boolean(imagePlan) || imageAssets.length > 0);
+    (imageInsertionStatus !== "unavailable" || hasImagePlan || imageAssets.length > 0);
 
   return (
     <div style={{ fontFamily: "Georgia, serif", padding: 16, maxWidth: 1520, margin: "0 auto" }}>
@@ -1235,9 +1238,9 @@ function ImageInsertionPanel({
   const [openPickerSlot, setOpenPickerSlot] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!plan) return;
     // After a regenerate-from-stage rewind, image_insertion_plan is cleared
-    // to {} server-side, so the typed fields may be undefined here.
+    // to {} server-side (truthy), so guard on real content, not presence.
+    if (!plan || Object.keys(plan).length === 0) return;
     const mappings =
       (plan.applied_mappings?.length ? plan.applied_mappings : plan.mappings) ?? [];
     setSelectedBySlot(
