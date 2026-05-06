@@ -789,7 +789,7 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
                             border: "1px solid #cfc8b9",
                             borderRadius: 6,
                             padding: "6px 8px",
-                            background: "#fff",
+                            background: "#f5f3ee",
                           }}
                         >
                           <option value="">Default routing</option>
@@ -818,7 +818,7 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
                             border: "1px solid #cfc8b9",
                             borderRadius: 6,
                             padding: "6px 8px",
-                            background: "#fff",
+                            background: "#f5f3ee",
                           }}
                         >
                           <option value="">Provider default</option>
@@ -1067,7 +1067,7 @@ function LaneDetail({
             </div>
           )}
           {lane.creator_prompt && (
-            <div style={{ color: "#374151", fontSize: 13, marginTop: 8, whiteSpace: "pre-wrap" }}>
+            <div style={{ color: "#1c1c1e", fontSize: 13, marginTop: 8, whiteSpace: "pre-wrap" }}>
               {lane.creator_prompt}
             </div>
           )}
@@ -1318,7 +1318,7 @@ function ArenaLane({ lane, slideIdx }: { lane: PlaygroundLane; slideIdx: number 
             height: frameHeight,
             overflow: "hidden",
             background: "white",
-            border: `${frameBorder}px solid #111`,
+            border: `${frameBorder}px solid #0a0a0a`,
             boxSizing: "border-box",
           }}
         >
