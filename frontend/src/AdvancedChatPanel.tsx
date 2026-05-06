@@ -138,10 +138,10 @@ function ChoiceGrid({
                 gap: 3,
                 minHeight: 74,
                 padding: "8px 9px",
-                border: isQueued ? "1px solid #93c5fd" : "1px solid #cbd5e1",
-                borderRadius: 6,
-                background: isQueued ? "#eff6ff" : "#f8fafc",
-                color: "#0f172a",
+                border: isQueued ? "1.5px solid #0a0a0a" : "1px solid #0a0a0a",
+                borderRadius: 0,
+                background: isQueued ? "#e8e3d8" : "#f5f3ee",
+                color: "#1c1c1e",
                 cursor: isQueued ? "default" : "pointer",
                 fontFamily: "inherit",
                 fontSize: 12,
@@ -152,7 +152,7 @@ function ChoiceGrid({
                 {isQueued ? `Queued: ${choice.label}` : choice.label}
               </span>
               {choice.description && (
-                <span style={{ color: "#475569", lineHeight: 1.25 }}>
+                <span style={{ color: "#5c5852", lineHeight: 1.25 }}>
                   {choice.description}
                 </span>
               )}
@@ -265,16 +265,16 @@ export function AdvancedChatPanel({
     >
       <div
         style={{
-          border: "1px solid #dbe4ef",
-          borderRadius: 8,
-          background: "#fff",
+          border: "1.5px solid #0a0a0a",
+          borderRadius: 0,
+          background: "#f5f3ee",
           overflow: "hidden",
         }}
       >
         <div
           style={{
             padding: "10px 12px",
-            borderBottom: "1px solid #e5e7eb",
+            borderBottom: "1px solid #0a0a0a",
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
@@ -282,7 +282,7 @@ export function AdvancedChatPanel({
           }}
         >
           <h3 style={{ margin: 0, fontSize: 16 }}>Advanced planning chat</h3>
-          <span style={{ fontSize: 12, color: "#64748b" }}>
+          <span style={{ fontSize: 12, color: "#5c5852" }}>
             {messages.length} message{messages.length === 1 ? "" : "s"}
           </span>
         </div>
@@ -295,7 +295,7 @@ export function AdvancedChatPanel({
             padding: 12,
             display: "grid",
             gap: 10,
-            background: "#f8fafc",
+            background: "#e8e3d8",
             overflowAnchor: "none",
           }}
         >
@@ -305,10 +305,10 @@ export function AdvancedChatPanel({
                 justifySelf: "start",
                 maxWidth: "84%",
                 padding: "9px 11px",
-                border: "1px solid #e5e7eb",
-                borderRadius: 8,
-                background: "#fff",
-                color: "#111827",
+                border: "1px solid #0a0a0a",
+                borderRadius: 0,
+                background: "#f5f3ee",
+                color: "#1c1c1e",
                 fontSize: 13,
               }}
             >
@@ -336,10 +336,10 @@ export function AdvancedChatPanel({
                   justifySelf: isUser ? "end" : "start",
                   maxWidth: "84%",
                   padding: "9px 11px",
-                  border: isUser ? "1px solid #bfdbfe" : "1px solid #e5e7eb",
-                  borderRadius: 8,
-                  background: isUser ? "#eff6ff" : "#fff",
-                  color: "#111827",
+                  border: isUser ? "1.5px solid #0a0a0a" : "1px solid #0a0a0a",
+                  borderRadius: 0,
+                  background: isUser ? "#e8e3d8" : "#f5f3ee",
+                  color: "#1c1c1e",
                   fontSize: 13,
                   whiteSpace: isUser ? "pre-wrap" : undefined,
                 }}
@@ -361,9 +361,9 @@ export function AdvancedChatPanel({
                 justifySelf: "start",
                 maxWidth: "84%",
                 padding: "9px 11px",
-                border: "1px solid #cbd5e1",
-                borderRadius: 8,
-                background: "#fff",
+                border: "1px solid #0a0a0a",
+                borderRadius: 0,
+                background: "#f5f3ee",
                 fontSize: 13,
               }}
             >
@@ -387,8 +387,8 @@ export function AdvancedChatPanel({
             gridTemplateColumns: "minmax(0, 1fr) auto",
             gap: 8,
             padding: 10,
-            borderTop: "1px solid #e5e7eb",
-            background: "#fff",
+            borderTop: "1px solid #0a0a0a",
+            background: "#f5f3ee",
           }}
         >
           <textarea
@@ -403,8 +403,13 @@ export function AdvancedChatPanel({
               maxHeight: 120,
               fontFamily: "inherit",
               fontSize: 14,
-              padding: "7px 8px",
+              padding: "10px 12px",
               boxSizing: "border-box",
+              border: "1.5px solid #0a0a0a",
+              borderRadius: 0,
+              background: "#e8e3d8",
+              color: "#1c1c1e",
+              lineHeight: 1.4,
             }}
           />
           <button type="submit" disabled={busy || !message.trim()}>
@@ -415,16 +420,16 @@ export function AdvancedChatPanel({
 
       <aside
         style={{
-          border: "1px solid #e5e7eb",
-          borderRadius: 8,
-          background: "#fff",
+          border: "1.5px solid #0a0a0a",
+          borderRadius: 0,
+          background: "#f5f3ee",
           overflow: "hidden",
         }}
       >
         <div
           style={{
             padding: "10px 12px",
-            borderBottom: "1px solid #e5e7eb",
+            borderBottom: "1px solid #0a0a0a",
             display: "flex",
             justifyContent: "space-between",
             gap: 10,
@@ -435,7 +440,7 @@ export function AdvancedChatPanel({
             <h3 style={{ margin: 0, fontSize: 16 }}>Current draft</h3>
             <div
               style={{
-                color: "#64748b",
+                color: "#5c5852",
                 fontSize: 12,
                 overflow: "hidden",
                 textOverflow: "ellipsis",
@@ -459,14 +464,14 @@ export function AdvancedChatPanel({
             maxHeight: 574,
             overflowY: "auto",
             padding: 12,
-            background: "#fafafa",
+            background: "#e8e3d8",
             fontSize: 13,
           }}
         >
           {draftPreview ? (
             <Markdown>{draftPreview}</Markdown>
           ) : (
-            <div style={{ color: "#64748b" }}>No draft yet.</div>
+            <div style={{ color: "#5c5852" }}>No draft yet.</div>
           )}
         </div>
       </aside>
