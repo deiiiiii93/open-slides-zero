@@ -51,6 +51,31 @@ type PackageIndexRow = {
   slideIndexHref: string;
   pngsHref: string;
   pptxHref: string;
+  fontPackageHref?: string;
+};
+
+type FontResourceKind = "stylesheet" | "import" | "font-file";
+
+type FontResource = {
+  kind: FontResourceKind;
+  url: string;
+  slides: number[];
+};
+
+type FontPackageInfo = {
+  resources: FontResource[];
+  families: string[];
+};
+
+type PackagedFontAsset = {
+  url: string;
+  path?: string;
+  status: "saved" | "failed";
+  error?: string;
+};
+
+type PackagedCssAsset = PackagedFontAsset & {
+  kind: "stylesheet" | "import";
 };
 
 // ---------------- Shared helpers ----------------
@@ -122,6 +147,292 @@ function filenameFromContentDisposition(header: string | null): string | null {
   }
   const ascii = header.match(/filename=(?:"([^"]+)"|([^;]+))/i);
   return (ascii?.[1] || ascii?.[2] || "").trim() || null;
+}
+
+const GENERIC_FONT_FAMILIES = new Set([
+  "serif",
+  "sans-serif",
+  "monospace",
+  "cursive",
+  "fantasy",
+  "system-ui",
+  "ui-serif",
+  "ui-sans-serif",
+  "ui-monospace",
+  "ui-rounded",
+  "-apple-system",
+  "blinkmacsystemfont",
+]);
+
+function uniqueSorted(values: Iterable<string>): string[] {
+  return Array.from(new Set(Array.from(values).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+}
+
+function cleanCssString(value: string): string {
+  return value.trim().replace(/^['"]|['"]$/g, "").trim();
+}
+
+function normalizeExternalUrl(raw: string, base = window.location.href): string | null {
+  const value = cleanCssString(raw);
+  if (!value || value.startsWith("data:") || value.startsWith("#")) return null;
+  try {
+    const url = new URL(value, base);
+    if (url.protocol === "http:" || url.protocol === "https:") return url.href;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function isLikelyFontFileUrl(url: string): boolean {
+  return /\.(woff2?|ttf|otf|eot)(?:[?#]|$)/i.test(url);
+}
+
+function fontFileName(url: string, index: number): string {
+  try {
+    const parsed = new URL(url);
+    const name = sanitizeFileName(decodeURIComponent(parsed.pathname.split("/").pop() || ""));
+    if (name && /\.[a-z0-9]+$/i.test(name)) return `${pad(index, 3)}-${name}`;
+  } catch {
+    // Fall through to extension fallback.
+  }
+  const ext = url.match(/\.(woff2?|ttf|otf|eot)(?:[?#]|$)/i)?.[1] || "woff2";
+  return `${pad(index, 3)}-font.${ext}`;
+}
+
+function collectFontFamiliesFromHtml(html: string): string[] {
+  const families: string[] = [];
+  for (const match of html.matchAll(/font-family\s*:\s*([^;}]+)/gi)) {
+    const declaration = match[1].replace(/!important/gi, "");
+    for (const part of declaration.split(",")) {
+      const family = cleanCssString(part);
+      if (!family) continue;
+      const normalized = family.toLowerCase();
+      if (GENERIC_FONT_FAMILIES.has(normalized)) continue;
+      if (normalized.startsWith("var(")) continue;
+      families.push(family);
+    }
+  }
+  return families;
+}
+
+function collectFontPackageInfo(entries: Array<[number, string]>): FontPackageInfo {
+  const parser = new DOMParser();
+  const resourceMap = new Map<string, FontResource>();
+  const familySet = new Set<string>();
+
+  function addResource(kind: FontResourceKind, rawUrl: string, slideIdx: number, base?: string) {
+    const url = normalizeExternalUrl(rawUrl, base);
+    if (!url) return;
+    const key = `${kind}:${url}`;
+    const existing = resourceMap.get(key);
+    if (existing) {
+      if (!existing.slides.includes(slideIdx + 1)) existing.slides.push(slideIdx + 1);
+      return;
+    }
+    resourceMap.set(key, { kind, url, slides: [slideIdx + 1] });
+  }
+
+  for (const [slideIdx, html] of entries) {
+    for (const family of collectFontFamiliesFromHtml(html)) familySet.add(family);
+
+    const doc = parser.parseFromString(html, "text/html");
+    doc.querySelectorAll("link[href]").forEach((link) => {
+      const href = link.getAttribute("href") || "";
+      const rel = (link.getAttribute("rel") || "").toLowerCase();
+      if (rel.includes("stylesheet") || /fonts?/i.test(href) || /^https?:\/\//i.test(href) || href.startsWith("//")) {
+        addResource("stylesheet", href, slideIdx);
+      }
+    });
+
+    for (const match of html.matchAll(/@import\s+(?:url\(\s*)?["']?([^"')\s;]+)["']?\s*\)?/gi)) {
+      addResource("import", match[1], slideIdx);
+    }
+
+    for (const match of html.matchAll(/url\(\s*["']?([^"')]+)["']?\s*\)/gi)) {
+      const url = normalizeExternalUrl(match[1]);
+      if (url && isLikelyFontFileUrl(url)) addResource("font-file", url, slideIdx);
+    }
+  }
+
+  const resources = Array.from(resourceMap.values()).map((resource) => ({
+    ...resource,
+    slides: [...resource.slides].sort((a, b) => a - b),
+  }));
+  resources.sort((a, b) => a.url.localeCompare(b.url) || a.kind.localeCompare(b.kind));
+  return { resources, families: uniqueSorted(familySet) };
+}
+
+function hasFontPackage(info: FontPackageInfo): boolean {
+  return info.resources.length > 0;
+}
+
+function fetchWithTimeout(url: string, timeoutMs = 8000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { signal: controller.signal }).finally(() => window.clearTimeout(timer));
+}
+
+function cssFontUrls(css: string, baseUrl: string): string[] {
+  const urls: string[] = [];
+  for (const match of css.matchAll(/url\(\s*["']?([^"')]+)["']?\s*\)/gi)) {
+    const url = normalizeExternalUrl(match[1], baseUrl);
+    if (url && isLikelyFontFileUrl(url)) urls.push(url);
+  }
+  return uniqueSorted(urls);
+}
+
+function buildFontReadme(deckName: string, info: FontPackageInfo, cssAssets: PackagedCssAsset[], fontAssets: PackagedFontAsset[]): string {
+  const lines = [
+    `# ${deckName} font package`,
+    "",
+    "This folder was generated because the slide HTML references external font or stylesheet resources.",
+    "The editable PPTX uses font family names, but PowerPoint may substitute fonts that are not installed locally.",
+    "",
+    "Recommended workflow:",
+    "1. Install the saved font files in `files/` when present.",
+    "2. Open `font-links.html` to review the original web resources and local CSS copies.",
+    "3. Open the PPTX after installing fonts for the closest visual match.",
+    "",
+  ];
+  if (info.families.length) {
+    lines.push("## Font families found in slide CSS", "", ...info.families.map((family) => `- ${family}`), "");
+  }
+  lines.push("## External resources", "");
+  for (const resource of info.resources) {
+    lines.push(`- ${resource.kind} on slide(s) ${resource.slides.join(", ")}: ${resource.url}`);
+  }
+  lines.push("", "## Packaged CSS", "");
+  if (cssAssets.length) {
+    for (const asset of cssAssets) {
+      lines.push(`- ${asset.status}: ${asset.url}${asset.path ? ` -> ${asset.path}` : ""}${asset.error ? ` (${asset.error})` : ""}`);
+    }
+  } else {
+    lines.push("- None saved.");
+  }
+  lines.push("", "## Packaged font files", "");
+  if (fontAssets.length) {
+    for (const asset of fontAssets) {
+      lines.push(`- ${asset.status}: ${asset.url}${asset.path ? ` -> ${asset.path}` : ""}${asset.error ? ` (${asset.error})` : ""}`);
+    }
+  } else {
+    lines.push("- None saved. Some providers block browser downloads; use the external resource links above.");
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+function buildFontLinksHtml(deckName: string, info: FontPackageInfo, cssAssets: PackagedCssAsset[]): string {
+  const localLinks = cssAssets
+    .filter((asset) => asset.status === "saved" && asset.path)
+    .map((asset) => `  <link rel="stylesheet" href="${escapeAttr(asset.path!.replace(/^.*?font-package\//, ""))}" />`)
+    .join("\n");
+  const externalLinks = info.resources
+    .filter((resource) => resource.kind !== "font-file")
+    .map((resource) => `  <link rel="stylesheet" href="${escapeAttr(resource.url)}" />`)
+    .join("\n");
+  const families = info.families
+    .map((family) => `<p style="font-family:${escapeAttr(JSON.stringify(family))}, sans-serif">${escapeText(family)} - The quick brown fox jumps over 1234567890.</p>`)
+    .join("\n");
+  const resources = info.resources
+    .map((resource) => `<li><code>${escapeText(resource.kind)}</code> slide(s) ${escapeText(resource.slides.join(", "))}: <a href="${escapeAttr(resource.url)}">${escapeText(resource.url)}</a></li>`)
+    .join("\n");
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeText(deckName)} font package</title>
+${localLinks}
+${externalLinks}
+  <style>
+    body { margin: 0; padding: 24px; color: #111827; font-family: Georgia, serif; line-height: 1.45; }
+    h1 { margin: 0 0 12px; }
+    code { color: #475569; }
+    p { font-size: 22px; margin: 14px 0; }
+  </style>
+</head>
+<body>
+  <h1>${escapeText(deckName)} font package</h1>
+  <p style="font-size:14px">Install saved files from <code>files/</code> when present, then open the PPTX.</p>
+  <h2>Font family samples</h2>
+  ${families || "<p>No explicit font-family declarations found.</p>"}
+  <h2>External resources</h2>
+  <ul>${resources}</ul>
+</body>
+</html>
+`;
+}
+
+async function addFontPackageToZip(
+  zip: JSZip,
+  info: FontPackageInfo,
+  deckName: string,
+  folder = "",
+): Promise<string | null> {
+  if (!hasFontPackage(info)) return null;
+
+  const base = `${folder}font-package/`;
+  const cssAssets: PackagedCssAsset[] = [];
+  const fontAssets = new Map<string, PackagedFontAsset>();
+
+  async function saveFont(url: string, preferredIndex: number): Promise<string | null> {
+    const existing = fontAssets.get(url);
+    if (existing) return existing.path || null;
+    const path = `${base}files/${fontFileName(url, preferredIndex)}`;
+    try {
+      const response = await fetchWithTimeout(url);
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      const blob = await response.blob();
+      zip.file(path, blob);
+      fontAssets.set(url, { url, path, status: "saved" });
+      return path;
+    } catch (exc) {
+      fontAssets.set(url, { url, status: "failed", error: String(exc) });
+      return null;
+    }
+  }
+
+  let cssIndex = 0;
+  let fontIndex = 0;
+  for (const resource of info.resources) {
+    if (resource.kind === "font-file") {
+      fontIndex += 1;
+      await saveFont(resource.url, fontIndex);
+      continue;
+    }
+
+    cssIndex += 1;
+    const cssPath = `${base}css/${pad(cssIndex, 3)}-${resource.kind}.css`;
+    try {
+      const response = await fetchWithTimeout(resource.url);
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      let css = await response.text();
+      for (const fontUrl of cssFontUrls(css, resource.url)) {
+        fontIndex += 1;
+        const fontPath = await saveFont(fontUrl, fontIndex);
+        if (fontPath) {
+          css = css.split(fontUrl).join(`../files/${fontPath.split("/").pop()}`);
+        }
+      }
+      zip.file(cssPath, css);
+      cssAssets.push({ kind: resource.kind, url: resource.url, path: cssPath, status: "saved" });
+    } catch (exc) {
+      cssAssets.push({ kind: resource.kind, url: resource.url, status: "failed", error: String(exc) });
+    }
+  }
+
+  const fontAssetList = Array.from(fontAssets.values());
+  const manifest = {
+    deck_name: deckName,
+    resources: info.resources,
+    font_families: info.families,
+    packaged_css: cssAssets,
+    packaged_font_files: fontAssetList,
+  };
+  zip.file(`${base}font-manifest.json`, JSON.stringify(manifest, null, 2));
+  zip.file(`${base}README.md`, buildFontReadme(deckName, info, cssAssets, fontAssetList));
+  zip.file(`${base}font-links.html`, buildFontLinksHtml(deckName, info, cssAssets));
+  return `${base}font-links.html`;
 }
 
 async function responseErrorDetail(res: Response): Promise<string> {
@@ -1825,13 +2136,41 @@ export async function buildPptxArtifact(deck: DeckState, options: ExportNameOpti
 
 /** Main export function. */
 export async function exportPptx(deck: DeckState): Promise<void> {
-  const artifact = await buildPptxArtifact(deck);
+  const artifact = await buildPptxDownloadArtifact(deck);
   downloadBlob(artifact.blob, artifact.filename);
+}
+
+async function buildPptxDownloadArtifact(deck: DeckState): Promise<ExportArtifact> {
+  const pptx = await buildPptxArtifact(deck);
+  const entries = getSlideEntries(deck);
+  const fontPackage = collectFontPackageInfo(entries);
+  if (!hasFontPackage(fontPackage)) return pptx;
+
+  const deckName = getDeckName(deck);
+  const zip = new JSZip();
+  zip.file(pptx.filename, pptx.blob);
+  await addFontPackageToZip(zip, fontPackage, deckName);
+  zip.file(
+    "README.md",
+    [
+      `# ${deckName} PPTX export`,
+      "",
+      `- Editable deck: ${pptx.filename}`,
+      "- Font helper: font-package/font-links.html",
+      "- Install packaged fonts before opening the PPTX for the closest visual match.",
+      "",
+    ].join("\n"),
+  );
+  const blob = await zip.generateAsync({ type: "blob" });
+  return { filename: `${deckName}-pptx.zip`, blob };
 }
 
 function buildPackageIndexHtml(packageName: string, rows: PackageIndexRow[]): string {
   const items = rows
     .map((row) => {
+      const fontPackageLink = row.fontPackageHref
+        ? `<br />\n        <a href="${escapeAttr(row.fontPackageHref)}">Font package</a>`
+        : "";
       return `    <tr>
       <td><strong>${escapeText(row.laneName)}</strong><br /><code>${escapeText(row.laneId)}</code></td>
       <td>${escapeText(row.stage)}</td>
@@ -1839,7 +2178,7 @@ function buildPackageIndexHtml(packageName: string, rows: PackageIndexRow[]): st
         <a href="${escapeAttr(row.singleHtmlHref)}">Single HTML</a><br />
         <a href="${escapeAttr(row.slideIndexHref)}">Slide HTML index</a><br />
         <a href="${escapeAttr(row.pngsHref)}">PNG package</a><br />
-        <a href="${escapeAttr(row.pptxHref)}">PPTX</a>
+        <a href="${escapeAttr(row.pptxHref)}">PPTX</a>${fontPackageLink}
       </td>
       <td><pre>${escapeText(row.prompt || "Baseline lane")}</pre></td>
     </tr>`;
@@ -1904,6 +2243,12 @@ export async function buildPlaygroundLanesPackageArtifact(
     addHtmlSlidesToZip(zip, entries, getDeckName(lane.state), canvas, folder);
     zip.file(`${folder}${pngs.filename}`, pngs.blob);
     zip.file(`${folder}${pptx.filename}`, pptx.blob);
+    const fontPackageHref = await addFontPackageToZip(
+      zip,
+      collectFontPackageInfo(entries),
+      getDeckName(lane.state),
+      folder,
+    );
 
     rows.push({
       laneId: lane.lane_id,
@@ -1914,6 +2259,7 @@ export async function buildPlaygroundLanesPackageArtifact(
       slideIndexHref: `${folder}index.html`,
       pngsHref: `${folder}${pngs.filename}`,
       pptxHref: `${folder}${pptx.filename}`,
+      fontPackageHref: fontPackageHref ?? undefined,
     });
   }
 

@@ -18,3 +18,12 @@ CLAUDE.md
 .playwright-mcp/
 .claude/
 osz-*.png
+
+# Local deployment packaging and private server scripts.
+.dockerignore
+Dockerfile.backend
+compose.prod.yml
+deploy/
+frontend/Dockerfile
+frontend/nginx.conf
+scripts/

@@ -187,28 +187,34 @@ def test_canonical_font_weights_pass():
     assert not any(w.rule == "font_weight_offscale" for w in r.warnings)
 
 
-def test_external_stylesheet_link_errors():
+def test_external_stylesheet_link_warns_without_blocking():
     bad = GOOD_SLIDE.replace(
         "<head>",
         '<head><link rel="stylesheet" href="https://example.com/style.css">',
     )
     r = validate_slide_html(bad)
-    assert any(e.rule == "external_resource_link" for e in r.errors)
+    assert r.ok
+    assert not any(e.rule == "external_resource_link" for e in r.errors)
+    assert any(w.rule == "external_resource_link" for w in r.warnings)
 
 
-def test_google_fonts_link_errors():
+def test_google_fonts_link_warns_without_blocking():
     bad = GOOD_SLIDE.replace(
         "<head>",
         '<head><link href="https://fonts.googleapis.com/css?family=Inter">',
     )
     r = validate_slide_html(bad)
-    assert any(e.rule == "external_resource_link" for e in r.errors)
+    assert r.ok
+    assert not any(e.rule == "external_resource_link" for e in r.errors)
+    assert any(w.rule == "external_resource_link" for w in r.warnings)
 
 
-def test_at_import_errors():
+def test_at_import_warns_without_blocking():
     bad = GOOD_SLIDE.replace(
         "*{box-sizing:border-box}",
         "@import url('https://fonts.googleapis.com/css?family=Inter'); *{box-sizing:border-box}",
     )
     r = validate_slide_html(bad)
-    assert any(e.rule == "external_resource_link" for e in r.errors)
+    assert r.ok
+    assert not any(e.rule == "external_resource_link" for e in r.errors)
+    assert any(w.rule == "external_resource_link" for w in r.warnings)

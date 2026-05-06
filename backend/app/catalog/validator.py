@@ -257,12 +257,12 @@ def validate_slide_html(
         rel = (_attr_value(tag, "rel") or "").lower()
         href = (_attr_value(tag, "href") or "").lower()
         if rel == "stylesheet" or "fonts" in href or href.startswith(("http://", "https://", "//")):
-            errors.append(Issue("external_resource_link", "error",
-                                "Remove external <link> tags — slides must be self-contained."))
+            warnings.append(Issue("external_resource_link", "warning",
+                                  "External <link> resources may require network access or a companion font package."))
             break
     if re.search(r"@import\s+url", html, flags=re.I):
-        errors.append(Issue("external_resource_link", "error",
-                            "Remove @import url() — slides must be self-contained."))
+        warnings.append(Issue("external_resource_link", "warning",
+                              "External @import resources may require network access or a companion font package."))
 
     # Banned fonts (anti-slop)
     for pat in BANNED_FONT_PATTERNS:
