@@ -279,8 +279,8 @@ export function LayoutWireframe({
         height,
         background: "#f5f3ee",
         border: "1px solid #0a0a0a",
-        borderRadius: 3,
-        boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+        borderRadius: 0,
+        boxShadow: "none",
         flexShrink: 0,
       }}
     >

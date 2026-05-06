@@ -786,8 +786,8 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
                           style={{
                             width: "100%",
                             minHeight: 34,
-                            border: "1px solid #cfc8b9",
-                            borderRadius: 6,
+                            border: "1.5px solid #0a0a0a",
+                            borderRadius: 0,
                             padding: "6px 8px",
                             background: "#f5f3ee",
                           }}
@@ -815,8 +815,8 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
                           style={{
                             width: "100%",
                             minHeight: 34,
-                            border: "1px solid #cfc8b9",
-                            borderRadius: 6,
+                            border: "1.5px solid #0a0a0a",
+                            borderRadius: 0,
                             padding: "6px 8px",
                             background: "#f5f3ee",
                           }}
@@ -1090,7 +1090,7 @@ function LaneDetail({
                   background: "#f5f3ee",
                   border: "1.5px solid #0a0a0a",
                   borderRadius: 0,
-                  boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+                  boxShadow: "none",
                   zIndex: 100,
                   padding: "4px 0",
                 }}

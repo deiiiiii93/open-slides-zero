@@ -2319,7 +2319,7 @@ function CreateForm({
               marginBottom: 12,
             }}
           >
-            <h2 style={{ fontSize: 16, margin: 0, color: "#333" }}>Recent decks</h2>
+            <h2 style={{ fontSize: 16, margin: 0, color: "#0a0a0a" }}>Recent decks</h2>
             <input
               type="search"
               value={recentSearch}
