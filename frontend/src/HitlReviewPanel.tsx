@@ -140,16 +140,16 @@ export function OutlineStage({ outlineMd, title, onSubmit }: OutlineStageProps) 
   const [playground, setPlayground] = useState(false);
 
   return (
-    <div style={{ padding: 16, border: "1px solid #e5e5e5", borderRadius: 6 }}>
+    <div style={{ padding: 24, border: "1.5px solid #0a0a0a", borderRadius: 0, background: "#f5f3ee" }}>
       <h3>{title}</h3>
       <div
         style={{
-          background: "#fafafa",
+          background: "#e8e3d8",
           padding: 12,
           maxHeight: 460,
           overflow: "auto",
-          border: "1px solid #e5e5e5",
-          borderRadius: 4,
+          border: "1.5px solid #0a0a0a",
+          borderRadius: 0,
         }}
       >
         <Markdown>{outlineMd ?? ""}</Markdown>
@@ -192,7 +192,7 @@ export function StructureStage({
     catalog?.scenarios.find((s) => s.id === selectedScenarioId)?.structures ?? candidates ?? [];
 
   return (
-    <div style={{ padding: 16, border: "1px solid #e5e5e5", borderRadius: 6 }}>
+    <div style={{ padding: 24, border: "1.5px solid #0a0a0a", borderRadius: 0, background: "#f5f3ee" }}>
       <h3>{title}</h3>
       <label>
         Scenario:{" "}
@@ -215,15 +215,16 @@ export function StructureStage({
                 key={sid}
                 onClick={() => setSelectedStructureId(sid)}
                 style={{
-                  border: sid === selectedStructureId ? "2px solid #2563eb" : "1px solid #e5e5e5",
+                  border: sid === selectedStructureId ? "2px solid #0a0a0a" : "1px solid #948e83",
+                  borderRadius: 0,
+                  background: sid === selectedStructureId ? "#e8e3d8" : "#f5f3ee",
                   padding: 10,
                   textAlign: "left",
-                  background: "white",
                   cursor: "pointer",
                 }}
               >
                 <div style={{ fontWeight: 600 }}>{s?.name_en ?? sid}</div>
-                <div style={{ fontSize: 12, color: "#555" }}>{s?.description_en}</div>
+                <div style={{ fontSize: 12, color: "#5c5852" }}>{s?.description_en}</div>
               </button>
             );
           })}
@@ -283,7 +284,7 @@ export function StyleStage({
   const swatches = hexSwatches(visualStyle?.palette);
 
   return (
-    <div style={{ padding: 16, border: "1px solid #e5e5e5", borderRadius: 6 }}>
+    <div style={{ padding: 24, border: "1.5px solid #0a0a0a", borderRadius: 0, background: "#f5f3ee" }}>
       <h3>{title}</h3>
       {swatches.length > 0 && (
         <div
@@ -298,16 +299,16 @@ export function StyleStage({
             <div
               key={name}
               style={{
-                border: "1px solid #e5e5e5",
-                borderRadius: 6,
+                border: "1px solid #948e83",
+                borderRadius: 0,
                 overflow: "hidden",
-                background: "white",
+                background: "#f5f3ee",
               }}
             >
               <div style={{ height: 48, background: hex }} />
               <div style={{ padding: "6px 8px", fontSize: 11, lineHeight: 1.3 }}>
                 <div style={{ fontWeight: 600, textTransform: "capitalize" }}>{name}</div>
-                <code style={{ color: "#666", fontSize: 10 }}>{hex.toUpperCase()}</code>
+                <code style={{ color: "#5c5852", fontSize: 10 }}>{hex.toUpperCase()}</code>
               </div>
             </div>
           ))}
@@ -316,12 +317,12 @@ export function StyleStage({
 
       <div
         style={{
-          background: "#fafafa",
+          background: "#e8e3d8",
           padding: 12,
           maxHeight: 360,
           overflow: "auto",
-          border: "1px solid #e5e5e5",
-          borderRadius: 4,
+          border: "1.5px solid #0a0a0a",
+          borderRadius: 0,
         }}
       >
         <Markdown>{visualStyleMd ?? ""}</Markdown>
@@ -466,17 +467,16 @@ function LayoutPatternCard({
       style={{
         minWidth: 0,
         height: "100%",
-        border: current ? "1px solid #93c5fd" : "1px solid #d8dee8",
-        outline: selected ? "2px solid #2563eb" : "2px solid transparent",
-        outlineOffset: -2,
-        borderRadius: 6,
-        background: selected ? "#eff6ff" : "white",
+        border: current ? "1.5px solid #0a0a0a" : "1px solid #948e83",
+        outline: selected ? "2px solid #0a0a0a" : "2px solid transparent",
+        outlineOffset: 1,
+        borderRadius: 0,
+        background: selected ? "#e8e3d8" : "#f5f3ee",
         padding: 8,
         display: "grid",
         gap: 7,
         textAlign: "left",
         cursor: "pointer",
-        boxShadow: selected ? "0 8px 18px rgba(37, 99, 235, 0.12)" : "0 1px 2px rgba(15, 23, 42, 0.04)",
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "start" }}>
@@ -484,12 +484,15 @@ function LayoutPatternCard({
         <span
           style={{
             flexShrink: 0,
-            border: "1px solid #cbd5e1",
-            borderRadius: 999,
-            padding: "1px 6px",
+            background: current ? "#0a0a0a" : "transparent",
+            color: current ? "#f5f3ee" : "#5c5852",
+            border: "1px solid #0a0a0a",
+            borderRadius: 0,
+            padding: "3px 8px",
             fontSize: 10,
-            color: current ? "#1d4ed8" : "#475569",
-            background: current ? "#dbeafe" : "#f8fafc",
+            fontWeight: 700,
+            letterSpacing: 1.4,
+            textTransform: "uppercase" as const,
             lineHeight: 1.4,
           }}
         >
@@ -505,11 +508,11 @@ function LayoutPatternCard({
           aspectRatio="16:9"
         />
       </div>
-      <div style={{ fontSize: 11, color: "#334155", lineHeight: 1.35 }}>{info.bestFor}</div>
+      <div style={{ fontSize: 11, color: "#5c5852", lineHeight: 1.35 }}>{info.bestFor}</div>
       {info.caution && (
-        <div style={{ fontSize: 10, color: "#9a3412", lineHeight: 1.3 }}>{info.caution}</div>
+        <div style={{ fontSize: 10, color: "#8a5a14", lineHeight: 1.3 }}>{info.caution}</div>
       )}
-      <code style={{ fontSize: 10, color: "#64748b", whiteSpace: "normal", wordBreak: "break-word" }}>
+      <code style={{ fontSize: 10, color: "#948e83", whiteSpace: "normal", wordBreak: "break-word" }}>
         {patternId}
       </code>
     </button>
@@ -541,7 +544,7 @@ export function LayoutStage({
   }, [selectedVisualStylePresetId]);
 
   return (
-    <div style={{ padding: 16, border: "1px solid #e5e5e5", borderRadius: 6 }}>
+    <div style={{ padding: 24, border: "1.5px solid #0a0a0a", borderRadius: 0, background: "#f5f3ee" }}>
       <h3>{title}</h3>
       {visualPresets.length > 0 && (
         <div style={{ marginBottom: 14 }}>
@@ -560,7 +563,7 @@ export function LayoutStage({
               ))}
             </select>
           </label>
-          <div style={{ color: "#64748b", fontSize: 12, lineHeight: 1.45, marginTop: 6, maxWidth: 680 }}>
+          <div style={{ color: "#5c5852", fontSize: 12, lineHeight: 1.45, marginTop: 6, maxWidth: 680 }}>
             {selectedPreset?.description ??
               "Optional final visual preference appended directly to the HTML generation prompt."}
           </div>
@@ -605,14 +608,14 @@ export function LayoutStage({
             <div
               key={String(l.slide_idx)}
               style={{
-                border: "1px solid #e5e5e5",
+                border: "1.5px solid #0a0a0a",
                 padding: 12,
-                borderRadius: 6,
+                borderRadius: 0,
                 display: "grid",
                 gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))",
                 gap: 14,
                 alignItems: "start",
-                background: "#fff",
+                background: "#f5f3ee",
               }}
             >
               <div style={{ minWidth: 0 }}>
@@ -626,12 +629,12 @@ export function LayoutStage({
                 <div style={{ fontWeight: 600, lineHeight: 1.3, marginTop: 10 }}>
                   {slideIdx + 1}. {String(l.title)}
                 </div>
-                <div style={{ fontSize: 12, color: "#555", marginTop: 4 }}>
+                <div style={{ fontSize: 12, color: "#5c5852", marginTop: 4 }}>
                   AI selected <code>{currentPatternId}</code>
-                  <span style={{ color: "#999" }}> · {String(currentPattern.family)}</span>
+                  <span style={{ color: "#948e83" }}> · {String(currentPattern.family)}</span>
                 </div>
                 {overrides[slideIdx] && (
-                  <div style={{ fontSize: 12, color: "#1d4ed8", marginTop: 6 }}>
+                  <div style={{ fontSize: 12, color: "#0a0a0a", marginTop: 6 }}>
                     Override selected: <code>{overrides[slideIdx]}</code>
                   </div>
                 )}
@@ -658,7 +661,7 @@ export function LayoutStage({
                 >
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 700 }}>Choose layout</div>
-                    <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
+                    <div style={{ fontSize: 11, color: "#5c5852", marginTop: 2 }}>
                       Showing {preferredKinds.join(" / ")} layouts first. Pick the AI card to keep the original.
                     </div>
                   </div>
@@ -733,17 +736,17 @@ export function LayoutStage({
 
 export function BriefReview({ briefMd }: { briefMd?: string }) {
   return (
-    <section style={{ padding: 16, border: "1px solid #e5e5e5", borderRadius: 6 }}>
+    <section style={{ padding: 24, border: "1.5px solid #0a0a0a", borderRadius: 0, background: "#f5f3ee" }}>
       <h3>④ Consolidated brief</h3>
-      <p style={{ marginTop: 0, color: "#555" }}>
+      <p style={{ marginTop: 0, color: "#5c5852" }}>
         This is the pre-render merged brief. To change it, go back to structure, style, or layout and create a fork from there.
       </p>
       <div
         style={{
-          background: "#fafafa",
+          background: "#e8e3d8",
           padding: 12,
-          border: "1px solid #e5e5e5",
-          borderRadius: 4,
+          border: "1.5px solid #0a0a0a",
+          borderRadius: 0,
           maxHeight: 560,
           overflow: "auto",
         }}
@@ -765,9 +768,9 @@ export function HtmlStage({
   const rows = failedSlides ?? [];
 
   return (
-    <section style={{ padding: 16, border: "1px solid #e5e5e5", borderRadius: 6 }}>
+    <section style={{ padding: 24, border: "1.5px solid #0a0a0a", borderRadius: 0, background: "#f5f3ee" }}>
       <h3>{title}</h3>
-      <p style={{ marginTop: 0, color: "#555" }}>
+      <p style={{ marginTop: 0, color: "#5c5852" }}>
         Rendered {renderedCount ?? 0} of {expectedCount ?? 0} slides. The deck is paused until the failed slides are re-rendered successfully.
       </p>
       <div style={{ display: "grid", gap: 10 }}>
@@ -775,20 +778,20 @@ export function HtmlStage({
           <div
             key={String(row.slide_idx)}
             style={{
-              border: "1px solid #e5e5e5",
-              borderRadius: 6,
+              border: "1.5px solid #0a0a0a",
+              borderRadius: 0,
               padding: 12,
-              background: "#fafafa",
+              background: "#e8e3d8",
             }}
           >
             <div style={{ fontWeight: 600 }}>
               Slide {Number(row.slide_idx) + 1}
             </div>
-            <div style={{ fontSize: 12, color: "#555", marginTop: 4 }}>
+            <div style={{ fontSize: 12, color: "#5c5852", marginTop: 4 }}>
               {String(row.reason ?? "HTML generation failed")}
             </div>
             {row.finish_reason && (
-              <div style={{ fontSize: 11, color: "#777", marginTop: 4 }}>
+              <div style={{ fontSize: 11, color: "#948e83", marginTop: 4 }}>
                 finish_reason: <code>{String(row.finish_reason)}</code>
               </div>
             )}
