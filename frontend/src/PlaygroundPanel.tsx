@@ -670,15 +670,15 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
             justifyContent: "space-between",
             gap: 12,
             padding: 12,
-            border: "1px solid #e5e5e5",
-            borderRadius: 6,
-            background: "#fff",
+            border: "1.5px solid #0a0a0a",
+            borderRadius: 0,
+            background: "#f5f3ee",
             marginBottom: 12,
           }}
         >
           <div>
             <h3 style={{ margin: 0 }}>Creator playground</h3>
-            <div style={{ color: "#64748b", fontSize: 13, marginTop: 3 }}>
+            <div style={{ color: "#948e83", fontSize: 13, marginTop: 3 }}>
               {lanes.length}/{maxLanes} lanes
             </div>
           </div>
@@ -691,13 +691,35 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
             </button>
             <button
               onClick={() => setView("lanes")}
-              style={{ border: view === "lanes" ? "1px solid #2563eb" : "1px solid #e5e5e5" }}
+              style={{
+                padding: "8px 16px",
+                border: view === "lanes" ? "1.5px solid #0a0a0a" : "1px solid #0a0a0a",
+                borderRadius: 0,
+                background: view === "lanes" ? "#0a0a0a" : "#f5f3ee",
+                color: view === "lanes" ? "#f5f3ee" : "#0a0a0a",
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: 1.4,
+                textTransform: "uppercase",
+                cursor: "pointer",
+              }}
             >
               Lanes
             </button>
             <button
               onClick={() => setView("arena")}
-              style={{ border: view === "arena" ? "1px solid #2563eb" : "1px solid #e5e5e5" }}
+              style={{
+                padding: "8px 16px",
+                border: view === "arena" ? "1.5px solid #0a0a0a" : "1px solid #0a0a0a",
+                borderRadius: 0,
+                background: view === "arena" ? "#0a0a0a" : "#f5f3ee",
+                color: view === "arena" ? "#f5f3ee" : "#0a0a0a",
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: 1.4,
+                textTransform: "uppercase",
+                cursor: "pointer",
+              }}
             >
               Arena
             </button>
@@ -705,7 +727,7 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
         </div>
 
         {err && (
-          <div style={{ color: "crimson", padding: 8, border: "1px solid crimson", marginBottom: 8 }}>
+          <div style={{ color: "#8b1a1a", padding: 8, border: "1px solid #8b1a1a", marginBottom: 8 }}>
             {err}
           </div>
         )}
@@ -720,10 +742,10 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
           <>
             <div
               style={{
-                border: "1px solid #e5e5e5",
-                borderRadius: 6,
+                border: "1.5px solid #0a0a0a",
+                borderRadius: 0,
                 padding: 12,
-                background: "#fff",
+                background: "#f5f3ee",
                 marginBottom: 12,
               }}
             >
@@ -748,7 +770,7 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
                   return (
                     <div
                       key={stage}
-                      style={{ display: "grid", gap: 6, color: "#475569", fontSize: 12 }}
+                      style={{ display: "grid", gap: 6, color: "#5c5852", fontSize: 12 }}
                     >
                       <label style={{ display: "grid", gap: 4 }}>
                         <span>{stageOptions?.label ?? stage} model</span>
@@ -812,7 +834,7 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
                 })}
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
-                <span style={{ color: "#64748b", fontSize: 12 }}>
+                <span style={{ color: "#948e83", fontSize: 12 }}>
                   Blank lanes are allowed as a baseline.
                 </span>
                 <button
@@ -831,9 +853,12 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
                     key={lane.lane_id}
                     onClick={() => setActiveLaneId(lane.lane_id)}
                     style={{
-                      border: lane.lane_id === activeLane?.lane_id ? "1px solid #2563eb" : "1px solid #e5e5e5",
-                      background: lane.lane_id === activeLane?.lane_id ? "#eff6ff" : "#fff",
-                      color: "#111827",
+                      border: lane.lane_id === activeLane?.lane_id ? "1.5px solid #0a0a0a" : "1px solid #0a0a0a",
+                      borderRadius: 0,
+                      background: lane.lane_id === activeLane?.lane_id ? "#e8e3d8" : "#f5f3ee",
+                      color: "#0a0a0a",
+                      padding: 14,
+                      cursor: "pointer",
                     }}
                   >
                     {laneLabel(lane)}
@@ -859,7 +884,7 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
                 onExport={runLaneExport}
               />
             ) : (
-              <div style={{ padding: 16, border: "1px solid #e5e5e5", borderRadius: 6 }}>
+              <div style={{ padding: 16, border: "1.5px solid #0a0a0a", borderRadius: 0, background: "#f5f3ee" }}>
                 Create a lane to start exploring alternatives.
               </div>
             )}
@@ -969,11 +994,11 @@ function LaneDetail({
   const continueDisabled = busy && !taskError;
 
   return (
-    <div style={{ border: "1px solid #e5e5e5", borderRadius: 6, background: "#fff", padding: 12 }}>
+    <div style={{ border: "1.5px solid #0a0a0a", borderRadius: 0, background: "#f5f3ee", padding: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", marginBottom: 12 }}>
         <div style={{ minWidth: 0 }}>
           <h3 style={{ margin: 0 }}>{laneLabel(lane)}</h3>
-          <div style={{ color: "#64748b", fontSize: 12, marginTop: 4 }}>
+          <div style={{ color: "#948e83", fontSize: 12, marginTop: 4 }}>
             stage: <code>{stage}</code>
           </div>
           {modelOverrideEntries.length > 0 && (
@@ -982,14 +1007,27 @@ function LaneDetail({
                 <span
                   key={stage}
                   style={{
-                    border: "1px solid #dbeafe",
-                    borderRadius: 6,
-                    background: "#eff6ff",
-                    color: "#1e3a8a",
+                    border: "1px solid #0a0a0a",
+                    borderRadius: 0,
+                    background: "#e8e3d8",
+                    color: "#1c1c1e",
+                    padding: "8px 12px",
                     fontSize: 12,
-                    padding: "3px 6px",
+                    lineHeight: 1.55,
                   }}
                 >
+                  <div
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      letterSpacing: 1.4,
+                      textTransform: "uppercase",
+                      color: "#5c5852",
+                      marginBottom: 4,
+                    }}
+                  >
+                    Suggestion
+                  </div>
                   {modelOptions?.stages[stage]?.label ?? stage}: {modelLabel(modelOptions, modelId)}
                 </span>
               ))}
@@ -1001,14 +1039,27 @@ function LaneDetail({
                 <span
                   key={stage}
                   style={{
-                    border: "1px solid #e0e7ff",
-                    borderRadius: 6,
-                    background: "#eef2ff",
-                    color: "#3730a3",
+                    border: "1px solid #0a0a0a",
+                    borderRadius: 0,
+                    background: "#e8e3d8",
+                    color: "#1c1c1e",
+                    padding: "8px 12px",
                     fontSize: 12,
-                    padding: "3px 6px",
+                    lineHeight: 1.55,
                   }}
                 >
+                  <div
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      letterSpacing: 1.4,
+                      textTransform: "uppercase",
+                      color: "#5c5852",
+                      marginBottom: 4,
+                    }}
+                  >
+                    Refinement
+                  </div>
                   {modelOptions?.stages[stage]?.label ?? stage} effort:{" "}
                   {thinkingEffortLabel(modelOptions, effort)}
                 </span>
@@ -1036,9 +1087,9 @@ function LaneDetail({
                   top: "calc(100% + 4px)",
                   right: 0,
                   minWidth: 190,
-                  background: "#fff",
-                  border: "1px solid #e5e5e5",
-                  borderRadius: 6,
+                  background: "#f5f3ee",
+                  border: "1.5px solid #0a0a0a",
+                  borderRadius: 0,
                   boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
                   zIndex: 100,
                   padding: "4px 0",
@@ -1067,8 +1118,8 @@ function LaneDetail({
                       fontSize: 13,
                       fontFamily: "inherit",
                     }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f5f5f5")}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "#e8e3d8")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "#f5f3ee")}
                   >
                     {opt.label}
                   </button>
@@ -1091,7 +1142,7 @@ function LaneDetail({
         </div>
       </div>
 
-      {!state && <div style={{ color: "#64748b" }}>Lane state is loading.</div>}
+      {!state && <div style={{ color: "#948e83" }}>Lane state is loading.</div>}
 
       {gate?.gate === "style" && (
         <StyleStage
@@ -1130,13 +1181,13 @@ function LaneDetail({
       )}
 
       {taskError && (
-        <div style={{ color: "crimson", border: "1px solid crimson", borderRadius: 6, padding: 8, marginBottom: 12 }}>
+        <div style={{ color: "#8b1a1a", border: "1px solid #8b1a1a", borderRadius: 0, padding: 8, marginBottom: 12 }}>
           {taskError}
         </div>
       )}
 
       {state && !gate && stage !== "ready" && (
-        <div style={{ color: "#64748b", display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ color: "#948e83", display: "flex", alignItems: "center", gap: 10 }}>
           <span>
             {taskError
               ? "Lane stopped before the next step."
@@ -1204,22 +1255,26 @@ function ArenaView({
 
   if (lanes.length === 0) {
     return (
-      <div style={{ padding: 16, border: "1px solid #e5e5e5", borderRadius: 6 }}>
+      <div style={{ padding: 16, border: "1.5px solid #0a0a0a", borderRadius: 0, background: "#f5f3ee" }}>
         Create lanes before opening the arena.
       </div>
     );
   }
 
   return (
-    <div style={{ border: "1px solid #e5e5e5", borderRadius: 6, background: "#fff", padding: 12 }}>
+    <div style={{ border: "1.5px solid #0a0a0a", borderRadius: 0, background: "#f5f3ee", padding: 12 }}>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
         {slideOrder.map((idx) => (
           <button
             key={idx}
             onClick={() => onSelectSlide(idx)}
             style={{
-              border: idx === currentSlide ? "1px solid #2563eb" : "1px solid #e5e5e5",
-              background: idx === currentSlide ? "#eff6ff" : "#fff",
+              padding: "8px 12px",
+              border: idx === currentSlide ? "1.5px solid #0a0a0a" : "1px solid #0a0a0a",
+              borderRadius: 0,
+              background: idx === currentSlide ? "#e8e3d8" : "#f5f3ee",
+              color: "#0a0a0a",
+              cursor: "pointer",
             }}
           >
             Slide {idx + 1}
@@ -1249,10 +1304,10 @@ function ArenaLane({ lane, slideIdx }: { lane: PlaygroundLane; slideIdx: number 
   const frameHeight = baseH * scale + frameBorder * 2;
 
   return (
-    <div ref={cardRef} style={{ border: "1px solid #e5e5e5", borderRadius: 6, padding: 10, background: "#fafafa", minWidth: 0 }}>
+    <div ref={cardRef} style={{ border: "1.5px solid #0a0a0a", borderRadius: 0, padding: 10, background: "#f5f3ee", minWidth: 0 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
         <strong>{laneLabel(lane)}</strong>
-        <span style={{ color: "#64748b", fontSize: 12 }}>
+        <span style={{ color: "#948e83", fontSize: 12 }}>
           {state?.values?.current_stage ?? "pending"}
         </span>
       </div>
@@ -1277,7 +1332,7 @@ function ArenaLane({ lane, slideIdx }: { lane: PlaygroundLane; slideIdx: number 
           </div>
         </div>
       ) : (
-        <div style={{ height: 210, display: "grid", placeItems: "center", color: "#64748b", background: "#fff", border: "1px solid #e5e5e5" }}>
+        <div style={{ height: 210, display: "grid", placeItems: "center", color: "#948e83", background: "#f5f3ee", border: "1px solid #0a0a0a" }}>
           Slide {slideIdx + 1} not rendered
         </div>
       )}
