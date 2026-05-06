@@ -11,12 +11,60 @@ export function Markdown({ children, style, className }: Props) {
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          h1: (props) => <h1 style={{ fontSize: 20, marginTop: 12 }} {...props} />,
-          h2: (props) => <h2 style={{ fontSize: 16, marginTop: 10, borderBottom: "1px solid #eee", paddingBottom: 2 }} {...props} />,
-          h3: (props) => <h3 style={{ fontSize: 14, marginTop: 8 }} {...props} />,
+          h1: (props) => (
+            <h1
+              style={{
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontWeight: 700,
+                fontSize: 22,
+                marginTop: 14,
+                marginBottom: 8,
+                color: "#0a0a0a",
+                lineHeight: 1.15,
+              }}
+              {...props}
+            />
+          ),
+          h2: (props) => (
+            <h2
+              style={{
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontWeight: 700,
+                fontSize: 18,
+                marginTop: 12,
+                marginBottom: 6,
+                paddingBottom: 4,
+                borderBottom: "1px solid #0a0a0a",
+                color: "#0a0a0a",
+                lineHeight: 1.2,
+              }}
+              {...props}
+            />
+          ),
+          h3: (props) => (
+            <h3
+              style={{
+                fontFamily: "ui-sans-serif, -apple-system, sans-serif",
+                fontWeight: 700,
+                fontSize: 14,
+                marginTop: 10,
+                marginBottom: 4,
+                color: "#0a0a0a",
+              }}
+              {...props}
+            />
+          ),
           code: ({ children, ...rest }) => (
             <code
-              style={{ background: "#f3f4f6", padding: "1px 4px", borderRadius: 3, fontSize: "0.9em" }}
+              style={{
+                background: "#e8e3d8",
+                border: "1px solid #0a0a0a",
+                padding: "1px 4px",
+                borderRadius: 0,
+                fontSize: "0.9em",
+                color: "#1c1c1e",
+                fontFamily: "ui-monospace, 'SF Mono', monospace",
+              }}
               {...rest}
             >
               {children}
@@ -25,12 +73,15 @@ export function Markdown({ children, style, className }: Props) {
           pre: (props) => (
             <pre
               style={{
-                background: "#fafafa",
-                padding: 10,
-                border: "1px solid #eee",
-                borderRadius: 4,
+                background: "#e8e3d8",
+                padding: 12,
+                border: "1px solid #0a0a0a",
+                borderRadius: 0,
                 overflow: "auto",
                 fontSize: 12,
+                lineHeight: 1.45,
+                fontFamily: "ui-monospace, 'SF Mono', monospace",
+                color: "#1c1c1e",
               }}
               {...props}
             />
@@ -39,14 +90,37 @@ export function Markdown({ children, style, className }: Props) {
             <table style={{ borderCollapse: "collapse", margin: "8px 0" }} {...props} />
           ),
           th: (props) => (
-            <th style={{ border: "1px solid #e5e5e5", padding: "4px 8px", background: "#f9fafb" }} {...props} />
+            <th
+              style={{
+                border: "1px solid #0a0a0a",
+                background: "#e8e3d8",
+                padding: "5px 9px",
+                textAlign: "left",
+                fontWeight: 700,
+                color: "#0a0a0a",
+              }}
+              {...props}
+            />
           ),
           td: (props) => (
-            <td style={{ border: "1px solid #e5e5e5", padding: "4px 8px" }} {...props} />
+            <td
+              style={{
+                border: "1px solid #0a0a0a",
+                padding: "5px 9px",
+                color: "#1c1c1e",
+              }}
+              {...props}
+            />
           ),
           blockquote: (props) => (
             <blockquote
-              style={{ borderLeft: "3px solid #d1d5db", margin: "6px 0", paddingLeft: 10, color: "#555" }}
+              style={{
+                borderLeft: "2px solid #0a0a0a",
+                margin: "8px 0",
+                paddingLeft: 12,
+                color: "#5c5852",
+                fontStyle: "italic",
+              }}
               {...props}
             />
           ),
