@@ -444,7 +444,8 @@ textarea.osz-control {
   }
 
   .osz-create-hero h1 {
-    font-size: 28px;
+    font-size: 40px;
+    letter-spacing: -0.8px;
   }
 
   .runtime-config-primary,
@@ -458,4 +459,50 @@ textarea.osz-control {
     align-items: flex-start;
     flex-direction: column;
   }
+}
+
+/* === New Sumi-e utilities === */
+
+.osz-app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 28px;
+  border-bottom: 2px solid #0a0a0a;
+  background: #0a0a0a;
+  color: #f5f3ee;
+}
+
+.osz-app-header .osz-header-btn {
+  background: transparent;
+  color: #f5f3ee;
+  border-color: #f5f3ee;
+}
+
+.osz-app-header .osz-header-btn:hover:not(:disabled) {
+  background: #f5f3ee;
+  color: #0a0a0a;
+}
+
+.osz-app-header .osz-header-btn:disabled {
+  border-color: #5c5852;
+  color: #5c5852;
+}
+
+.osz-eyebrow {
+  font-family: ui-sans-serif, -apple-system, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: #5c5852;
+  line-height: 1.0;
+}
+
+.osz-rule {
+  border-top: 1px solid #0a0a0a;
+}
+
+.osz-rule-emphasis {
+  border-top: 2px solid #0a0a0a;
 }
