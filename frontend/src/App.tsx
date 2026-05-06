@@ -693,59 +693,59 @@ export function App() {
     (imageInsertionStatus !== "unavailable" || hasImagePlan || imageAssets.length > 0);
 
   return (
-    <div style={{ fontFamily: "Georgia, serif", padding: 16, maxWidth: 1520, margin: "0 auto" }}>
-      <header
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          padding: "10px 14px",
-          marginBottom: 14,
-          border: "1px solid #e5e5e5",
-          borderRadius: 8,
-          background: "#fff",
-        }}
-      >
+    <div style={{ padding: 16, maxWidth: 1520, margin: "0 auto" }}>
+      <header className="osz-app-header">
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <strong style={{ fontSize: 18 }}>Open Slides Zero</strong>
-          <span style={{ color: "#ccc" }}>·</span>
-          <span style={{ fontSize: 15, color: "#333", maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <strong
+            style={{
+              fontFamily: "'Playfair Display', Georgia, serif",
+              fontSize: 20,
+              fontWeight: 900,
+              letterSpacing: -0.3,
+            }}
+          >
+            Open Slides Zero
+          </strong>
+          <span style={{ color: "#948e83" }}>·</span>
+          <span
+            style={{
+              fontSize: 14,
+              color: "#f5f3ee",
+              maxWidth: 300,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
             {(deck.values?.deck_name as string) || deck.thread_id}
           </span>
-          <span style={{ color: "#ccc" }}>·</span>
-          <code style={{ color: "#999", fontSize: 12 }}>{deck.thread_id}</code>
-          <span style={{ color: "#ccc" }}>·</span>
-          <span style={{ fontSize: 13, color: "#555" }}>
-            stage: <code>{stage}</code>
+          <span style={{ color: "#948e83" }}>·</span>
+          <code style={{ color: "#cfc8b9", fontSize: 12, fontFamily: "ui-monospace, 'SF Mono', monospace" }}>
+            {deck.thread_id}
+          </code>
+          <span style={{ color: "#948e83" }}>·</span>
+          <span style={{ fontSize: 13, color: "#cfc8b9" }}>
+            stage: <code style={{ fontFamily: "ui-monospace, 'SF Mono', monospace" }}>{stage}</code>
           </span>
           {stage === "html" && expectedCount > 0 && renderedCount < expectedCount && (
-            <span style={{ fontSize: 13, color: "#64748b" }}>
+            <span style={{ fontSize: 13, color: "#cfc8b9" }}>
               rendered {renderedCount}/{expectedCount}
             </span>
           )}
           {busy && activeModel && (
-            <span style={{ fontSize: 12, color: "#64748b" }}>
-              model: <code>{activeModel}</code>
+            <span style={{ fontSize: 12, color: "#cfc8b9" }}>
+              model: <code style={{ fontFamily: "ui-monospace, 'SF Mono', monospace" }}>{activeModel}</code>
             </span>
           )}
           {busy && (
-            <span
-              style={{
-                marginLeft: 4,
-                padding: "2px 8px",
-                background: "#eff6ff",
-                color: "#2563eb",
-                border: "1px solid #bfdbfe",
-                borderRadius: 12,
-                fontSize: 12,
-              }}
-            >
-              ● streaming…
+            <span className="osz-status osz-status-busy" style={{ marginLeft: 4 }}>
+              ● streaming
             </span>
           )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, position: "relative" }}>
           <button
+            className="osz-header-btn"
             onClick={() => {
               setShowMasterpieces(false);
               setShowExport(false);
@@ -756,6 +756,7 @@ export function App() {
             Config
           </button>
           <button
+            className="osz-header-btn"
             onClick={() => {
               setShowExport(false);
               setShowHistory(false);
@@ -766,6 +767,7 @@ export function App() {
             Masterpieces
           </button>
           <button
+            className="osz-header-btn"
             onClick={() => {
               setShowMasterpieces(false);
               setShowExport(false);
@@ -781,6 +783,7 @@ export function App() {
           </button>
           <div style={{ position: "relative" }}>
             <button
+              className="osz-header-btn"
               disabled={!hasExportableSlides(deck) || exporting !== null}
               onClick={() => {
                 setShowMasterpieces(false);
@@ -798,10 +801,10 @@ export function App() {
                   top: "calc(100% + 4px)",
                   right: 0,
                   minWidth: 200,
-                  background: "#fff",
-                  border: "1px solid #e5e5e5",
-                  borderRadius: 6,
-                  boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+                  background: "#f5f3ee",
+                  border: "1.5px solid #0a0a0a",
+                  borderRadius: 0,
+                  boxShadow: "none",
                   zIndex: 100,
                   padding: "4px 0",
                 }}
@@ -845,8 +848,8 @@ export function App() {
                       fontSize: 13,
                       fontFamily: "inherit",
                     }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f5f5f5")}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "#e8e3d8")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                   >
                     {opt.label}
                   </button>
@@ -855,6 +858,7 @@ export function App() {
             )}
           </div>
           <button
+            className="osz-header-btn"
             disabled={busy || Boolean(deletingDeckId)}
             onClick={() =>
               void onDeleteDeck(
@@ -865,7 +869,7 @@ export function App() {
           >
             {deletingDeckId === deck.thread_id ? "Deleting…" : "Delete deck"}
           </button>
-          <button onClick={onNewDeck}>New deck</button>
+          <button className="osz-header-btn" onClick={onNewDeck}>New deck</button>
           {showHistory && (
             <div
               style={{
@@ -874,9 +878,9 @@ export function App() {
                 right: 0,
                 minWidth: 200,
                 background: "#fff",
-                border: "1px solid #e5e5e5",
+                border: "1px solid #ebebeb",
                 borderRadius: 6,
-                boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+                boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
                 zIndex: 100,
                 padding: "4px 0",
               }}
@@ -898,7 +902,7 @@ export function App() {
 
                 if (merged.size === 0) {
                   return (
-                    <div style={{ padding: "8px 12px", color: "#999", fontSize: 13 }}>
+                    <div style={{ padding: "8px 12px", color: "#aeaeb2", fontSize: 13 }}>
                       No history yet
                     </div>
                   );
@@ -939,9 +943,9 @@ export function App() {
                         {info.name}
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <code style={{ fontSize: 11, color: "#999" }}>{id}</code>
+                        <code style={{ fontSize: 11, color: "#aeaeb2" }}>{id}</code>
                         {info.stage && (
-                          <span style={{ fontSize: 10, color: "#64748b", background: "#f1f5f9", padding: "1px 4px", borderRadius: 4 }}>
+                          <span style={{ fontSize: 10, color: "#6e6e73", background: "#f5f5f5", padding: "1px 4px", borderRadius: 4 }}>
                             {info.stage}
                           </span>
                         )}
@@ -973,7 +977,7 @@ export function App() {
       </header>
 
       {err && (
-        <div style={{ color: "crimson", padding: 8, border: "1px solid crimson", marginBottom: 8 }}>
+        <div style={{ color: "#b42318", padding: 8, border: "1px solid #fecaca", borderRadius: 6, marginBottom: 8, background: "#fff5f5" }}>
           {err}
         </div>
       )}
@@ -1030,12 +1034,13 @@ export function App() {
                 gap: 12,
                 padding: 12,
                 marginBottom: 12,
-                border: "1px solid #e5e5e5",
+                border: "1px solid #ebebeb",
                 borderRadius: 6,
                 background: "#fff",
               }}
             >
               <button
+                className="osz-button"
                 disabled={reviewStepIndex <= 0}
                 onClick={() => setSelectedReviewStage(REVIEW_STAGES[reviewStepIndex - 1].id)}
               >
@@ -1047,9 +1052,9 @@ export function App() {
                     key={step.id}
                     onClick={() => setSelectedReviewStage(step.id)}
                     style={{
-                      border: step.id === selectedReviewStage ? "1px solid #2563eb" : "1px solid #e5e5e5",
-                      background: step.id === selectedReviewStage ? "#eff6ff" : "#fff",
-                      color: step.id === selectedReviewStage ? "#1d4ed8" : "#374151",
+                      border: step.id === selectedReviewStage ? "1px solid #c8c8c8" : "1px solid #ebebeb",
+                      background: step.id === selectedReviewStage ? "#f0f0f0" : "#fff",
+                      color: step.id === selectedReviewStage ? "#1c1c1e" : "#6e6e73",
                       padding: "4px 8px",
                       borderRadius: 999,
                       cursor: "pointer",
@@ -1061,6 +1066,7 @@ export function App() {
                 ))}
               </div>
               <button
+                className="osz-button"
                 disabled={reviewStepIndex >= REVIEW_STAGES.length - 1}
                 onClick={() => setSelectedReviewStage(REVIEW_STAGES[reviewStepIndex + 1].id)}
               >
@@ -1165,7 +1171,7 @@ export function App() {
 
               {!hasInterrupt && !hasSlides && outlineMd && (
                 <section
-                  style={{ padding: 12, border: "1px solid #e5e5e5", borderRadius: 6 }}
+                  style={{ padding: 12, border: "1px solid #ebebeb", borderRadius: 6 }}
                 >
                   <Markdown>{outlineMd}</Markdown>
                 </section>
@@ -1178,7 +1184,7 @@ export function App() {
                     style={{
                       marginTop: 8,
                       padding: 12,
-                      border: "1px solid #e5e5e5",
+                      border: "1px solid #ebebeb",
                       borderRadius: 6,
                     }}
                   >
@@ -1409,15 +1415,15 @@ function ImageInsertionPanel({
       style={{
         padding: 12,
         marginBottom: 12,
-        border: "1px solid #dbe4ef",
+        border: "1px solid #ebebeb",
         borderRadius: 8,
-        background: "#f8fafc",
+        background: "#fafafa",
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
         <div>
           <h3 style={{ margin: "0 0 4px", fontSize: 16 }}>Insert images</h3>
-          <div style={{ fontSize: 13, color: "#475569" }}>
+          <div style={{ fontSize: 13, color: "#6e6e73" }}>
             Keep exporting the placeholder deck, or review matches and apply real images.
           </div>
         </div>
@@ -1438,7 +1444,7 @@ function ImageInsertionPanel({
         </div>
       </div>
 
-      {panelBusy && <div style={{ marginTop: 8, fontSize: 12, color: "#2563eb" }}>{panelBusy}...</div>}
+      {panelBusy && <div style={{ marginTop: 8, fontSize: 12, color: "#6e6e73" }}>{panelBusy}...</div>}
 
       {plan && (
         <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
@@ -1454,13 +1460,13 @@ function ImageInsertionPanel({
                   gridTemplateColumns: "minmax(160px, 1fr) minmax(220px, 1.2fr)",
                   gap: 10,
                   padding: 10,
-                  border: "1px solid #e2e8f0",
+                  border: "1px solid #ebebeb",
                   borderRadius: 6,
                   background: "#fff",
                 }}
               >
                 <div>
-                  <div style={{ fontSize: 12, color: "#64748b" }}>Slide {slot.slide_idx + 1}</div>
+                  <div style={{ fontSize: 12, color: "#6e6e73" }}>Slide {slot.slide_idx + 1}</div>
                   <div style={{ fontSize: 14, fontWeight: 600 }}>{slot.hint}</div>
                 </div>
                 <div style={{ display: "grid", gap: 8, position: "relative" }}>
@@ -1474,7 +1480,7 @@ function ImageInsertionPanel({
                       gap: 10,
                       width: "100%",
                       padding: "7px 9px",
-                      border: "1px solid #94a3b8",
+                      border: "1px solid #e0e0e0",
                       borderRadius: 4,
                       background: "#fff",
                       fontFamily: "inherit",
@@ -1486,7 +1492,7 @@ function ImageInsertionPanel({
                     <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {selectedAsset ? assetLabel(selectedAsset) : "No user image"}
                     </span>
-                    <span aria-hidden="true" style={{ color: "#64748b" }}>▾</span>
+                    <span aria-hidden="true" style={{ color: "#6e6e73" }}>▾</span>
                   </button>
                   {openPickerSlot === slot.slot_id && (
                     <div
@@ -1502,10 +1508,10 @@ function ImageInsertionPanel({
                         gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))",
                         gap: 8,
                         padding: 10,
-                        border: "1px solid #cbd5e1",
+                        border: "1px solid #e0e0e0",
                         borderRadius: 8,
                         background: "#fff",
-                        boxShadow: "0 14px 36px rgba(15, 23, 42, 0.18)",
+                        boxShadow: "0 8px 24px rgba(0, 0, 0, 0.1)",
                       }}
                     >
                       <button
@@ -1517,9 +1523,9 @@ function ImageInsertionPanel({
                         style={{
                           gridColumn: "1 / -1",
                           padding: 8,
-                          border: selectedAsset ? "1px solid #e2e8f0" : "2px solid #2563eb",
+                          border: selectedAsset ? "1px solid #ebebeb" : "2px solid #c8c8c8",
                           borderRadius: 6,
-                          background: selectedAsset ? "#fff" : "#eff6ff",
+                          background: selectedAsset ? "#fff" : "#f5f5f5",
                           textAlign: "left",
                           fontFamily: "inherit",
                           cursor: "pointer",
@@ -1547,9 +1553,9 @@ function ImageInsertionPanel({
                               alignItems: "center",
                               minHeight: 72,
                               padding: 7,
-                              border: selected ? "2px solid #2563eb" : "1px solid #e2e8f0",
+                              border: selected ? "2px solid #c8c8c8" : "1px solid #ebebeb",
                               borderRadius: 6,
-                              background: selected ? "#eff6ff" : "#fff",
+                              background: selected ? "#f5f5f5" : "#fff",
                               cursor: "pointer",
                               textAlign: "left",
                               fontFamily: "inherit",
@@ -1564,8 +1570,8 @@ function ImageInsertionPanel({
                                 height: 54,
                                 objectFit: "cover",
                                 borderRadius: 4,
-                                border: "1px solid #e2e8f0",
-                                background: "#f8fafc",
+                                border: "1px solid #ebebeb",
+                                background: "#fafafa",
                               }}
                             />
                             <span
@@ -1573,7 +1579,7 @@ function ImageInsertionPanel({
                                 minWidth: 0,
                                 fontSize: 12,
                                 lineHeight: 1.25,
-                                color: "#0f172a",
+                                color: "#1c1c1e",
                                 overflowWrap: "anywhere",
                               }}
                             >
@@ -1592,7 +1598,7 @@ function ImageInsertionPanel({
                         width: 96,
                         height: 54,
                         objectFit: "cover",
-                        border: "1px solid #e2e8f0",
+                        border: "1px solid #ebebeb",
                         borderRadius: 4,
                       }}
                     />
@@ -1622,10 +1628,10 @@ function ImageInsertionPanel({
                           style={{
                             gridColumn: "1 / -1",
                             padding: "6px 8px",
-                            border: "1px solid #bfdbfe",
+                            border: "1px solid #e0e0e0",
                             borderRadius: 4,
-                            background: "#eff6ff",
-                            color: "#1d4ed8",
+                            background: "#f5f5f5",
+                            color: "#1c1c1e",
                             fontSize: 12,
                           }}
                         >
@@ -1711,28 +1717,28 @@ function MasterpieceManager({
   }
 
   return (
-    <section style={{ border: "1px solid #e5e5e5", borderRadius: 6, background: "#fff", padding: 16 }}>
+    <section style={{ border: "1px solid #ebebeb", borderRadius: 6, background: "#fff", padding: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
         <div>
           <h3 style={{ margin: 0 }}>Masterpieces</h3>
           {playgroundOpen && laneCount != null && (
-            <div style={{ color: "#64748b", fontSize: 13, marginTop: 4 }}>
+            <div style={{ color: "#6e6e73", fontSize: 13, marginTop: 4 }}>
               Playground lanes: {laneCount}/{maxLanes}
             </div>
           )}
         </div>
-        <button onClick={onClose}>Close</button>
+        <button className="osz-button" onClick={onClose}>Close</button>
       </div>
 
       {err && (
-        <div style={{ color: "crimson", padding: 8, border: "1px solid crimson", marginTop: 12 }}>
+        <div style={{ color: "#b42318", padding: 8, border: "1px solid #fecaca", borderRadius: 6, marginTop: 12, background: "#fff5f5" }}>
           {err}
         </div>
       )}
 
       <div style={{ display: "grid", gap: 10, marginTop: 14 }}>
         {items.length === 0 && (
-          <div style={{ color: "#64748b", padding: 12, border: "1px solid #e5e5e5", borderRadius: 6 }}>
+          <div style={{ color: "#6e6e73", padding: 12, border: "1px solid #ebebeb", borderRadius: 6 }}>
             No saved masterpiece prompts yet.
           </div>
         )}
@@ -1740,7 +1746,7 @@ function MasterpieceManager({
           <div
             key={item.id}
             style={{
-              border: "1px solid #e5e5e5",
+              border: "1px solid #ebebeb",
               borderRadius: 6,
               padding: 12,
               background: "#fafafa",
@@ -1748,7 +1754,7 @@ function MasterpieceManager({
           >
             <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{item.prompt}</div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginTop: 10 }}>
-              <span style={{ color: "#64748b", fontSize: 12 }}>
+              <span style={{ color: "#6e6e73", fontSize: 12 }}>
                 {new Date(item.created_at).toLocaleString()}
               </span>
               <div style={{ display: "flex", gap: 8 }}>
@@ -2321,13 +2327,13 @@ function CreateForm({
           </div>
           <div
             style={{
-              border: "1px solid #e5e5e5",
+              border: "1px solid #ebebeb",
               borderRadius: 8,
               overflow: "hidden",
             }}
           >
             {visibleRecentDecks.length === 0 && (
-              <div style={{ padding: "12px 14px", color: "#64748b", fontSize: 13 }}>
+              <div style={{ padding: "12px 14px", color: "#6e6e73", fontSize: 13 }}>
                 No decks match "{recentSearch.trim()}".
               </div>
             )}
@@ -2375,13 +2381,13 @@ function CreateForm({
                     {d.deck_name || d.thread_id}
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-                    <code style={{ fontSize: 11, color: "#999" }}>{d.thread_id}</code>
+                    <code style={{ fontSize: 11, color: "#aeaeb2" }}>{d.thread_id}</code>
                     {d.stage && (
                       <span
                         style={{
                           fontSize: 10,
-                          color: "#64748b",
-                          background: "#f1f5f9",
+                          color: "#6e6e73",
+                          background: "#f5f5f5",
                           padding: "1px 5px",
                           borderRadius: 4,
                         }}
@@ -2390,7 +2396,7 @@ function CreateForm({
                       </span>
                     )}
                     {d.created_at && (
-                      <span style={{ fontSize: 11, color: "#999" }}>
+                      <span style={{ fontSize: 11, color: "#aeaeb2" }}>
                         {recentDeckDateText(d.created_at)}
                       </span>
                     )}
@@ -2425,7 +2431,7 @@ function CreateForm({
               justifyContent: "space-between",
               gap: 12,
               marginTop: 10,
-              color: "#64748b",
+              color: "#6e6e73",
               fontSize: 12,
             }}
           >
