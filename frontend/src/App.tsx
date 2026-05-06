@@ -1052,13 +1052,16 @@ export function App() {
                     key={step.id}
                     onClick={() => setSelectedReviewStage(step.id)}
                     style={{
-                      border: step.id === selectedReviewStage ? "1px solid #c8c8c8" : "1px solid #ebebeb",
-                      background: step.id === selectedReviewStage ? "#f0f0f0" : "#fff",
-                      color: step.id === selectedReviewStage ? "#1c1c1e" : "#6e6e73",
-                      padding: "4px 8px",
-                      borderRadius: 999,
+                      padding: "5px 12px",
+                      border: "1px solid #0a0a0a",
+                      borderRadius: 0,
+                      background: step.id === selectedReviewStage ? "#0a0a0a" : "#f5f3ee",
+                      color: step.id === selectedReviewStage ? "#f5f3ee" : "#5c5852",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      letterSpacing: 1.4,
+                      textTransform: "uppercase",
                       cursor: "pointer",
-                      fontSize: 12,
                     }}
                   >
                     {idx + 1}. {step.label}
@@ -2053,6 +2056,7 @@ function CreateForm({
   return (
     <div className="osz-create-shell">
       <header className="osz-create-hero">
+        <div className="osz-eyebrow">— Compose a new deck</div>
         <h1>Open Slides Zero</h1>
         <p>
           Create a private deck from text, files, and image links. Bring your ZenMux key;
