@@ -39,7 +39,7 @@ export function DeckCanvas({
     [slideOrder, slides],
   );
 
-  const html = normalizeImagePlaceholders(slides[currentSlide] ?? pendingSlideHtml(baseW, baseH, currentSlide));
+  const html = normalizeImagePlaceholders(slides[currentSlide] ?? pendingSlideHtml(currentSlide));
 
   return (
     <div style={{ display: "flex", gap: 16 }}>
@@ -152,7 +152,7 @@ export function DeckCanvas({
   );
 }
 
-function pendingSlideHtml(width: number, height: number, slideIdx: number): string {
+function pendingSlideHtml(slideIdx: number): string {
   return `<!doctype html>
 <html>
 <head>
