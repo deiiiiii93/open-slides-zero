@@ -2,7 +2,37 @@
 // generating. Tokens are grouped by `tag` (outline / style / layout / html:N)
 // and rendered as streaming markdown once complete enough to be parseable.
 
+import { useEffect, useRef } from "react";
 import { Markdown } from "./Markdown";
+
+function StreamingPre({ text }: { text: string }) {
+  const ref = useRef<HTMLPreElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [text]);
+  return (
+    <pre
+      ref={ref}
+      style={{
+        background: "#0b1020",
+        color: "#cfc8b9",
+        padding: 12,
+        borderRadius: 0,
+        fontFamily: "ui-monospace, 'SF Mono', monospace",
+        fontSize: 11,
+        lineHeight: 1.45,
+        overflow: "auto",
+        margin: 0,
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-all",
+        maxHeight: 140,
+      }}
+    >
+      {text}
+    </pre>
+  );
+}
 
 type Props = {
   buffersByTag: Record<string, string>;
@@ -46,6 +76,12 @@ export function LiveStream({
   isActive: _isActive = false,
   maxHeight = "calc(100vh - 120px)",
 }: Props) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = containerRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [activeNode, activeSlide]);
+
   const tagsInOrder = ["advanced_chat", "propose_structure", "outline", "style", "layout"];
   const htmlTags = Object.keys(buffersByTag)
     .filter((t) => t.startsWith("html:"))
@@ -60,6 +96,7 @@ export function LiveStream({
 
   return (
     <div
+      ref={containerRef}
       style={{
         border: "1.5px solid #0a0a0a",
         borderRadius: 0,
@@ -286,24 +323,7 @@ export function LiveStream({
                         </div>
                       </div>
                     </div>
-                    <pre
-                      style={{
-                        background: "#0b1020",
-                        color: "#cfc8b9",
-                        padding: 12,
-                        borderRadius: 0,
-                        fontFamily: "ui-monospace, 'SF Mono', monospace",
-                        fontSize: 11,
-                        lineHeight: 1.45,
-                        overflow: "auto",
-                        margin: 0,
-                        whiteSpace: "pre-wrap",
-                        wordBreak: "break-all",
-                        maxHeight: 140,
-                      }}
-                    >
-                      {buf.slice(-300)}
-                    </pre>
+                    <StreamingPre text={buf.slice(-300)} />
                   </div>
                 );
               })}

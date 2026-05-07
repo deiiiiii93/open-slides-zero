@@ -54,21 +54,41 @@ export function Markdown({ children, style, className }: Props) {
               {...props}
             />
           ),
-          code: ({ children, ...rest }) => (
-            <code
+          code: ({ children, className, ...rest }) => {
+            const isBlock = typeof className === "string" && className.startsWith("language-");
+            if (isBlock) {
+              return (
+                <code className={className} {...rest}>
+                  {children}
+                </code>
+              );
+            }
+            return (
+              <code
+                style={{
+                  background: "#e8e3d8",
+                  border: "1px solid #0a0a0a",
+                  padding: "1px 4px",
+                  borderRadius: 0,
+                  fontSize: "0.9em",
+                  color: "#1c1c1e",
+                  fontFamily: "ui-monospace, 'SF Mono', monospace",
+                }}
+                {...rest}
+              >
+                {children}
+              </code>
+            );
+          },
+          a: (props) => (
+            <a
               style={{
-                background: "#e8e3d8",
-                border: "1px solid #0a0a0a",
-                padding: "1px 4px",
-                borderRadius: 0,
-                fontSize: "0.9em",
-                color: "#1c1c1e",
-                fontFamily: "ui-monospace, 'SF Mono', monospace",
+                color: "#0a0a0a",
+                textDecoration: "none",
+                borderBottom: "1px solid #0a0a0a",
               }}
-              {...rest}
-            >
-              {children}
-            </code>
+              {...props}
+            />
           ),
           pre: (props) => (
             <pre
