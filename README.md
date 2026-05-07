@@ -46,7 +46,7 @@ Full PNG export: [docs/images/bugs-2-fork](docs/images/bugs-2-fork)
 Frontend (Vite + React, :5174)
     | fetch -> /api/* (proxied)
     v
-FastAPI (:8765) -> app/api/{decks,hitl,comments,history,images,playground}
+FastAPI (:8765) -> app/api/{decks,hitl,comments,history,images,playground,shares}
     |
     v
 LangGraph StateGraph
@@ -120,6 +120,19 @@ hash. Decks, playground lanes, comments, image assets, history, and thread
 exports are readable only from the browser profile that created them. Clearing
 browser cookies loses access to anonymous decks.
 
+The browser also keeps a current-session deck list in `sessionStorage`. That
+list is only a convenience view for the active tab/session and is cleared when
+the browser session ends. The persistent "My history" deck list comes from the
+owner cookie above; users can access it again from the same browser profile as
+long as that cookie remains.
+
+Deck sharing is explicit and read-only by default. A share link exposes only the
+public deck snapshot needed to preview slides, such as the deck title, stage,
+aspect ratio, and rendered HTML slides. Runtime ZenMux keys are never included
+in share responses or forked state. Viewers who want to edit a shared deck must
+fork it into their own owner namespace and provide their own ZenMux key in the
+Config panel for any new generation or edit requests.
+
 Before publishing or opening a PR, verify that only the example env file is
 tracked:
 
@@ -161,6 +174,8 @@ backend/.venv/bin/python -c "import os; os.environ['ZENMUX_API_KEY']='probe'; fr
 7. Optionally insert images into placeholder slots: match uploaded/linked image
    assets, apply mappings, or generate missing slot images.
 8. Draw a box on any slide and leave a comment to trigger targeted edits.
+9. Share a ready deck with a read-only link, or open a shared deck and fork it
+   into your own history before editing.
 
 Creator Playground can branch from a shared outline into multiple lane threads,
 each with its own creator prompt, style/layout/html checkpoints, cutoff status,
@@ -173,6 +188,21 @@ browser. Remote HTTP(S) images are fetched through the backend `/images/proxy`
 endpoint so public image URLs can be embedded or rasterized same-origin; if a
 remote image cannot be loaded, export keeps going and uses an "Image
 unavailable" placeholder in that image slot.
+
+History has two browser-facing scopes:
+
+- Current session decks are tracked in `sessionStorage` so the UI can show only
+  decks created or opened in the active browser session.
+- My history decks are loaded from the backend owner token and can include decks
+  from earlier sessions in the same browser profile.
+
+Sharing uses these endpoints:
+
+- `POST /decks/{thread_id}/share` creates or returns an opaque share link for a
+  deck owned by the current browser profile.
+- `GET /shares/{share_id}` returns the read-only public snapshot for preview.
+- `POST /shares/{share_id}/fork` copies the shared deck into the viewer's own
+  owner namespace so they can edit with their own ZenMux key.
 
 Image insertion is an optional ready-time stage. During ingest, uploaded image
 files and image URLs become `image_assets`. During HTML rendering, empty visual
@@ -212,6 +242,7 @@ backend/
   app/
     main.py                 FastAPI entrypoint
     api/                    HTTP endpoints, SSE streaming, image insertion
+                            and share/fork flows
     graph/                  LangGraph state, wiring, and nodes
     llm/                    ZenMux adapter, streaming, model routing, vision
     catalog/                Structure, scenario, layout, scorer, validator
@@ -247,6 +278,9 @@ frontend/
   idempotently.
 - PNG and PPTX export must be best-effort around image loading. External image
   fetch failures should not abort the whole deck export.
+- Share responses and forked checkpoints must never expose runtime API keys,
+  owner tokens, request headers, or local secret material. Shared decks are
+  previews; editing always happens after a fork under the viewer's owner token.
 
 ## License
 
