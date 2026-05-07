@@ -19,6 +19,7 @@ CLAUDE.md
 .claude/
 .superpowers/
 osz-*.png
+docs/superpowers/
 
 # Local deployment packaging and private server scripts.
 .dockerignore
