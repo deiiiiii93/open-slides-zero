@@ -163,6 +163,27 @@ export type DeletePlaygroundLaneResponse = DeleteDeckResponse & {
   lane: PlaygroundLane;
 };
 
+export type ShareDeckResponse = {
+  ok: boolean;
+  share_id: string;
+  thread_id: string;
+  share_url: string;
+  created_at: string;
+};
+
+export type SharedDeckResponse = {
+  share_id: string;
+  source_thread_id: string;
+  created_at: string;
+  deck: DeckState;
+};
+
+export type ForkSharedDeckResponse = {
+  ok: boolean;
+  share_id: string;
+  state: DeckState;
+};
+
 export type PlaygroundLane = {
   lane_id: string;
   lane_thread_id: string;
@@ -257,6 +278,13 @@ export const api = {
   getDeck: (id: string) => http<DeckState>("GET", `/decks/${id}`),
 
   deleteDeck: (id: string) => http<DeleteDeckResponse>("DELETE", `/decks/${id}`),
+
+  shareDeck: (id: string) => http<ShareDeckResponse>("POST", `/decks/${id}/share`, {}),
+
+  getSharedDeck: (shareId: string) => http<SharedDeckResponse>("GET", `/shares/${encodeURIComponent(shareId)}`),
+
+  forkSharedDeck: (shareId: string) =>
+    http<ForkSharedDeckResponse>("POST", `/shares/${encodeURIComponent(shareId)}/fork`, {}),
 
   getCatalog: (id: string) => http<CatalogResponse>("GET", `/decks/${id}/catalog`),
 

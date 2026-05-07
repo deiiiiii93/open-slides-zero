@@ -406,6 +406,24 @@ textarea.osz-control {
   font-size: 13px;
 }
 
+.osz-markdown :not(pre) > code {
+  border: 1px solid #0a0a0a;
+  border-radius: 0;
+  background: #e8e3d8;
+  color: #1c1c1e;
+  padding: 1px 4px;
+  font-family: ui-monospace, 'SF Mono', monospace;
+  font-size: 0.9em;
+}
+
+.osz-markdown pre code {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  font: inherit;
+}
+
 .recent-decks-panel {
   margin-top: 28px;
 }

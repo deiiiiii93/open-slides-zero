@@ -6,8 +6,10 @@ import remarkGfm from "remark-gfm";
 type Props = { children: string; style?: React.CSSProperties; className?: string };
 
 export function Markdown({ children, style, className }: Props) {
+  const markdownClassName = className ? `osz-markdown ${className}` : "osz-markdown";
+
   return (
-    <div className={className} style={{ lineHeight: 1.55, ...style }}>
+    <div className={markdownClassName} style={{ lineHeight: 1.55, ...style }}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -54,32 +56,11 @@ export function Markdown({ children, style, className }: Props) {
               {...props}
             />
           ),
-          code: ({ children, className, ...rest }) => {
-            const isBlock = typeof className === "string" && className.startsWith("language-");
-            if (isBlock) {
-              return (
-                <code className={className} {...rest}>
-                  {children}
-                </code>
-              );
-            }
-            return (
-              <code
-                style={{
-                  background: "#e8e3d8",
-                  border: "1px solid #0a0a0a",
-                  padding: "1px 4px",
-                  borderRadius: 0,
-                  fontSize: "0.9em",
-                  color: "#1c1c1e",
-                  fontFamily: "ui-monospace, 'SF Mono', monospace",
-                }}
-                {...rest}
-              >
-                {children}
-              </code>
-            );
-          },
+          code: ({ children, className, ...rest }) => (
+            <code className={className} {...rest}>
+              {children}
+            </code>
+          ),
           a: (props) => (
             <a
               style={{

@@ -37,6 +37,8 @@ import {
   type Material,
   type ModelStage,
   type RuntimeModelOptions,
+  type ShareDeckResponse,
+  type SharedDeckResponse,
   type ThinkingEffort,
 } from "./api";
 import { streamSSE, type StreamEvent } from "./sse";
@@ -73,6 +75,7 @@ const SUPPORTED_UPLOAD_EXTENSIONS = new Set(
 );
 const MODEL_STAGE_ORDER: ModelStage[] = ["style", "layout", "html"];
 const RECENT_DECKS_PAGE_SIZE = 5;
+const SESSION_DECK_HISTORY_KEY = "osz.session.history";
 
 function isSupportedUpload(file: File): boolean {
   const dot = file.name.lastIndexOf(".");
@@ -163,21 +166,40 @@ function recentDeckSearchText(deck: DeckListItem): string {
 
 function readDeckHistory(): DeckHistoryEntry[] {
   try {
-    const raw = JSON.parse(localStorage.getItem("osz.history") || "[]") as StoredDeckHistoryEntry[];
+    const raw = JSON.parse(sessionStorage.getItem(SESSION_DECK_HISTORY_KEY) || "[]") as StoredDeckHistoryEntry[];
     if (!Array.isArray(raw)) return [];
-    return raw.map((item) => (typeof item === "string" ? { id: item, name: item } : item));
+    const seen = new Set<string>();
+    const entries: DeckHistoryEntry[] = [];
+    for (const item of raw) {
+      const entry = typeof item === "string" ? { id: item, name: item } : item;
+      if (!entry?.id || seen.has(entry.id)) continue;
+      seen.add(entry.id);
+      entries.push({ id: entry.id, name: entry.name || entry.id });
+    }
+    return entries;
   } catch {
     return [];
   }
 }
 
 function writeDeckHistory(entries: DeckHistoryEntry[]) {
-  localStorage.setItem("osz.history", JSON.stringify(entries));
+  sessionStorage.setItem(SESSION_DECK_HISTORY_KEY, JSON.stringify(entries));
 }
 
-function pruneDeckHistory(threadIds: string[]) {
-  const deleted = new Set(threadIds);
-  writeDeckHistory(readDeckHistory().filter((entry) => !deleted.has(entry.id)));
+function sessionDeckList(
+  history: DeckHistoryEntry[],
+  backendDecks: DeckListItem[] | null,
+): DeckListItem[] {
+  const backendById = new Map((backendDecks ?? []).map((d) => [d.thread_id, d]));
+  return history.map((entry) => {
+    const backendDeck = backendById.get(entry.id);
+    return backendDeck ?? {
+      thread_id: entry.id,
+      deck_name: entry.name,
+      stage: "",
+      created_at: null,
+    };
+  });
 }
 
 function isDeckAccessError(error: unknown): boolean {
@@ -192,10 +214,17 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [showOwnedHistory, setShowOwnedHistory] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const [showShare, setShowShare] = useState(false);
   const [showMasterpieces, setShowMasterpieces] = useState(false);
   const [exporting, setExporting] = useState<string | null>(null);
+  const [shareInfo, setShareInfo] = useState<ShareDeckResponse | null>(null);
+  const [sharedDeck, setSharedDeck] = useState<SharedDeckResponse | null>(null);
+  const [requestedShareId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("share"));
+  const [forkingShare, setForkingShare] = useState(false);
   const [deckList, setDeckList] = useState<DeckListItem[] | null>(null);
+  const [deckHistory, setDeckHistory] = useState<DeckHistoryEntry[]>(() => readDeckHistory());
   const [deletingDeckId, setDeletingDeckId] = useState<string | null>(null);
   const [runtimeModelOptions, setRuntimeModelOptions] = useState<RuntimeModelOptions | null>(null);
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig>(() => readRuntimeConfig());
@@ -212,16 +241,34 @@ export function App() {
   const tagStartRef = useRef<Record<string, number>>({});
   const abortRef = useRef<AbortController | null>(null);
 
+  const updateDeckHistory = useCallback((entries: DeckHistoryEntry[]) => {
+    writeDeckHistory(entries);
+    setDeckHistory(entries);
+  }, []);
+
+  const rememberDeck = useCallback((nextDeck: DeckState) => {
+    const name = (nextDeck.values?.deck_name as string) || nextDeck.thread_id;
+    const hist = readDeckHistory();
+    const filtered = hist.filter((h) => h.id !== nextDeck.thread_id);
+    updateDeckHistory([{ id: nextDeck.thread_id, name }, ...filtered].slice(0, 20));
+  }, [updateDeckHistory]);
+
+  const forgetDecks = useCallback((threadIds: string[]) => {
+    const deleted = new Set(threadIds);
+    updateDeckHistory(readDeckHistory().filter((entry) => !deleted.has(entry.id)));
+  }, [updateDeckHistory]);
+
   const refresh = useCallback(
     async (id: string) => {
       try {
         const d = await api.getDeck(id);
         setDeck(d);
+        rememberDeck(d);
         if (!catalog) setCatalog(await api.getCatalog(id));
       } catch (e) {
         if (isDeckAccessError(e)) {
           localStorage.removeItem("osz.thread_id");
-          pruneDeckHistory([id]);
+          forgetDecks([id]);
           setDeck(null);
           setErr("This deck is not available in this browser session.");
           return;
@@ -229,7 +276,7 @@ export function App() {
         throw e;
       }
     },
-    [catalog],
+    [catalog, forgetDecks, rememberDeck],
   );
 
   const updateRuntimeConfig = useCallback((next: RuntimeConfig) => {
@@ -258,10 +305,22 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (!requestedShareId) return;
+    localStorage.removeItem("osz.thread_id");
+    setDeck(null);
+    setErr(null);
+    void api.getSharedDeck(requestedShareId)
+      .then(setSharedDeck)
+      .catch((e) => setErr(String(e)));
+  }, [requestedShareId]);
+
+  useEffect(() => {
     if (!identityReady) return;
+    if (requestedShareId) return;
+    if (sharedDeck) return;
     const saved = localStorage.getItem("osz.thread_id");
     if (saved) void refresh(saved).catch((e) => setErr(String(e)));
-  }, [identityReady, refresh]);
+  }, [identityReady, refresh, requestedShareId, sharedDeck]);
 
   useEffect(() => {
     if (!catalog) void api.getCatalog("catalog").then(setCatalog).catch(() => undefined);
@@ -286,12 +345,9 @@ export function App() {
     }
   }, [deck?.values?.current_stage, deck?.interrupts?.length]);
 
-  const rememberDeck = useCallback((nextDeck: DeckState) => {
-    const name = (nextDeck.values?.deck_name as string) || nextDeck.thread_id;
-    const hist = readDeckHistory();
-    const filtered = hist.filter((h) => h.id !== nextDeck.thread_id);
-    writeDeckHistory([{ id: nextDeck.thread_id, name }, ...filtered].slice(0, 20));
-  }, []);
+  useEffect(() => {
+    if (deck) rememberDeck(deck);
+  }, [deck?.thread_id, rememberDeck]);
 
   // Handle a single SSE event stream to completion.
   async function consumeStream(url: string, body: unknown | FormData): Promise<void> {
@@ -562,9 +618,46 @@ export function App() {
     abortRef.current?.abort();
     localStorage.removeItem("osz.thread_id");
     setDeck(null);
+    setSharedDeck(null);
     setErr(null);
     setBuffersByTag({});
     setShowMasterpieces(false);
+    setShowOwnedHistory(false);
+    setShowShare(false);
+    window.history.replaceState({}, "", window.location.pathname);
+  }
+
+  async function onShareDeck() {
+    if (!deck) return;
+    setErr(null);
+    try {
+      const share = await api.shareDeck(deck.thread_id);
+      setShareInfo(share);
+      setShowShare(true);
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(share.share_url).catch(() => undefined);
+      }
+    } catch (e) {
+      setErr(String(e));
+    }
+  }
+
+  async function onForkSharedDeck(shareId: string) {
+    setForkingShare(true);
+    setErr(null);
+    try {
+      const result = await api.forkSharedDeck(shareId);
+      localStorage.setItem("osz.thread_id", result.state.thread_id);
+      rememberDeck(result.state);
+      setDeck(result.state);
+      setSharedDeck(null);
+      window.history.replaceState({}, "", window.location.pathname);
+      void refreshDeckList();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setForkingShare(false);
+    }
   }
 
   async function onDeleteDeck(id: string, name?: string | null) {
@@ -585,7 +678,7 @@ export function App() {
       if (activeId && deleted.has(activeId)) {
         localStorage.removeItem("osz.thread_id");
       }
-      pruneDeckHistory(deletedIds);
+      forgetDecks(deletedIds);
       if (deck && deleted.has(deck.thread_id)) {
         abortRef.current?.abort();
         setDeck(null);
@@ -623,7 +716,24 @@ export function App() {
     }
   }
 
+  const visibleSessionDecks = useMemo(
+    () => sessionDeckList(deckHistory, deckList),
+    [deckHistory, deckList],
+  );
+
   // --- Render ---
+
+  if (sharedDeck) {
+    return (
+      <SharedDeckView
+        shared={sharedDeck}
+        err={err}
+        forking={forkingShare}
+        onFork={() => void onForkSharedDeck(sharedDeck.share_id)}
+        onNewDeck={onNewDeck}
+      />
+    );
+  }
 
   if (!deck) {
     return (
@@ -635,7 +745,8 @@ export function App() {
         runtimeConfig={runtimeConfig}
         runtimeModelOptions={runtimeModelOptions}
         onRuntimeConfigChange={updateRuntimeConfig}
-        recentDecks={deckList}
+        recentDecks={visibleSessionDecks}
+        ownedDecks={deckList ?? []}
         deletingDeckId={deletingDeckId}
         onLoadDeck={(id) => void refresh(id).catch((e) => setErr(String(e)))}
         onDeleteDeck={(id, name) => void onDeleteDeck(id, name)}
@@ -743,54 +854,79 @@ export function App() {
             </span>
           )}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, position: "relative" }}>
-          <button
-            className="osz-header-btn"
-            onClick={() => {
-              setShowMasterpieces(false);
-              setShowExport(false);
-              setShowHistory(false);
-              setShowConfig((s) => !s);
-            }}
-          >
+	        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", position: "relative" }}>
+	          <button
+	            className="osz-header-btn"
+	            onClick={() => {
+	              setShowMasterpieces(false);
+	              setShowExport(false);
+	              setShowHistory(false);
+	              setShowOwnedHistory(false);
+	              setShowShare(false);
+	              setShowConfig((s) => !s);
+	            }}
+	          >
             Config
           </button>
           <button
             className="osz-header-btn"
-            onClick={() => {
-              setShowExport(false);
-              setShowHistory(false);
-              setShowConfig(false);
-              setShowMasterpieces((s) => !s);
-            }}
+	            onClick={() => {
+	              setShowExport(false);
+	              setShowHistory(false);
+	              setShowOwnedHistory(false);
+	              setShowShare(false);
+	              setShowConfig(false);
+	              setShowMasterpieces((s) => !s);
+	            }}
           >
             Masterpieces
           </button>
           <button
             className="osz-header-btn"
-            onClick={() => {
-              setShowMasterpieces(false);
-              setShowExport(false);
-              setShowConfig(false);
-              setShowHistory((s) => {
-                const next = !s;
-                if (next) void refreshDeckList();
-                return next;
-              });
-            }}
-          >
-            History deck
-          </button>
-          <div style={{ position: "relative" }}>
+	            onClick={() => {
+	              setShowMasterpieces(false);
+	              setShowExport(false);
+	              setShowConfig(false);
+	              setShowOwnedHistory(false);
+	              setShowShare(false);
+	              setShowHistory((s) => {
+	                const next = !s;
+	                if (next) void refreshDeckList();
+	                return next;
+	              });
+	            }}
+	          >
+	            Session decks
+	          </button>
+	          <button
+	            className="osz-header-btn"
+	            onClick={() => {
+	              setShowMasterpieces(false);
+	              setShowExport(false);
+	              setShowConfig(false);
+	              setShowHistory(false);
+	              setShowShare(false);
+	              setShowOwnedHistory((s) => {
+	                const next = !s;
+	                if (next) void refreshDeckList();
+	                return next;
+	              });
+	            }}
+	          >
+	            My history
+	          </button>
+	          <div style={{ position: "relative" }}>
             <button
               className="osz-header-btn"
               disabled={!hasExportableSlides(deck) || exporting !== null}
               onClick={() => {
-                setShowMasterpieces(false);
-                setShowHistory(false);
-                setShowConfig(false);
-                setShowExport((s) => !s);
-              }}
+	                setShowMasterpieces(false);
+	                setShowHistory(false);
+	                setShowOwnedHistory(false);
+	                setShowShare(false);
+	                setShowConfig(false);
+	                setShowExport((s) => !s);
+	              }}
             >
               {exporting ? `Exporting ${exporting}…` : "Export"}
             </button>
@@ -800,7 +936,9 @@ export function App() {
                   position: "absolute",
                   top: "calc(100% + 4px)",
                   right: 0,
-                  minWidth: 200,
+	                minWidth: 320,
+	                maxHeight: "min(680px, calc(100vh - 96px))",
+	                overflowY: "auto",
                   background: "#f5f3ee",
                   border: "1.5px solid #0a0a0a",
                   borderRadius: 0,
@@ -857,21 +995,91 @@ export function App() {
               </div>
             )}
           </div>
-          <button
-            className="osz-header-btn"
-            disabled={busy || Boolean(deletingDeckId)}
-            onClick={() =>
+	          <button
+	            className="osz-header-btn"
+	            disabled={busy || Boolean(deletingDeckId)}
+	            onClick={() =>
               void onDeleteDeck(
                 deck.thread_id,
                 (deck.values?.deck_name as string | undefined) || deck.thread_id,
               )
             }
           >
-            {deletingDeckId === deck.thread_id ? "Deleting…" : "Delete deck"}
-          </button>
-          <button className="osz-header-btn" onClick={onNewDeck}>New deck</button>
-          {showHistory && (
-            <div
+	            {deletingDeckId === deck.thread_id ? "Deleting…" : "Delete deck"}
+	          </button>
+	          <button
+	            className="osz-header-btn"
+	            disabled={busy || Boolean(deletingDeckId)}
+	            onClick={() => {
+	              setShowMasterpieces(false);
+	              setShowExport(false);
+	              setShowHistory(false);
+	              setShowOwnedHistory(false);
+	              setShowConfig(false);
+	              if (shareInfo?.thread_id === deck.thread_id) {
+	                setShowShare((s) => !s);
+	              } else {
+	                void onShareDeck();
+	              }
+	            }}
+	          >
+	            Share deck
+	          </button>
+	          <button className="osz-header-btn" onClick={onNewDeck}>New deck</button>
+	          {showShare && shareInfo && (
+	            <div
+	              style={{
+	                position: "absolute",
+	                top: "calc(100% + 4px)",
+	                right: 0,
+	                minWidth: 360,
+	                background: "#f5f3ee",
+	                border: "1.5px solid #0a0a0a",
+	                borderRadius: 0,
+	                boxShadow: "none",
+	                zIndex: 100,
+	                padding: 12,
+	              }}
+	            >
+	              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.4, textTransform: "uppercase", color: "#0a0a0a" }}>
+	                Share link
+	              </div>
+	              <div style={{ color: "#5c5852", fontSize: 12, lineHeight: 1.4, marginTop: 6 }}>
+	                Viewers can open this read-only deck and fork it into their own history. ZenMux keys are not included in the shared deck.
+	              </div>
+	              <input
+	                readOnly
+	                value={shareInfo.share_url}
+	                onFocus={(e) => e.currentTarget.select()}
+	                style={{
+	                  width: "100%",
+	                  boxSizing: "border-box",
+	                  marginTop: 10,
+	                  padding: "8px 10px",
+	                  border: "1px solid #0a0a0a",
+	                  background: "#e8e3d8",
+	                  color: "#1c1c1e",
+	                  fontFamily: "ui-monospace, 'SF Mono', monospace",
+	                  fontSize: 12,
+	                }}
+	              />
+	              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
+	                <button
+	                  type="button"
+	                  onClick={() => {
+	                    if (navigator.clipboard) {
+	                      void navigator.clipboard.writeText(shareInfo.share_url);
+	                    }
+	                  }}
+	                  className="osz-button"
+	                >
+	                  Copy
+	                </button>
+	              </div>
+	            </div>
+	          )}
+	          {showHistory && (
+	            <div
               style={{
                 position: "absolute",
                 top: "calc(100% + 4px)",
@@ -881,35 +1089,29 @@ export function App() {
                 border: "1.5px solid #0a0a0a",
                 borderRadius: 0,
                 boxShadow: "none",
-                zIndex: 100,
-                padding: "4px 0",
-              }}
-            >
-              {(() => {
-                // Merge backend list with localStorage history; backend is authoritative for names
-                const backendDecks = deckList ?? [];
-                const localHist = readDeckHistory();
-
-                const merged = new Map<string, { name: string; stage: string }>();
-                for (const d of backendDecks) {
-                  merged.set(d.thread_id, { name: d.deck_name || d.thread_id, stage: d.stage });
-                }
-                for (const h of localHist) {
-                  if (!merged.has(h.id)) {
-                    merged.set(h.id, { name: h.name, stage: "" });
-                  }
-                }
-
-                if (merged.size === 0) {
-                  return (
+	                zIndex: 100,
+	                padding: "8px 0",
+	              }}
+	            >
+	              <div style={{ padding: "4px 12px 8px", borderBottom: "1px solid #0a0a0a" }}>
+	                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.4, textTransform: "uppercase", color: "#0a0a0a" }}>
+	                  Current session
+	                </div>
+	                <div style={{ color: "#5c5852", fontSize: 12, lineHeight: 1.4, marginTop: 4 }}>
+	                  Clears when this tab session ends. Reloading this tab keeps it.
+	                </div>
+	              </div>
+	              {(() => {
+	                if (visibleSessionDecks.length === 0) {
+	                  return (
                     <div style={{ padding: "8px 12px", color: "#948e83", fontSize: 13 }}>
                       No history yet
                     </div>
                   );
                 }
-                return Array.from(merged.entries()).map(([id, info]) => (
+                return visibleSessionDecks.map((historyDeck) => (
                   <div
-                    key={id}
+                    key={historyDeck.thread_id}
                     style={{
                       display: "flex",
                       alignItems: "stretch",
@@ -921,7 +1123,7 @@ export function App() {
                       disabled={Boolean(deletingDeckId)}
                       onClick={() => {
                         setShowHistory(false);
-                        void refresh(id).catch((e) => setErr(String(e)));
+                        void refresh(historyDeck.thread_id).catch((e) => setErr(String(e)));
                       }}
                       style={{
                         flex: "1 1 auto",
@@ -940,20 +1142,20 @@ export function App() {
                       onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                     >
                       <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 260 }}>
-                        {info.name}
+                        {historyDeck.deck_name || historyDeck.thread_id}
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <code style={{ fontSize: 11, color: "#948e83" }}>{id}</code>
-                        {info.stage && (
+                        <code style={{ fontSize: 11, color: "#948e83" }}>{historyDeck.thread_id}</code>
+                        {historyDeck.stage && (
                           <span style={{ fontSize: 10, color: "#5c5852", background: "transparent", padding: "1px 4px" }}>
-                            {info.stage}
+                            {historyDeck.stage}
                           </span>
                         )}
                       </div>
                     </button>
                     <button
                       disabled={busy || Boolean(deletingDeckId)}
-                      onClick={() => void onDeleteDeck(id, info.name)}
+                      onClick={() => void onDeleteDeck(historyDeck.thread_id, historyDeck.deck_name)}
                       style={{
                         flex: "0 0 auto",
                         border: "none",
@@ -966,14 +1168,115 @@ export function App() {
                         padding: "0 10px",
                       }}
                     >
-                      {deletingDeckId === id ? "Deleting…" : "Delete"}
+                      {deletingDeckId === historyDeck.thread_id ? "Deleting…" : "Delete"}
                     </button>
                   </div>
-                ));
-              })()}
-            </div>
-          )}
-        </div>
+	                ));
+	              })()}
+	            </div>
+	          )}
+	          {showOwnedHistory && (
+	            <div
+	              style={{
+	                position: "absolute",
+	                top: "calc(100% + 4px)",
+	                right: 0,
+	                minWidth: 360,
+	                maxWidth: 520,
+	                maxHeight: "min(680px, calc(100vh - 96px))",
+	                overflowY: "auto",
+	                background: "#f5f3ee",
+	                border: "1.5px solid #0a0a0a",
+	                borderRadius: 0,
+	                boxShadow: "none",
+	                zIndex: 100,
+	                padding: "8px 0",
+	              }}
+	            >
+	              <div style={{ padding: "4px 12px 8px", borderBottom: "1px solid #0a0a0a" }}>
+	                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.4, textTransform: "uppercase", color: "#0a0a0a" }}>
+	                  My deck history
+	                </div>
+	                <div style={{ color: "#5c5852", fontSize: 12, lineHeight: 1.4, marginTop: 4 }}>
+	                  Available on this browser while site cookies remain. Clearing site data removes access.
+	                </div>
+	              </div>
+	              {deckList == null ? (
+	                <div style={{ padding: "8px 12px", color: "#948e83", fontSize: 13 }}>
+	                  Loading history...
+	                </div>
+	              ) : deckList.length > 0 ? (
+	                deckList.map((historyDeck) => (
+	                  <div
+	                    key={historyDeck.thread_id}
+	                    style={{
+	                      display: "flex",
+	                      alignItems: "stretch",
+	                      width: "100%",
+	                      borderBottom: "1px solid #0a0a0a",
+	                    }}
+	                  >
+	                    <button
+	                      disabled={Boolean(deletingDeckId)}
+	                      onClick={() => {
+	                        setShowOwnedHistory(false);
+	                        void refresh(historyDeck.thread_id).catch((e) => setErr(String(e)));
+	                      }}
+	                      style={{
+	                        flex: "1 1 auto",
+	                        minWidth: 0,
+	                        textAlign: "left",
+	                        padding: "8px 12px",
+	                        background: "none",
+	                        border: "none",
+	                        cursor: deletingDeckId ? "default" : "pointer",
+	                        fontSize: 13,
+	                        fontFamily: "inherit",
+	                      }}
+	                      onMouseEnter={(e) => {
+	                        if (!deletingDeckId) e.currentTarget.style.background = "#e8e3d8";
+	                      }}
+	                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+	                    >
+	                      <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 300 }}>
+	                        {historyDeck.deck_name || historyDeck.thread_id}
+	                      </div>
+	                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+	                        <code style={{ fontSize: 11, color: "#948e83" }}>{historyDeck.thread_id}</code>
+	                        {historyDeck.stage && (
+	                          <span style={{ fontSize: 10, color: "#5c5852", background: "transparent", padding: "1px 4px" }}>
+	                            {historyDeck.stage}
+	                          </span>
+	                        )}
+	                      </div>
+	                    </button>
+	                    <button
+	                      disabled={busy || Boolean(deletingDeckId)}
+	                      onClick={() => void onDeleteDeck(historyDeck.thread_id, historyDeck.deck_name)}
+	                      style={{
+	                        flex: "0 0 auto",
+	                        border: "none",
+	                        borderLeft: "1px solid #0a0a0a",
+	                        background: "transparent",
+	                        color: "#8b1a1a",
+	                        cursor: busy || deletingDeckId ? "default" : "pointer",
+	                        fontSize: 12,
+	                        fontFamily: "inherit",
+	                        padding: "0 10px",
+	                      }}
+	                    >
+	                      {deletingDeckId === historyDeck.thread_id ? "Deleting…" : "Delete"}
+	                    </button>
+	                  </div>
+	                ))
+	              ) : (
+	                <div style={{ padding: "8px 12px", color: "#948e83", fontSize: 13 }}>
+	                  No saved deck history for this browser.
+	                </div>
+	              )}
+	            </div>
+	          )}
+	        </div>
       </header>
 
       {err && (
@@ -1955,6 +2258,113 @@ function RuntimeConfigPanel({
   );
 }
 
+function SharedDeckView({
+  shared,
+  err,
+  forking,
+  onFork,
+  onNewDeck,
+}: {
+  shared: SharedDeckResponse;
+  err: string | null;
+  forking: boolean;
+  onFork: () => void;
+  onNewDeck: () => void;
+}) {
+  const [currentSlide, setCurrentSlide] = useState(0);
+  const values = shared.deck.values || {};
+  const slides = useMemo(() => {
+    const raw = (values.html_slides ?? {}) as Record<string | number, string>;
+    return Object.fromEntries(
+      Object.entries(raw)
+        .map(([key, html]) => [Number(key), html] as const)
+        .filter(([key, html]) => Number.isInteger(key) && typeof html === "string" && html.length > 0),
+    ) as Record<number, string>;
+  }, [values.html_slides]);
+  const slideOrder = useMemo(() => Object.keys(slides).map(Number).sort((a, b) => a - b), [slides]);
+
+  useEffect(() => {
+    if (slideOrder.length > 0 && !slideOrder.includes(currentSlide)) {
+      setCurrentSlide(slideOrder[0]);
+    }
+  }, [currentSlide, slideOrder]);
+
+  const deckName = (values.deck_name as string | undefined) || shared.source_thread_id;
+  const stage = (values.current_stage as string | undefined) || "unknown";
+  const aspectRatio = (values.aspect_ratio as "16:9" | "4:3" | "21:9" | undefined) ?? "16:9";
+
+  return (
+    <div style={{ padding: 16, maxWidth: 1280, margin: "0 auto" }}>
+      <header className="osz-app-header">
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <strong
+            style={{
+              fontFamily: "'Playfair Display', Georgia, serif",
+              fontSize: 20,
+              fontWeight: 900,
+              letterSpacing: -0.3,
+            }}
+          >
+            Open Slides Zero
+          </strong>
+          <span style={{ color: "#948e83" }}>·</span>
+          <span style={{ fontSize: 14, color: "#f5f3ee" }}>Shared deck</span>
+          <span style={{ color: "#948e83" }}>·</span>
+          <span style={{ fontSize: 13, color: "#cfc8b9" }}>
+            stage: <code style={{ fontFamily: "ui-monospace, 'SF Mono', monospace" }}>{stage}</code>
+          </span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <button
+            className="osz-header-btn"
+            disabled={forking}
+            onClick={onFork}
+            title="Create an owned copy that uses your browser identity and your ZenMux key for future edits."
+          >
+            {forking ? "Forking..." : "Fork to edit"}
+          </button>
+          <button className="osz-header-btn" disabled={forking} onClick={onNewDeck}>
+            New deck
+          </button>
+        </div>
+      </header>
+
+      {err && (
+        <div style={{ color: "#8b1a1a", padding: 8, border: "1.5px solid #8b1a1a", borderRadius: 0, marginBottom: 8, background: "#f5f3ee" }}>
+          {err}
+        </div>
+      )}
+
+      <section className="osz-panel" style={{ marginTop: 16 }}>
+        <div className="osz-panel-body">
+          <div className="osz-section-header">
+            <div>
+              <h2 style={{ margin: 0, color: "#0a0a0a", fontSize: 22 }}>{deckName}</h2>
+              <div style={{ color: "#5c5852", fontSize: 13, lineHeight: 1.55, marginTop: 4 }}>
+                This is a read-only shared view. Fork it to your own history before editing; generation and edits use your own ZenMux key.
+              </div>
+            </div>
+          </div>
+          {slideOrder.length > 0 ? (
+            <DeckCanvas
+              slides={slides}
+              slideOrder={slideOrder}
+              currentSlide={currentSlide}
+              onSelectSlide={setCurrentSlide}
+              aspectRatio={aspectRatio}
+              width={960}
+            />
+          ) : (
+            <div style={{ padding: 16, border: "1.5px solid #0a0a0a", color: "#5c5852" }}>
+              This shared deck does not have rendered slides yet. Fork it to continue from the latest checkpoint.
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 // ---------------- Create form ----------------
 
 function CreateForm({
@@ -1966,6 +2376,7 @@ function CreateForm({
   runtimeModelOptions,
   onRuntimeConfigChange,
   recentDecks,
+  ownedDecks,
   deletingDeckId,
   onLoadDeck,
   onDeleteDeck,
@@ -1991,6 +2402,7 @@ function CreateForm({
   runtimeModelOptions: RuntimeModelOptions | null;
   onRuntimeConfigChange: (config: RuntimeConfig) => void;
   recentDecks: DeckListItem[] | null;
+  ownedDecks: DeckListItem[];
   deletingDeckId: string | null;
   onLoadDeck: (id: string) => void;
   onDeleteDeck: (id: string, name?: string | null) => void;
@@ -2319,7 +2731,12 @@ function CreateForm({
               marginBottom: 12,
             }}
           >
-            <h2 style={{ fontSize: 16, margin: 0, color: "#0a0a0a" }}>Recent decks</h2>
+            <div>
+              <h2 style={{ fontSize: 16, margin: 0, color: "#0a0a0a" }}>Current session decks</h2>
+              <div style={{ color: "#5c5852", fontSize: 12, lineHeight: 1.45, marginTop: 3 }}>
+                This list is scoped to this tab session and clears when the tab session ends.
+              </div>
+            </div>
             <input
               type="search"
               value={recentSearch}
@@ -2467,6 +2884,237 @@ function CreateForm({
           </div>
         </div>
       )}
+      <DeckHistoryPanel
+        title="My deck history"
+        description="Saved decks owned by this browser. Use this to recover older decks after the current tab session ends; access is lost if cookies or site data are cleared."
+        decks={ownedDecks}
+        emptyText="No saved deck history for this browser."
+        busy={busy}
+        deletingDeckId={deletingDeckId}
+        onLoadDeck={onLoadDeck}
+        onDeleteDeck={onDeleteDeck}
+      />
+    </div>
+  );
+}
+
+function DeckHistoryPanel({
+  title,
+  description,
+  decks,
+  emptyText,
+  busy,
+  deletingDeckId,
+  onLoadDeck,
+  onDeleteDeck,
+}: {
+  title: string;
+  description: string;
+  decks: DeckListItem[];
+  emptyText: string;
+  busy: boolean;
+  deletingDeckId: string | null;
+  onLoadDeck: (id: string) => void;
+  onDeleteDeck: (id: string, name?: string | null) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const filteredDecks = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return decks;
+    return decks.filter((deck) => recentDeckSearchText(deck).includes(q));
+  }, [decks, search]);
+  const pageCount = Math.max(1, Math.ceil(filteredDecks.length / RECENT_DECKS_PAGE_SIZE));
+  const boundedPage = Math.min(page, pageCount);
+  const visibleDecks = filteredDecks.slice(
+    (boundedPage - 1) * RECENT_DECKS_PAGE_SIZE,
+    boundedPage * RECENT_DECKS_PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [search]);
+
+  useEffect(() => {
+    if (page > pageCount) setPage(pageCount);
+  }, [page, pageCount]);
+
+  if (decks.length === 0) {
+    return (
+      <div className="recent-decks-panel">
+        <h2 style={{ fontSize: 16, margin: 0, color: "#0a0a0a" }}>{title}</h2>
+        <div style={{ color: "#5c5852", fontSize: 12, lineHeight: 1.45, marginTop: 3 }}>
+          {description}
+        </div>
+        <div style={{ padding: "12px 14px", color: "#5c5852", fontSize: 13, border: "1.5px solid #0a0a0a", marginTop: 12 }}>
+          {emptyText}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="recent-decks-panel">
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          marginBottom: 12,
+        }}
+      >
+        <div>
+          <h2 style={{ fontSize: 16, margin: 0, color: "#0a0a0a" }}>{title}</h2>
+          <div style={{ color: "#5c5852", fontSize: 12, lineHeight: 1.45, marginTop: 3 }}>
+            {description}
+          </div>
+        </div>
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search decks"
+          style={{
+            width: 220,
+            maxWidth: "50%",
+            fontFamily: "inherit",
+            padding: "6px 8px",
+          }}
+        />
+      </div>
+      <div
+        style={{
+          border: "1.5px solid #0a0a0a",
+          borderRadius: 0,
+          overflow: "hidden",
+        }}
+      >
+        {visibleDecks.length === 0 && (
+          <div style={{ padding: "12px 14px", color: "#5c5852", fontSize: 13 }}>
+            No decks match "{search.trim()}".
+          </div>
+        )}
+        {visibleDecks.map((d, idx) => (
+          <div
+            key={d.thread_id}
+            style={{
+              display: "flex",
+              alignItems: "stretch",
+              width: "100%",
+              background: "#f5f3ee",
+              borderBottom: idx === visibleDecks.length - 1 ? "none" : "1px solid #0a0a0a",
+            }}
+          >
+            <button
+              disabled={busy || Boolean(deletingDeckId)}
+              onClick={() => onLoadDeck(d.thread_id)}
+              style={{
+                flex: "1 1 auto",
+                minWidth: 0,
+                textAlign: "left",
+                padding: "10px 14px",
+                background: "#f5f3ee",
+                border: "none",
+                cursor: busy || deletingDeckId ? "default" : "pointer",
+                fontFamily: "inherit",
+                fontSize: 14,
+                opacity: busy || deletingDeckId ? 0.6 : 1,
+              }}
+              onMouseEnter={(e) => {
+                if (!busy && !deletingDeckId) e.currentTarget.style.background = "#e8e3d8";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "#f5f3ee";
+              }}
+            >
+              <div
+                style={{
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  fontWeight: 500,
+                }}
+              >
+                {d.deck_name || d.thread_id}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+                <code style={{ fontSize: 11, color: "#948e83" }}>{d.thread_id}</code>
+                {d.stage && (
+                  <span
+                    style={{
+                      fontSize: 10,
+                      color: "#5c5852",
+                      background: "transparent",
+                      padding: "1px 5px",
+                    }}
+                  >
+                    {d.stage}
+                  </span>
+                )}
+                {d.created_at && (
+                  <span style={{ fontSize: 11, color: "#948e83" }}>
+                    {recentDeckDateText(d.created_at)}
+                  </span>
+                )}
+              </div>
+            </button>
+            <button
+              type="button"
+              disabled={busy || Boolean(deletingDeckId)}
+              onClick={() => onDeleteDeck(d.thread_id, d.deck_name || d.thread_id)}
+              style={{
+                flex: "0 0 auto",
+                border: "none",
+                borderLeft: "1px solid #0a0a0a",
+                background: "#f5f3ee",
+                color: "#8b1a1a",
+                cursor: busy || deletingDeckId ? "default" : "pointer",
+                fontFamily: "inherit",
+                fontSize: 13,
+                padding: "0 14px",
+                opacity: busy || deletingDeckId ? 0.6 : 1,
+              }}
+            >
+              {deletingDeckId === d.thread_id ? "Deleting..." : "Delete"}
+            </button>
+          </div>
+        ))}
+      </div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          marginTop: 10,
+          color: "#5c5852",
+          fontSize: 12,
+        }}
+      >
+        <span>
+          {filteredDecks.length} deck{filteredDecks.length === 1 ? "" : "s"}
+        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            type="button"
+            disabled={busy || Boolean(deletingDeckId) || boundedPage <= 1}
+            onClick={() => setPage((current) => Math.max(1, current - 1))}
+          >
+            Previous
+          </button>
+          <span>
+            page {boundedPage} of {pageCount}
+          </span>
+          <button
+            type="button"
+            disabled={busy || Boolean(deletingDeckId) || boundedPage >= pageCount}
+            onClick={() => setPage((current) => Math.min(pageCount, current + 1))}
+          >
+            Next
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

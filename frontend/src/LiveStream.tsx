@@ -66,6 +66,12 @@ function fmtMs(ms: number): string {
   return `${m}m ${rs}s`;
 }
 
+const AUTOSCROLL_THRESHOLD_PX = 40;
+
+function isNearBottom(el: HTMLElement): boolean {
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= AUTOSCROLL_THRESHOLD_PX;
+}
+
 export function LiveStream({
   buffersByTag,
   activeNode,
@@ -77,10 +83,13 @@ export function LiveStream({
   maxHeight = "calc(100vh - 120px)",
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const shouldStickToBottomRef = useRef(true);
+  const streamContentLength = Object.values(buffersByTag).reduce((sum, text) => sum + text.length, 0);
+
   useEffect(() => {
     const el = containerRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [activeNode, activeSlide]);
+    if (el && shouldStickToBottomRef.current) el.scrollTop = el.scrollHeight;
+  }, [activeNode, activeSlide, streamContentLength]);
 
   const tagsInOrder = ["advanced_chat", "propose_structure", "outline", "style", "layout"];
   const htmlTags = Object.keys(buffersByTag)
@@ -97,6 +106,9 @@ export function LiveStream({
   return (
     <div
       ref={containerRef}
+      onScroll={(event) => {
+        shouldStickToBottomRef.current = isNearBottom(event.currentTarget);
+      }}
       style={{
         border: "1.5px solid #0a0a0a",
         borderRadius: 0,
