@@ -656,6 +656,7 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
 
   return (
     <section
+      className="osz-playground-grid"
       style={{
         display: "grid",
         gridTemplateColumns: liveStreams.length > 0 ? "minmax(0, 1fr) 360px" : "minmax(0, 1fr)",

@@ -1313,6 +1313,7 @@ export function App() {
       )}
 
       <div
+        className="osz-main-grid"
         style={{
           display: "grid",
           gridTemplateColumns: showLive ? "minmax(0, 1fr) 380px" : "minmax(0, 1fr)",
@@ -1765,6 +1766,7 @@ function ImageInsertionPanel({
             return (
               <div
                 key={slot.slot_id}
+                className="osz-image-row"
                 style={{
                   display: "grid",
                   gridTemplateColumns: "minmax(160px, 1fr) minmax(220px, 1.2fr)",
@@ -1815,7 +1817,7 @@ function ImageInsertionPanel({
                         maxHeight: 390,
                         overflowY: "auto",
                         display: "grid",
-                        gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))",
+                        gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
                         gap: 8,
                         padding: 10,
                         border: "1.5px solid #0a0a0a",

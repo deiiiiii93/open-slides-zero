@@ -2,7 +2,7 @@
 // (Layout Catalog §10.1) and CSS-scales to fit the viewport. Isolated iframes
 // prevent the slide's CSS from leaking into the app chrome.
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { normalizeImagePlaceholders } from "./imagePlaceholders";
 
 type Props = {
@@ -31,7 +31,19 @@ export function DeckCanvas({
   children,
 }: Props) {
   const [baseW, baseH] = CANVAS[aspectRatio] ?? CANVAS["16:9"];
-  const scale = width / baseW;
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [effW, setEffW] = useState(width);
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      if (w > 0) setEffW(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const scale = effW / baseW;
   const scaledH = baseH * scale;
 
   const sortedIdx = useMemo(
@@ -41,9 +53,55 @@ export function DeckCanvas({
 
   const html = normalizeImagePlaceholders(slides[currentSlide] ?? pendingSlideHtml(currentSlide));
 
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length !== 1) {
+      touchStart.current = null;
+      return;
+    }
+    const t = e.touches[0];
+    touchStart.current = { x: t.clientX, y: t.clientY };
+  };
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    const start = touchStart.current;
+    touchStart.current = null;
+    if (!start) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy)) return;
+    const idx = sortedIdx.indexOf(currentSlide);
+    if (idx < 0) return;
+    if (dx < 0 && idx < sortedIdx.length - 1) onSelectSlide(sortedIdx[idx + 1]);
+    else if (dx > 0 && idx > 0) onSelectSlide(sortedIdx[idx - 1]);
+  };
+
+  const currentPosition = sortedIdx.indexOf(currentSlide);
+
   return (
-    <div style={{ display: "flex", gap: 16 }}>
+    <div className="osz-deck-shell" style={{ display: "flex", gap: 16 }}>
+      <div className="osz-deck-mobile-nav">
+        <span className="osz-deck-mobile-nav-label">Slide</span>
+        <select
+          className="osz-deck-mobile-nav-select"
+          value={currentSlide}
+          onChange={(e) => onSelectSlide(Number(e.target.value))}
+        >
+          {sortedIdx.map((i) => {
+            const isReady = typeof slides[i] === "string" && slides[i].length > 0;
+            return (
+              <option key={i} value={i}>
+                Slide {i + 1}{isReady ? "" : " · rendering"}
+              </option>
+            );
+          })}
+        </select>
+        <span className="osz-deck-mobile-nav-counter">
+          {currentPosition >= 0 ? currentPosition + 1 : "—"} / {sortedIdx.length}
+        </span>
+      </div>
       <aside
+        className="osz-deck-sidebar"
         style={{
           width: 140,
           overflowY: "auto",
@@ -57,6 +115,7 @@ export function DeckCanvas({
         }}
       >
         <div
+          className="osz-deck-eyebrow"
           style={{
             paddingBottom: 12,
             marginBottom: 14,
@@ -77,6 +136,7 @@ export function DeckCanvas({
           return (
             <button
               key={i}
+              className="osz-deck-thumb"
               onClick={() => onSelectSlide(i)}
               style={{
                 display: "block",
@@ -124,7 +184,21 @@ export function DeckCanvas({
         })}
       </aside>
 
-      <div style={{ position: "relative", width, height: scaledH }}>
+      <div
+        ref={wrapRef}
+        className="osz-canvas-wrap"
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+        style={{
+          position: "relative",
+          width: "100%",
+          maxWidth: width,
+          minWidth: 0,
+          height: scaledH,
+          overflow: "hidden",
+          touchAction: "pan-y",
+        }}
+      >
         <div
           style={{
             transformOrigin: "top left",

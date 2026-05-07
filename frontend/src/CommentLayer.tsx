@@ -117,7 +117,8 @@ export function CommentLayer({ width, height, onSubmit }: Props) {
                 fontSize: 13,
                 color: "#1c1c1e",
                 background: "#e8e3d8",
-                minWidth: 240,
+                minWidth: "min(240px, 60vw)",
+                maxWidth: "70vw",
               }}
             />
             <button
