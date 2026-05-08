@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import html
+import math
 import mimetypes
 import re
 import uuid
@@ -41,6 +42,13 @@ _TAG_RE = re.compile(r"<[^>]+>")
 _MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*\]\((?P<uri>[^)\s]+)(?:\s+[^)]*)?\)")
 _URL_RE = re.compile(r"https?://[^\s)\]\"<>]+")
 _GBIF_OCCURRENCE_RE = re.compile(r"^/occurrence/(\d+)$")
+_SUPPORTED_GENERATION_ASPECTS = {
+    "1:1": 1.0,
+    "3:4": 3 / 4,
+    "4:3": 4 / 3,
+    "9:16": 9 / 16,
+    "16:9": 16 / 9,
+}
 
 
 class _MappingChoice(BaseModel):
@@ -261,6 +269,7 @@ def extract_placeholder_slots(html_slides: dict[int | str, str]) -> list[dict[st
                 "hint": _hint_from_placeholder(attrs, match.group("body")),
                 "style": attrs.get("style", ""),
                 "attrs": attrs,
+                **_slot_geometry(attrs),
             })
             ordinal += 1
     return slots
@@ -366,10 +375,13 @@ def _plan_prompt(slots: list[dict[str, Any]], assets: list[dict[str, Any]]) -> l
 def _ai_prompt_for_slot(slot: dict[str, Any]) -> str:
     hint = str(slot.get("hint") or "presentation image").strip()
     slide_num = int(slot.get("slide_idx", 0)) + 1
+    aspect = str(slot.get("generation_aspect_ratio") or "").strip()
+    aspect_hint = f" Use a {aspect} image canvas." if aspect else ""
     return (
         f"Create a polished presentation image for slide {slide_num}: {hint}. "
         "Use a clean editorial composition, no visible text, no watermarks, "
         "and enough negative space to sit inside a slide image slot."
+        f"{aspect_hint}"
     )
 
 
@@ -445,6 +457,52 @@ def _style_map(style: str) -> dict[str, str]:
     return out
 
 
+def _dimension_px(value: Any) -> float | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    match = re.fullmatch(r"(-?\d+(?:\.\d+)?)(?:px)?", raw, flags=re.IGNORECASE)
+    if not match:
+        return None
+    px = float(match.group(1))
+    return px if px > 0 else None
+
+
+def _nearest_generation_aspect(aspect_ratio: float | None) -> str | None:
+    if not aspect_ratio or aspect_ratio <= 0:
+        return None
+    target = math.log(aspect_ratio)
+    return min(
+        _SUPPORTED_GENERATION_ASPECTS,
+        key=lambda name: abs(target - math.log(_SUPPORTED_GENERATION_ASPECTS[name])),
+    )
+
+
+def _slot_fit(style: dict[str, str], attrs: dict[str, str]) -> str:
+    fit = str(attrs.get("data-image-fit") or style.get("object-fit") or "cover").strip().lower()
+    return fit if fit in {"cover", "contain"} else "cover"
+
+
+def _slot_position(style: dict[str, str], attrs: dict[str, str]) -> str:
+    position = str(attrs.get("data-image-position") or style.get("object-position") or "").strip()
+    return position or "50% 50%"
+
+
+def _slot_geometry(attrs: dict[str, str]) -> dict[str, Any]:
+    style = _style_map(attrs.get("style", ""))
+    width = _dimension_px(style.get("width")) or _dimension_px(attrs.get("width"))
+    height = _dimension_px(style.get("height")) or _dimension_px(attrs.get("height"))
+    aspect_ratio = (width / height) if width and height else None
+    return {
+        "width_px": width,
+        "height_px": height,
+        "aspect_ratio": aspect_ratio,
+        "fit": _slot_fit(style, attrs),
+        "position": _slot_position(style, attrs),
+        "generation_aspect_ratio": _nearest_generation_aspect(aspect_ratio),
+    }
+
+
 def _img_style(slot: dict[str, Any]) -> str:
     keep_prefixes = ("grid-",)
     keep_keys = {
@@ -466,7 +524,8 @@ def _img_style(slot: dict[str, Any]) -> str:
     if attrs.get("height") and "height" not in style:
         style["height"] = attrs["height"] if str(attrs["height"]).endswith("px") else f"{attrs['height']}px"
     style["display"] = "block"
-    style["object-fit"] = "cover"
+    style["object-fit"] = str(slot.get("fit") or "cover")
+    style["object-position"] = str(slot.get("position") or "50% 50%")
     style["box-sizing"] = "border-box"
     return "; ".join(f"{key}: {value}" for key, value in style.items())
 
@@ -476,9 +535,12 @@ def _img_tag(slot: dict[str, Any], asset: dict[str, Any]) -> str:
     hint = html.escape(str(slot.get("hint") or asset.get("name") or "image"), quote=True)
     style = html.escape(_img_style(slot), quote=True)
     asset_id = html.escape(str(asset.get("asset_id") or ""), quote=True)
+    fit = html.escape(str(slot.get("fit") or "cover"), quote=True)
+    position = html.escape(str(slot.get("position") or "50% 50%"), quote=True)
     return (
         f'<img src="{src}" alt="{hint}" style="{style}" '
-        f'data-inserted-image="true" data-image-asset-id="{asset_id}" loading="lazy" />'
+        f'data-inserted-image="true" data-image-asset-id="{asset_id}" '
+        f'data-image-fit="{fit}" data-image-position="{position}" loading="lazy" />'
     )
 
 
@@ -568,7 +630,8 @@ def generate_slot_image(
     safe_slot = re.sub(r"[^A-Za-z0-9_.-]+", "-", slot_id).strip("-")
     filename = f"{safe_slot}-{uuid.uuid4().hex[:8]}.png"
     output_path = store.thread_dir(str(thread_id)) / "images" / filename
-    result = image_gen.generate_image(prompt, output_path)
+    aspect_ratio = slot.get("generation_aspect_ratio")
+    result = image_gen.generate_image(prompt, output_path, aspect_ratio=aspect_ratio)
     asset = {
         "asset_id": f"generated-{safe_slot}-{uuid.uuid4().hex[:8]}",
         "uri": str(result["path"]),
@@ -579,6 +642,7 @@ def generate_slot_image(
         "prompt": prompt,
         "model": result.get("model"),
         "thread_id": thread_id,
+        "requested_aspect_ratio": aspect_ratio,
     }
     assets = [*(values.get("image_assets") or []), asset]
     plan = dict(values.get("image_insertion_plan") or {})

@@ -34,6 +34,7 @@ import {
   type ImageAsset,
   type ImageInsertionPlan,
   type ImageMapping,
+  type ImageSlot,
   type Masterpiece,
   type Material,
   type ModelStage,
@@ -1638,11 +1639,39 @@ function assetThumbnailSrc(deck: DeckState, asset: ImageAsset): string {
   return api.imageAssetContentUrl(deck.thread_id, asset.asset_id);
 }
 
-function defaultImagePrompt(slot: { slide_idx: number; hint: string }): string {
+function slotPreviewAspect(slot: Pick<ImageSlot, "aspect_ratio" | "width_px" | "height_px">): number {
+  const fromAspect = Number(slot.aspect_ratio);
+  if (Number.isFinite(fromAspect) && fromAspect > 0) return fromAspect;
+  const width = Number(slot.width_px);
+  const height = Number(slot.height_px);
+  if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+    return width / height;
+  }
+  return 16 / 9;
+}
+
+function slotObjectFit(slot: Pick<ImageSlot, "fit">): "cover" | "contain" {
+  return slot.fit === "contain" ? "contain" : "cover";
+}
+
+function slotObjectPosition(slot: Pick<ImageSlot, "position">): string {
+  return slot.position?.trim() || "50% 50%";
+}
+
+function slotPreviewSize(slot: ImageSlot, width = 128): { width: number; height: number } {
+  const aspect = slotPreviewAspect(slot);
+  return { width, height: Math.max(1, Math.round(width / aspect)) };
+}
+
+function defaultImagePrompt(slot: Pick<ImageSlot, "slide_idx" | "hint" | "generation_aspect_ratio">): string {
+  const aspectHint = slot.generation_aspect_ratio
+    ? ` Use a ${slot.generation_aspect_ratio} image canvas.`
+    : "";
   return (
     `Create a polished presentation image for slide ${slot.slide_idx + 1}: ${slot.hint}. ` +
     "Use a clean editorial composition, no visible text, no watermarks, " +
-    "and enough negative space to sit inside a slide image slot."
+    "and enough negative space to sit inside a slide image slot." +
+    aspectHint
   );
 }
 
@@ -1684,7 +1713,7 @@ function ImageInsertionPanel({
   const promptBySlot = Object.fromEntries(
     (plan?.unmatched_slots ?? []).map((slot) => [slot.slot_id, slot.prompt]),
   );
-  const promptForSlot = (slot: { slot_id: string; slide_idx: number; hint: string }) =>
+  const promptForSlot = (slot: ImageSlot) =>
     promptsBySlot[slot.slot_id] ?? promptBySlot[slot.slot_id] ?? defaultImagePrompt(slot);
   const noUserImageSlots = slots.filter((slot) => !selectedBySlot[slot.slot_id]);
   const generationActive = Object.keys(generatingBySlot).length > 0;
@@ -1718,7 +1747,7 @@ function ImageInsertionPanel({
     }
   }
 
-  async function generateForSlot(slot: { slot_id: string; slide_idx: number; hint: string }) {
+  async function generateForSlot(slot: ImageSlot) {
     const prompt = promptForSlot(slot).trim();
     if (!prompt) return;
     setGeneratingBySlot((prev) => ({ ...prev, [slot.slot_id]: "Generating image..." }));
@@ -1820,6 +1849,8 @@ function ImageInsertionPanel({
             const selectedAsset = assets.find((asset) => asset.asset_id === selectedBySlot[slot.slot_id]);
             const prompt = promptForSlot(slot);
             const generatingHint = generatingBySlot[slot.slot_id];
+            const previewSize = slotPreviewSize(slot);
+            const pickerPreviewSize = slotPreviewSize(slot, 96);
             return (
               <div
                 key={slot.slot_id}
@@ -1924,11 +1955,11 @@ function ImageInsertionPanel({
                             }}
                             style={{
                               display: "grid",
-                              gridTemplateColumns: "96px minmax(0, 1fr)",
+                              gridTemplateColumns: `${pickerPreviewSize.width}px minmax(0, 1fr)`,
                               gap: 12,
                               alignItems: "center",
                               width: "100%",
-                              minHeight: 82,
+                              minHeight: Math.max(82, pickerPreviewSize.height + 18),
                               padding: 9,
                               border: selected ? "2px solid #0a0a0a" : "1.5px solid #0a0a0a",
                               borderRadius: 0,
@@ -1944,9 +1975,10 @@ function ImageInsertionPanel({
                               alt=""
                               loading="lazy"
                               style={{
-                                width: 96,
-                                height: 64,
-                                objectFit: "cover",
+                                width: pickerPreviewSize.width,
+                                height: pickerPreviewSize.height,
+                                objectFit: slotObjectFit(slot),
+                                objectPosition: slotObjectPosition(slot),
                                 borderRadius: 0,
                                 border: "1px solid #0a0a0a",
                                 background: "#e8e3d8",
@@ -1973,11 +2005,13 @@ function ImageInsertionPanel({
                       src={assetThumbnailSrc(deck, selectedAsset)}
                       alt=""
                       style={{
-                        width: 96,
-                        height: 54,
-                        objectFit: "cover",
+                        width: previewSize.width,
+                        height: previewSize.height,
+                        objectFit: slotObjectFit(slot),
+                        objectPosition: slotObjectPosition(slot),
                         border: "1.5px solid #0a0a0a",
                         borderRadius: 0,
+                        background: "#e8e3d8",
                       }}
                     />
                   )}

@@ -20,7 +20,13 @@ ZENMUX_VERTEX_BASE_URL = "https://zenmux.ai/api/vertex-ai"
 ZENMUX_API_KEY_ENV = "ZENMUX_API_KEY"
 
 
-def generate_image(prompt: str, output_path: str | Path, *, model: str | None = None) -> dict[str, Any]:
+def generate_image(
+    prompt: str,
+    output_path: str | Path,
+    *,
+    model: str | None = None,
+    aspect_ratio: str | None = None,
+) -> dict[str, Any]:
     """Generate one image and save it to ``output_path``.
 
     The caller owns user confirmation. This function should only be called
@@ -52,6 +58,7 @@ def generate_image(prompt: str, output_path: str | Path, *, model: str | None = 
         prompt=prompt,
         config=types.GenerateImagesConfig(
             number_of_images=1,
+            aspect_ratio=aspect_ratio,
             output_mime_type="image/png",
         ),
     )

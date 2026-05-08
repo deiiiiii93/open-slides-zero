@@ -40,6 +40,7 @@ export type ImageAsset = {
   media_type?: string;
   summary?: string;
   prompt?: string;
+  requested_aspect_ratio?: string | null;
 };
 
 export type ImageSlot = {
@@ -47,6 +48,12 @@ export type ImageSlot = {
   slide_idx: number;
   slot_index: number;
   hint: string;
+  width_px?: number | null;
+  height_px?: number | null;
+  aspect_ratio?: number | null;
+  fit?: "cover" | "contain" | string;
+  position?: string | null;
+  generation_aspect_ratio?: string | null;
 };
 
 export type ImageMapping = {

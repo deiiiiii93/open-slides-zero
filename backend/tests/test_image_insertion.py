@@ -144,21 +144,41 @@ def test_markdown_image_refs_and_gbif_pages_become_assets(
 def test_extract_placeholder_slots_reads_hint_and_position():
     slots = image_insert.extract_placeholder_slots({0: _slide_html()})
 
-    assert slots == [
-        {
-            "slot_id": "slide-0-slot-0",
-            "slide_idx": 0,
-            "slot_index": 0,
-            "tag": "div",
-            "hint": "Product photo",
-            "style": "position:absolute;left:10px;top:20px;width:300px;height:180px;border:1px dashed #999",
-            "attrs": {
-                "data-image-placeholder": "true",
-                "data-prompt-hint": "Product photo",
-                "style": "position:absolute;left:10px;top:20px;width:300px;height:180px;border:1px dashed #999",
-            },
-        }
-    ]
+    assert len(slots) == 1
+    slot = slots[0]
+    assert slot["slot_id"] == "slide-0-slot-0"
+    assert slot["slide_idx"] == 0
+    assert slot["slot_index"] == 0
+    assert slot["tag"] == "div"
+    assert slot["hint"] == "Product photo"
+    assert slot["style"] == "position:absolute;left:10px;top:20px;width:300px;height:180px;border:1px dashed #999"
+    assert slot["attrs"] == {
+        "data-image-placeholder": "true",
+        "data-prompt-hint": "Product photo",
+        "style": "position:absolute;left:10px;top:20px;width:300px;height:180px;border:1px dashed #999",
+    }
+    assert slot["width_px"] == 300
+    assert slot["height_px"] == 180
+    assert slot["aspect_ratio"] == pytest.approx(300 / 180)
+    assert slot["fit"] == "cover"
+    assert slot["position"] == "50% 50%"
+    assert slot["generation_aspect_ratio"] == "16:9"
+
+
+def test_extract_placeholder_slots_uses_nearest_supported_generation_aspect():
+    html = """<!DOCTYPE html>
+<html><body>
+<div style="width:960px;height:540px;position:relative">
+  <div data-image-placeholder="true" data-prompt-hint="Tall" style="width:220px;height:390px"></div>
+  <div data-image-placeholder="true" data-prompt-hint="Wide" style="width:420px;height:260px;object-position:35% 62%"></div>
+</div>
+</body></html>"""
+
+    tall, wide = image_insert.extract_placeholder_slots({0: html})
+
+    assert tall["generation_aspect_ratio"] == "9:16"
+    assert wide["generation_aspect_ratio"] == "16:9"
+    assert wide["position"] == "35% 62%"
 
 
 def test_plan_proposes_mapping_without_mutating_html(monkeypatch: pytest.MonkeyPatch):
@@ -204,6 +224,10 @@ def test_apply_mapping_preserves_copy_and_base_html():
     assert update["html_slides_base"][0] == _slide_html()
     assert "Keep this copy" in update["html_slides"][0]
     assert 'src="https://example.com/product.png"' in update["html_slides"][0]
+    assert 'object-fit: cover' in update["html_slides"][0]
+    assert 'object-position: 50% 50%' in update["html_slides"][0]
+    assert 'data-image-fit="cover"' in update["html_slides"][0]
+    assert 'data-image-position="50% 50%"' in update["html_slides"][0]
     assert 'data-image-placeholder="true"' not in update["html_slides"][0]
     assert update["image_insertion_status"] == "applied"
 
@@ -229,10 +253,10 @@ def _assign_test_owner(thread_id: str) -> None:
 def test_generate_endpoint_calls_image_model_only_after_confirm(
     isolated_graph, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    calls: list[str] = []
+    calls: list[tuple[str, str | None]] = []
 
-    def fake_generate(prompt: str, output_path: str | Path, **_kwargs):
-        calls.append(prompt)
+    def fake_generate(prompt: str, output_path: str | Path, **kwargs):
+        calls.append((prompt, kwargs.get("aspect_ratio")))
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"png")
@@ -261,6 +285,9 @@ def test_generate_endpoint_calls_image_model_only_after_confirm(
     plan_response = client.post(f"/decks/{thread_id}/images/plan")
     assert plan_response.status_code == 200
     assert calls == []
+    planned_slot = plan_response.json()["plan"]["slots"][0]
+    assert planned_slot["aspect_ratio"] == pytest.approx(300 / 180)
+    assert planned_slot["generation_aspect_ratio"] == "16:9"
 
     generate_response = client.post(
         f"/decks/{thread_id}/images/generate",
@@ -272,9 +299,11 @@ def test_generate_endpoint_calls_image_model_only_after_confirm(
     )
 
     assert generate_response.status_code == 200
-    assert calls == ["A clean product photo"]
+    assert calls == [("A clean product photo", "16:9")]
+    assert generate_response.json()["asset"]["requested_aspect_ratio"] == "16:9"
     html = generate_response.json()["state"]["values"]["html_slides"]["0"]
     assert 'data-inserted-image="true"' in html
+    assert 'data-image-fit="cover"' in html
     assert generate_response.json()["state"]["values"]["html_slides_base"]["0"] == _slide_html()
 
 

@@ -278,6 +278,9 @@ frontend/
   idempotently.
 - PNG and PPTX export must be best-effort around image loading. External image
   fetch failures should not abort the whole deck export.
+- When PPTX export reproduces CSS `object-fit` image slots, pass the rendered
+  image's intrinsic dimensions to `pptxgenjs`; using the slot dimensions as the
+  source size collapses clipping into stretch/zoom behavior.
 - Share responses and forked checkpoints must never expose runtime API keys,
   owner tokens, request headers, or local secret material. Shared decks are
   previews; editing always happens after a fork under the viewer's owner token.

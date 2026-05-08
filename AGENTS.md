@@ -128,6 +128,7 @@ not fail the whole deck.
 6. **Vision guard**: `app/llm/models.py::vision_capable()` + `VISION_FALLBACK`. When images are attached to a chat and the routed model doesn't declare image input, `zenmux.chat()` reroutes to the fallback and logs. Don't bypass — misrouted images produce cryptic upstream errors.
 7. **PNG/PPTX export is best-effort around images**. Remote image failures must not abort export; route public remote images through `/images/proxy` and keep the frontend fallback placeholder path intact.
 8. **Image insertion must stay idempotent**. Keep `html_slides_base` as the pre-insertion source of truth for remapping image slots; `html_slides` is the current rendered deck and may already contain inserted image tags.
+9. **PPTX object-fit needs intrinsic image size**. When translating browser `object-fit:cover`/`contain` slots, pass the rendered image's natural dimensions to `pptxgenjs` and the slot box as `sizing`; using the slot box for both source and target prevents real clipping.
 
 ## Adding a new subagent (common extension)
 

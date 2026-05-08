@@ -690,6 +690,25 @@ async function waitForIframeReady(f: HTMLIFrameElement, timeoutMs = 10000): Prom
   } catch {
     // Cross-origin guard — sandboxed iframes can throw; ignore.
   }
+  try {
+    const images = Array.from(f.contentDocument?.images ?? []);
+    images.forEach((img) => {
+      img.loading = "eager";
+      img.decoding = "sync";
+    });
+    await Promise.race([
+      Promise.all(images.map((img) => {
+        if (img.complete) return true;
+        return new Promise((resolve) => {
+          img.addEventListener("load", () => resolve(true), { once: true });
+          img.addEventListener("error", () => resolve(true), { once: true });
+        });
+      })),
+      new Promise((resolve) => setTimeout(resolve, Math.max(0, deadline - Date.now()))),
+    ]);
+  } catch {
+    // Keep PPTX export best-effort if a browser refuses image inspection.
+  }
 }
 
 // --- Color helpers ---
@@ -1133,6 +1152,13 @@ function getInches(rect: DOMRect, rootRect: DOMRect): { x: number; y: number; w:
   };
 }
 
+function intrinsicImageSizeIn(img: HTMLImageElement): { w: number; h: number } | null {
+  if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+    return { w: pxToIn(img.naturalWidth), h: pxToIn(img.naturalHeight) };
+  }
+  return null;
+}
+
 /** Extract rotation angle from CSS transform matrix. */
 function getRotation(transform: string): number | undefined {
   if (!transform || transform === "none") return undefined;
@@ -1500,12 +1526,14 @@ function processElement(node: Element, ctx: PptxContext, depth = 0): void {
         return;
       }
       const opacity = parseFloat(style.opacity);
-      const objectFit = style.objectFit;
+      const objectFit = img.dataset.imageFit || style.objectFit;
+      const sizingType = objectFit === "cover" || objectFit === "contain" ? objectFit : null;
+      const intrinsicSize = sizingType ? intrinsicImageSizeIn(img) : null;
       const imgOpts: Record<string, unknown> = {
         x: pos.x,
         y: pos.y,
-        w: pos.w,
-        h: pos.h,
+        w: intrinsicSize?.w ?? pos.w,
+        h: intrinsicSize?.h ?? pos.h,
         rotate: rotation,
         transparency: !isNaN(opacity) && opacity < 1 ? Math.round((1 - opacity) * 100) : undefined,
       };
@@ -1514,10 +1542,8 @@ function processElement(node: Element, ctx: PptxContext, depth = 0): void {
       } else {
         imgOpts.path = source;
       }
-      if (objectFit === "cover") {
-        imgOpts.sizing = { type: "cover", w: pos.w, h: pos.h };
-      } else if (objectFit === "contain") {
-        imgOpts.sizing = { type: "contain", w: pos.w, h: pos.h };
+      if (sizingType) {
+        imgOpts.sizing = { type: sizingType, w: pos.w, h: pos.h };
       }
       try {
         ctx.slide.addImage(imgOpts);
