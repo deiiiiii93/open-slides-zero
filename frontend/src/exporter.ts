@@ -295,6 +295,31 @@ function classifyError(exc: unknown): string {
   return s.length > 80 ? `${s.slice(0, 77)}…` : s;
 }
 
+async function convertWoff2ToTtf(woff2Bytes: Uint8Array, timeoutMs = 15000): Promise<Uint8Array> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${API_BASE}/font-as-ttf`, {
+      method: "POST",
+      headers: { "Content-Type": "font/woff2" },
+      body: new Blob([woff2Bytes as BlobPart]),
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+    return new Uint8Array(await response.arrayBuffer());
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+function isWoff2Url(url: string): boolean {
+  return /\.woff2(?:[?#]|$)/i.test(url);
+}
+
+function googleFontsSpecimenUrl(family: string): string {
+  return `https://fonts.google.com/specimen/${family.trim().replace(/\s+/g, "+")}`;
+}
+
 function shortenUrl(url: string, max = 60): string {
   if (url.length <= max) return url;
   try {
@@ -323,14 +348,26 @@ function buildFontReadme(deckName: string, info: FontPackageInfo, cssAssets: Pac
     "This folder was generated because the slide HTML references external font or stylesheet resources.",
     "The editable PPTX uses font family names, but PowerPoint may substitute fonts that are not installed locally.",
     "",
-    "Recommended workflow:",
-    "1. Install the saved font files in `files/` when present.",
-    "2. Open `font-links.html` to review the original web resources and local CSS copies.",
-    "3. Open the PPTX after installing fonts for the closest visual match.",
+    "## Installing fonts",
+    "",
+    "Files in `files/` are saved as `.ttf` where possible (downloaded `.woff2` files are decompressed",
+    "during export, since `.woff2` is a web-only format that macOS Font Book and Windows do not install).",
+    "",
+    "- **macOS**: open `files/` in Finder, select the `.ttf` files, double-click to launch Font Book, then click **Install**.",
+    "- **Windows**: select the `.ttf` files, right-click → **Install for all users**.",
+    "",
+    "After installing, reopen the PPTX in PowerPoint or Keynote for the closest visual match to the original slides.",
     "",
   ];
   if (info.families.length) {
-    lines.push("## Font families found in slide CSS", "", ...info.families.map((family) => `- ${family}`), "");
+    lines.push(
+      "## Font families used by the slides",
+      "",
+      "If the packaged files don't load on your system, download the originals from Google Fonts:",
+      "",
+      ...info.families.map((family) => `- [${family}](${googleFontsSpecimenUrl(family)})`),
+      "",
+    );
   }
   lines.push("## External resources", "");
   for (const resource of info.resources) {
@@ -366,7 +403,10 @@ function buildFontLinksHtml(deckName: string, info: FontPackageInfo, cssAssets: 
     .map((resource) => `  <link rel="stylesheet" href="${escapeAttr(resource.url)}" />`)
     .join("\n");
   const families = info.families
-    .map((family) => `<p style="font-family:${escapeAttr(JSON.stringify(family))}, sans-serif">${escapeText(family)} - The quick brown fox jumps over 1234567890.</p>`)
+    .map((family) => {
+      const downloadUrl = googleFontsSpecimenUrl(family);
+      return `<p style="font-family:${escapeAttr(JSON.stringify(family))}, sans-serif">${escapeText(family)} - The quick brown fox jumps over 1234567890. <a style="font-size:14px;font-family:Georgia,serif" href="${escapeAttr(downloadUrl)}">Download from Google Fonts</a></p>`;
+    })
     .join("\n");
   const resources = info.resources
     .map((resource) => `<li><code>${escapeText(resource.kind)}</code> slide(s) ${escapeText(resource.slides.join(", "))}: <a href="${escapeAttr(resource.url)}">${escapeText(resource.url)}</a></li>`)
@@ -383,11 +423,12 @@ ${externalLinks}
     h1 { margin: 0 0 12px; }
     code { color: #5c5852; }
     p { font-size: 22px; margin: 14px 0; }
+    a { color: #5c5852; }
   </style>
 </head>
 <body>
   <h1>${escapeText(deckName)} font package</h1>
-  <p style="font-size:14px">Install saved files from <code>files/</code> when present, then open the PPTX.</p>
+  <p style="font-size:14px">Install <code>.ttf</code> files from <code>files/</code> via Font Book (macOS) or right-click → Install (Windows). If a typeface won't install, follow its <em>Download from Google Fonts</em> link below.</p>
   <h2>Font family samples</h2>
   ${families || "<p>No explicit font-family declarations found.</p>"}
   <h2>External resources</h2>
@@ -413,16 +454,34 @@ async function addFontPackageToZip(
   async function saveFont(url: string, preferredIndex: number): Promise<string | null> {
     const existing = fontAssets.get(url);
     if (existing) return existing.path || null;
-    const path = `${base}files/${fontFileName(url, preferredIndex)}`;
     const label = `font-file ${shortenUrl(url)}`;
+    const wantsConversion = isWoff2Url(url);
     onProgress?.({ kind: "resource-start", label });
     try {
       const response = await fetchWithTimeout(url);
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-      const blob = await response.blob();
-      zip.file(path, blob);
+      let bytes: Uint8Array = new Uint8Array(await response.arrayBuffer());
+      let converted = false;
+      if (wantsConversion) {
+        try {
+          bytes = await convertWoff2ToTtf(bytes);
+          converted = true;
+        } catch (exc) {
+          console.warn(`[exporter] /api/font-as-ttf failed; keeping original woff2`, exc);
+          onProgress?.({ kind: "info", text: `woff2 → ttf failed (${classifyError(exc)}); keeping original` });
+        }
+      }
+      const baseName = fontFileName(url, preferredIndex);
+      const finalName = converted ? baseName.replace(/\.woff2$/i, ".ttf") : baseName;
+      const path = `${base}files/${finalName}`;
+      zip.file(path, bytes);
       fontAssets.set(url, { url, path, status: "saved" });
-      onProgress?.({ kind: "resource-ok", label, detail: `${Math.max(1, Math.round(blob.size / 1024))} KB` });
+      const sizeKb = Math.max(1, Math.round(bytes.length / 1024));
+      onProgress?.({
+        kind: "resource-ok",
+        label,
+        detail: converted ? `${sizeKb} KB → ttf` : `${sizeKb} KB`,
+      });
       return path;
     } catch (exc) {
       fontAssets.set(url, { url, status: "failed", error: String(exc) });
@@ -448,12 +507,18 @@ async function addFontPackageToZip(
       const response = await fetchWithTimeout(resource.url);
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
       let css = await response.text();
+      let woff2Conversions = 0;
       for (const fontUrl of cssFontUrls(css, resource.url)) {
         fontIndex += 1;
+        const wasWoff2 = isWoff2Url(fontUrl);
         const fontPath = await saveFont(fontUrl, fontIndex);
         if (fontPath) {
+          if (wasWoff2 && fontPath.toLowerCase().endsWith(".ttf")) woff2Conversions += 1;
           css = css.split(fontUrl).join(`../files/${fontPath.split("/").pop()}`);
         }
+      }
+      if (woff2Conversions > 0) {
+        css = css.replace(/format\(\s*['"]woff2['"]\s*\)/gi, 'format("truetype")');
       }
       zip.file(cssPath, css);
       cssAssets.push({ kind: resource.kind, url: resource.url, path: cssPath, status: "saved" });
