@@ -55,6 +55,7 @@ const NODE_LABELS: Record<string, string> = {
   html_one: "⑤ Slide HTML",
   consolidate: "· Consolidating brief",
   post_html: "✓ Ready",
+  export: "● Exporting",
 };
 
 function fmtMs(ms: number): string {
@@ -174,6 +175,57 @@ export function LiveStream({
         >
           {commentBuf}
         </div>
+      )}
+
+      {buffersByTag.export && (
+        <details
+          open={activeNode === "export"}
+          style={{
+            borderBottom: "1px solid #0a0a0a",
+            padding: 0,
+          }}
+        >
+          <summary
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "10px 14px",
+              cursor: "pointer",
+              listStyle: "none",
+            }}
+          >
+            <span
+              style={{
+                color: "#1c1c1e",
+                fontWeight: 600,
+                fontSize: 13,
+              }}
+            >
+              {NODE_LABELS.export}
+            </span>
+            {elapsedByTag.export && (
+              <span
+                style={{
+                  color: "#948e83",
+                  fontFamily: "ui-monospace, 'SF Mono', monospace",
+                  fontSize: 10,
+                }}
+              >
+                {fmtMs(elapsedByTag.export)}
+              </span>
+            )}
+          </summary>
+          <div
+            style={{
+              background: "#e8e3d8",
+              padding: "12px 14px",
+              borderTop: "1px solid #0a0a0a",
+            }}
+          >
+            <StreamingPre text={buffersByTag.export} />
+          </div>
+        </details>
       )}
 
       {tagsInOrder.map((tag) =>

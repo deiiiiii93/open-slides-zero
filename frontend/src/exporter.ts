@@ -30,6 +30,16 @@ export type ExportArtifact = {
   blob: Blob;
 };
 
+export type ExportProgressEvent =
+  | { kind: "phase"; label: string }
+  | { kind: "info"; text: string }
+  | { kind: "resource-start"; label: string }
+  | { kind: "resource-ok"; label: string; detail?: string }
+  | { kind: "resource-fail"; label: string; reason: string }
+  | { kind: "done"; detail?: string };
+
+export type ExportProgress = (event: ExportProgressEvent) => void;
+
 type ExportNameOptions = {
   filenameBase?: string;
   useBaseSlides?: boolean;
@@ -239,8 +249,11 @@ function collectFontPackageInfo(entries: Array<[number, string]>): FontPackageIn
     const doc = parser.parseFromString(html, "text/html");
     doc.querySelectorAll("link[href]").forEach((link) => {
       const href = link.getAttribute("href") || "";
-      const rel = (link.getAttribute("rel") || "").toLowerCase();
-      if (rel.includes("stylesheet") || /fonts?/i.test(href) || /^https?:\/\//i.test(href) || href.startsWith("//")) {
+      const relTokens = (link.getAttribute("rel") || "").toLowerCase().split(/\s+/).filter(Boolean);
+      const as = (link.getAttribute("as") || "").toLowerCase();
+      const isStylesheet = relTokens.includes("stylesheet");
+      const isPreloadStyle = relTokens.includes("preload") && as === "style";
+      if (isStylesheet || isPreloadStyle) {
         addResource("stylesheet", href, slideIdx);
       }
     });
@@ -271,6 +284,27 @@ function fetchWithTimeout(url: string, timeoutMs = 8000): Promise<Response> {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   return fetch(url, { signal: controller.signal }).finally(() => window.clearTimeout(timer));
+}
+
+function classifyError(exc: unknown): string {
+  if (exc instanceof DOMException && exc.name === "AbortError") return "timeout";
+  if (exc instanceof TypeError && /failed to fetch|networkerror/i.test(exc.message)) return "CORS";
+  const s = String(exc);
+  const httpMatch = s.match(/\b(\d{3})(?:\s+([A-Za-z][A-Za-z ]+))?\b/);
+  if (httpMatch) return httpMatch[2] ? `${httpMatch[1]} ${httpMatch[2].trim()}` : httpMatch[1];
+  return s.length > 80 ? `${s.slice(0, 77)}…` : s;
+}
+
+function shortenUrl(url: string, max = 60): string {
+  if (url.length <= max) return url;
+  try {
+    const u = new URL(url);
+    const tail = u.pathname.split("/").filter(Boolean).pop() ?? "";
+    const compact = `${u.host}/…/${tail}`;
+    return compact.length <= max ? compact : `${compact.slice(0, max - 1)}…`;
+  } catch {
+    return `${url.slice(0, max - 1)}…`;
+  }
 }
 
 function cssFontUrls(css: string, baseUrl: string): string[] {
@@ -368,6 +402,7 @@ async function addFontPackageToZip(
   info: FontPackageInfo,
   deckName: string,
   folder = "",
+  onProgress?: ExportProgress,
 ): Promise<string | null> {
   if (!hasFontPackage(info)) return null;
 
@@ -379,15 +414,19 @@ async function addFontPackageToZip(
     const existing = fontAssets.get(url);
     if (existing) return existing.path || null;
     const path = `${base}files/${fontFileName(url, preferredIndex)}`;
+    const label = `font-file ${shortenUrl(url)}`;
+    onProgress?.({ kind: "resource-start", label });
     try {
       const response = await fetchWithTimeout(url);
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
       const blob = await response.blob();
       zip.file(path, blob);
       fontAssets.set(url, { url, path, status: "saved" });
+      onProgress?.({ kind: "resource-ok", label, detail: `${Math.max(1, Math.round(blob.size / 1024))} KB` });
       return path;
     } catch (exc) {
       fontAssets.set(url, { url, status: "failed", error: String(exc) });
+      onProgress?.({ kind: "resource-fail", label, reason: classifyError(exc) });
       return null;
     }
   }
@@ -403,6 +442,8 @@ async function addFontPackageToZip(
 
     cssIndex += 1;
     const cssPath = `${base}css/${pad(cssIndex, 3)}-${resource.kind}.css`;
+    const cssLabel = `${resource.kind} ${shortenUrl(resource.url)}`;
+    onProgress?.({ kind: "resource-start", label: cssLabel });
     try {
       const response = await fetchWithTimeout(resource.url);
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
@@ -416,8 +457,10 @@ async function addFontPackageToZip(
       }
       zip.file(cssPath, css);
       cssAssets.push({ kind: resource.kind, url: resource.url, path: cssPath, status: "saved" });
+      onProgress?.({ kind: "resource-ok", label: cssLabel, detail: `${Math.max(1, Math.round(css.length / 1024))} KB` });
     } catch (exc) {
       cssAssets.push({ kind: resource.kind, url: resource.url, status: "failed", error: String(exc) });
+      onProgress?.({ kind: "resource-fail", label: cssLabel, reason: classifyError(exc) });
     }
   }
 
@@ -2038,11 +2081,17 @@ function processTable(table: HTMLTableElement, ctx: PptxContext, pos: { x: numbe
   });
 }
 
-export async function buildPptxArtifact(deck: DeckState, options: ExportNameOptions = {}): Promise<ExportArtifact> {
+export async function buildPptxArtifact(
+  deck: DeckState,
+  options: ExportNameOptions = {},
+  onProgress?: ExportProgress,
+): Promise<ExportArtifact> {
   const entries = getSlideEntries(deck);
   if (entries.length === 0) throw new Error("No rendered slides to export");
   const [w, h] = getCanvasSize(deck);
   const deckName = getDeckName(deck, options);
+
+  onProgress?.({ kind: "phase", label: `Preparing ${entries.length} slides` });
 
   // Mount all slide iframes off-screen but rendered.
   const host = document.createElement("div");
@@ -2064,7 +2113,15 @@ export async function buildPptxArtifact(deck: DeckState, options: ExportNameOpti
   });
 
   try {
-    await Promise.all(frames.map((f) => waitForIframeReady(f)));
+    let ready = 0;
+    await Promise.all(
+      frames.map(async (f) => {
+        await waitForIframeReady(f);
+        ready += 1;
+        onProgress?.({ kind: "info", text: `Slide ${ready}/${frames.length} ready` });
+      }),
+    );
+    onProgress?.({ kind: "phase", label: "Building PPTX shapes" });
 
     const pptx = new PptxGenJS();
 
@@ -2161,21 +2218,29 @@ export async function buildPptxArtifact(deck: DeckState, options: ExportNameOpti
 }
 
 /** Main export function. */
-export async function exportPptx(deck: DeckState): Promise<void> {
-  const artifact = await buildPptxDownloadArtifact(deck);
+export async function exportPptx(deck: DeckState, onProgress?: ExportProgress): Promise<void> {
+  const artifact = await buildPptxDownloadArtifact(deck, onProgress);
   downloadBlob(artifact.blob, artifact.filename);
+  onProgress?.({ kind: "done", detail: `${(artifact.blob.size / 1024 / 1024).toFixed(1)} MB` });
 }
 
-async function buildPptxDownloadArtifact(deck: DeckState): Promise<ExportArtifact> {
-  const pptx = await buildPptxArtifact(deck);
+async function buildPptxDownloadArtifact(
+  deck: DeckState,
+  onProgress?: ExportProgress,
+): Promise<ExportArtifact> {
+  const pptx = await buildPptxArtifact(deck, {}, onProgress);
   const entries = getSlideEntries(deck);
   const fontPackage = collectFontPackageInfo(entries);
-  if (!hasFontPackage(fontPackage)) return pptx;
+  if (!hasFontPackage(fontPackage)) {
+    onProgress?.({ kind: "info", text: "No external fonts referenced" });
+    return pptx;
+  }
 
+  onProgress?.({ kind: "phase", label: `Bundling fonts (${fontPackage.resources.length} resources)` });
   const deckName = getDeckName(deck);
   const zip = new JSZip();
   zip.file(pptx.filename, pptx.blob);
-  await addFontPackageToZip(zip, fontPackage, deckName);
+  await addFontPackageToZip(zip, fontPackage, deckName, "", onProgress);
   zip.file(
     "README.md",
     [
@@ -2187,6 +2252,7 @@ async function buildPptxDownloadArtifact(deck: DeckState): Promise<ExportArtifac
       "",
     ].join("\n"),
   );
+  onProgress?.({ kind: "phase", label: "Building zip" });
   const blob = await zip.generateAsync({ type: "blob" });
   return { filename: `${deckName}-pptx.zip`, blob };
 }

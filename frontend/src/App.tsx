@@ -51,6 +51,8 @@ import {
   exportPngZip,
   exportPptx,
   hasExportableSlides,
+  type ExportProgress,
+  type ExportProgressEvent,
 } from "./exporter";
 import {
   DEFAULT_ZENMUX_BASE_URL,
@@ -103,6 +105,23 @@ function splitImageUrls(raw: string): string[] {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
+}
+
+function renderProgressLine(ev: ExportProgressEvent): string {
+  switch (ev.kind) {
+    case "phase":
+      return `→ ${ev.label}…`;
+    case "info":
+      return `  ${ev.text}`;
+    case "resource-start":
+      return `  → ${ev.label}`;
+    case "resource-ok":
+      return `    ✓ ${ev.detail ?? "ok"}`;
+    case "resource-fail":
+      return `    ✗ ${ev.reason}`;
+    case "done":
+      return `✓ ${ev.detail ?? "complete"}`;
+  }
 }
 
 function deckWithBaseSlides(deck: DeckState): DeckState {
@@ -730,17 +749,38 @@ export function App() {
 
   async function runExport(
     label: string,
-    fn: (d: DeckState) => Promise<void>,
+    fn: (d: DeckState, onProgress?: ExportProgress) => Promise<void>,
   ) {
     if (!deck) return;
     setShowExport(false);
     setExporting(label);
+    setBuffersByTag((b) => ({ ...b, export: `● Exporting ${label}\n` }));
+    setActiveNode("export");
+    setElapsedByTag((prev) => {
+      if (!prev.export) return prev;
+      const next = { ...prev };
+      delete next.export;
+      return next;
+    });
+    tagStartRef.current = { ...tagStartRef.current, export: Date.now() };
+
+    const onProgress: ExportProgress = (ev) => {
+      const line = renderProgressLine(ev);
+      setBuffersByTag((b) => ({ ...b, export: (b.export ?? "") + line + "\n" }));
+    };
+
     try {
-      await fn(deck);
+      await fn(deck, onProgress);
     } catch (e) {
       setErr(`Export failed: ${String(e)}`);
+      onProgress({ kind: "resource-fail", label: "export", reason: String(e) });
     } finally {
       setExporting(null);
+      setElapsedByTag((prev) =>
+        prev.export
+          ? prev
+          : { ...prev, export: Date.now() - (tagStartRef.current.export ?? Date.now()) },
+      );
     }
   }
 
@@ -976,10 +1016,10 @@ export function App() {
                 }}
               >
                 {[
-                  { key: "html", label: "Current HTML (single file)", fn: exportHtmlSingle },
-                  { key: "zip", label: "Current HTML (zip of slides)", fn: exportHtmlZip },
-                  { key: "pngs", label: "Current PNGs (zip of slides)", fn: exportPngZip },
-                  { key: "pptx", label: "Current PPTX (editable)", fn: exportPptx },
+                  { key: "html", label: "Current HTML (single file)", fn: (d: DeckState) => exportHtmlSingle(d) },
+                  { key: "zip", label: "Current HTML (zip of slides)", fn: (d: DeckState) => exportHtmlZip(d) },
+                  { key: "pngs", label: "Current PNGs (zip of slides)", fn: (d: DeckState) => exportPngZip(d) },
+                  { key: "pptx", label: "Current PPTX (editable)", fn: (d: DeckState, onProgress?: ExportProgress) => exportPptx(d, onProgress) },
                   ...(hasOriginalSlides(deck)
                     ? [
                         {
@@ -995,7 +1035,8 @@ export function App() {
                         {
                           key: "pptx-original",
                           label: "Original PPTX before images",
-                          fn: (d: DeckState) => exportPptx(deckWithBaseSlides(d)),
+                          fn: (d: DeckState, onProgress?: ExportProgress) =>
+                            exportPptx(deckWithBaseSlides(d), onProgress),
                         },
                       ]
                     : []),
