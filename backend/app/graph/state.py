@@ -125,7 +125,7 @@ def _merge_html_failures(
 Stage = Literal[
     "ingest", "outline", "await_structure",
     "advanced_chat",
-    "await_outline", "playground",
+    "await_outline", "playground", "visual_playground",
     "style", "await_style",
     "layout", "await_layout",
     "consolidate", "html", "await_image_insertion", "ready", "editing",
@@ -165,6 +165,11 @@ class SlideState(TypedDict, total=False):
     advanced_chat_messages: list[dict[str, Any]]
     advanced_chat_draft: dict[str, Any]
 
+    # ---- F'': visual playground style previews ----
+    visual_playground_candidates: list[dict[str, Any]]
+    visual_playground_selected_candidate_id: str | None
+    visual_playground_status: dict[str, Any] | None
+
     # ---- C / D: structure choice ----
     scenario_id: str
     structure_id: str
@@ -173,6 +178,7 @@ class SlideState(TypedDict, total=False):
     # ---- E ----
     outline_md: str
     outline_slides: list[dict[str, Any]]    # parsed slide list {title, bullets, role}
+    outline_revision_feedback: str | None
 
     # ---- F ----
     visual_style_md: str

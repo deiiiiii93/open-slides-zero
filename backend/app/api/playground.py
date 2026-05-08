@@ -1,8 +1,8 @@
 """Creator playground endpoints.
 
-The base deck stops after outline generation. Each lane is a separate LangGraph
-thread cloned from that outline checkpoint and then resumed through style,
-layout, and HTML with its own creator prompt.
+The base deck stops after visual style is locked. Each lane is a separate
+LangGraph thread cloned from that style-locked checkpoint and then resumed
+through layout and HTML with its own creator prompt.
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ from .owners import Owner, assign_deck_to_owner, current_owner, require_deck_own
 from .streaming import SSE_HEADERS, _sse, _stream_graph
 
 router = APIRouter()
+CREATOR_PLAYGROUND_MODEL_STAGES = ("layout", "html")
 
 
 class CreateLaneBody(BaseModel):
@@ -52,37 +53,33 @@ def _lane_response(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _find_outline_interrupt_checkpoint(thread_id: str) -> dict[str, Any] | None:
-    g = graph()
-    cfg = config_for(thread_id)
-    for snap in g.get_state_history(cfg):  # type: ignore[arg-type]
-        values = snap.values or {}
-        if "await_outline" in (snap.next or ()) and values.get("outline_slides"):
-            return snap.config
-    return None
-
-
-def _require_playground_base(thread_id: str) -> dict[str, Any]:
+def _require_playground_base(thread_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
     snap = graph().get_state(config_for(thread_id))  # type: ignore[arg-type]
     if not snap or not snap.values:
         raise HTTPException(status_code=404, detail="Unknown deck")
     if snap.values.get("current_stage") != "playground":
         raise HTTPException(
             status_code=409,
-            detail="Enable playground mode at the outline gate before creating lanes.",
+            detail="Enable Creator Playground after visual style is locked before creating lanes.",
         )
-    return snap.values
+    if not snap.values.get("visual_style"):
+        raise HTTPException(
+            status_code=409,
+            detail="Creator Playground requires a locked visual style.",
+        )
+    return snap.values, snap.config
 
 
 def _prepare_lane(thread_id: str, body: CreateLaneBody) -> tuple[dict[str, Any], dict[str, Any]]:
-    base_values = _require_playground_base(thread_id)
-    target_cfg = _find_outline_interrupt_checkpoint(thread_id)
-    if target_cfg is None:
-        raise HTTPException(status_code=409, detail="No outline checkpoint found for playground.")
+    base_values, target_cfg = _require_playground_base(thread_id)
     try:
-        model_overrides = normalize_lane_model_overrides(body.model_overrides)
+        model_overrides = normalize_lane_model_overrides(
+            body.model_overrides,
+            allowed_stages=CREATOR_PLAYGROUND_MODEL_STAGES,
+        )
         thinking_effort_overrides = normalize_lane_thinking_effort_overrides(
-            body.thinking_effort_overrides
+            body.thinking_effort_overrides,
+            allowed_stages=CREATOR_PLAYGROUND_MODEL_STAGES,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -110,9 +107,9 @@ def _prepare_lane(thread_id: str, body: CreateLaneBody) -> tuple[dict[str, Any],
                 "creator_prompt": creator_prompt,
                 "lane_model_overrides": model_overrides or None,
                 "lane_thinking_effort_overrides": thinking_effort_overrides or None,
-                "current_stage": "style",
+                "current_stage": "layout",
             },
-            as_node="await_outline",
+            as_node="await_style",
         )
     except Exception:
         playground_store.delete_lane_record(thread_id, lane["lane_id"])
@@ -123,7 +120,7 @@ def _prepare_lane(thread_id: str, body: CreateLaneBody) -> tuple[dict[str, Any],
 
 @router.get("/playground/model-options")
 def get_playground_model_options() -> dict[str, Any]:
-    return lane_model_options()
+    return lane_model_options(CREATOR_PLAYGROUND_MODEL_STAGES)
 
 
 @router.get("/runtime/model-options")

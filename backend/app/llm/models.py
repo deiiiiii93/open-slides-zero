@@ -162,28 +162,29 @@ def all_models() -> dict[str, str]:
     return {node: get_model(node) for node in _DEFAULTS}
 
 
-def lane_model_options() -> dict[str, Any]:
+def lane_model_options(stages: tuple[str, ...] = LANE_MODEL_STAGES) -> dict[str, Any]:
     """Return the curated model choices supported by Creator Playground lanes."""
     options = [dict(option) for option in _CURATED_LANE_MODEL_OPTIONS]
     effort_options = [dict(option) for option in _CURATED_THINKING_EFFORT_OPTIONS]
-    return {
-        "stages": {
-            "style": {
-                "label": "Style",
-                "default_model": get_model("style.text"),
-                "options": options,
-            },
-            "layout": {
-                "label": "Layout",
-                "default_model": get_model("layout"),
-                "options": options,
-            },
-            "html": {
-                "label": "HTML",
-                "default_model": get_model("html"),
-                "options": options,
-            },
+    stage_defs = {
+        "style": {
+            "label": "Style",
+            "default_model": get_model("style.text"),
+            "options": options,
         },
+        "layout": {
+            "label": "Layout",
+            "default_model": get_model("layout"),
+            "options": options,
+        },
+        "html": {
+            "label": "HTML",
+            "default_model": get_model("html"),
+            "options": options,
+        },
+    }
+    return {
+        "stages": {stage: stage_defs[stage] for stage in stages if stage in stage_defs},
         "thinking_efforts": {
             "default_effort": None,
             "options": effort_options,
@@ -218,7 +219,11 @@ def runtime_model_options() -> dict[str, Any]:
     }
 
 
-def normalize_lane_model_overrides(overrides: Any) -> dict[str, str]:
+def normalize_lane_model_overrides(
+    overrides: Any,
+    *,
+    allowed_stages: tuple[str, ...] = LANE_MODEL_STAGES,
+) -> dict[str, str]:
     if overrides is None:
         return {}
     if not isinstance(overrides, dict):
@@ -227,8 +232,8 @@ def normalize_lane_model_overrides(overrides: Any) -> dict[str, str]:
     normalized: dict[str, str] = {}
     for raw_stage, raw_model in overrides.items():
         stage = str(raw_stage)
-        if stage not in LANE_MODEL_STAGES:
-            allowed = ", ".join(LANE_MODEL_STAGES)
+        if stage not in allowed_stages:
+            allowed = ", ".join(allowed_stages)
             raise ValueError(f"Unknown model override stage '{stage}'. Allowed stages: {allowed}.")
         model = str(raw_model).strip()
         if not model:
@@ -239,7 +244,11 @@ def normalize_lane_model_overrides(overrides: Any) -> dict[str, str]:
     return normalized
 
 
-def normalize_lane_thinking_effort_overrides(overrides: Any) -> dict[str, str]:
+def normalize_lane_thinking_effort_overrides(
+    overrides: Any,
+    *,
+    allowed_stages: tuple[str, ...] = LANE_MODEL_STAGES,
+) -> dict[str, str]:
     if overrides is None:
         return {}
     if not isinstance(overrides, dict):
@@ -247,8 +256,8 @@ def normalize_lane_thinking_effort_overrides(overrides: Any) -> dict[str, str]:
     normalized: dict[str, str] = {}
     for raw_stage, raw_effort in overrides.items():
         stage = str(raw_stage)
-        if stage not in LANE_MODEL_STAGES:
-            allowed = ", ".join(LANE_MODEL_STAGES)
+        if stage not in allowed_stages:
+            allowed = ", ".join(allowed_stages)
             raise ValueError(
                 f"Unknown thinking effort override stage '{stage}'. Allowed stages: {allowed}."
             )

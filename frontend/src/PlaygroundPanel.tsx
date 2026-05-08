@@ -56,7 +56,7 @@ const CANVAS: Record<string, [number, number]> = {
   "4:3": [960, 720],
   "21:9": [960, 411],
 };
-const MODEL_STAGE_ORDER = ["style", "layout", "html"] as const;
+const MODEL_STAGE_ORDER = ["layout", "html"] as const;
 type ModelStage = (typeof MODEL_STAGE_ORDER)[number];
 
 function useElementWidth(fallback: number) {

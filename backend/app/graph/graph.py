@@ -4,9 +4,11 @@ Topology (matches the plan):
 
   ingest → outline_propose → [interrupt: structure]
                               ↓
-                        outline → [interrupt: outline/playground]
+                        outline → [interrupt: outline review/revise]
                               ↓
-                         style → [interrupt: style]
+                  visual_playground or style → [interrupt: style]
+                              ↓                      ↓
+                         playground or layout ←──────┘
                                           ↓
                                        layout → [interrupt: layout]
                                                 ↓
@@ -96,8 +98,14 @@ def await_style_review(state: SlideState) -> dict[str, Any]:
         "gate": "style",
         "visual_style_md": state.get("visual_style_md"),
         "visual_style": state.get("visual_style"),
-        "hint": "Return {approved: true} to continue, or {revise: 'free-text feedback'} to rerun.",
+        "hint": (
+            "Return {approved: true} to continue to layout, "
+            "{playground: true} to open Creator Playground with this locked style, "
+            "or {revise: 'free-text feedback'} to rerun."
+        ),
     })
+    if resume.get("playground"):
+        return {"current_stage": "playground"}
     if resume.get("approved"):
         return {"current_stage": "layout"}
     # User wants revisions → loop back to style via a feedback preference
@@ -116,13 +124,23 @@ def await_outline_review(state: SlideState) -> dict[str, Any]:
         "outline_md": state.get("outline_md"),
         "outline_slides": state.get("outline_slides"),
         "hint": (
-            "Return {approved: true} to continue the normal flow, or "
-            "{playground: true} to stop here and create creator playground lanes."
+            "Return {revise: 'free-text feedback'} to regenerate the outline, "
+            "{visual_playground: true} to explore visual style candidates, or "
+            "{approved: true} to continue with legacy visual style generation."
         ),
     })
     if resume.get("playground"):
-        return {"current_stage": "playground"}
-    return {"current_stage": "style"}
+        raise ValueError("Creator Playground is available after visual style is locked.")
+    if resume.get("revise"):
+        return {
+            "current_stage": "outline",
+            "outline_revision_feedback": str(resume.get("revise") or ""),
+        }
+    if resume.get("visual_playground"):
+        return {"current_stage": "visual_playground"}
+    if resume.get("approved"):
+        return {"current_stage": "style"}
+    raise ValueError("Outline review requires revise, visual_playground, or approved.")
 
 
 def await_layout_review(state: SlideState) -> dict[str, Any]:
@@ -302,15 +320,33 @@ def build_graph(checkpointer: SqliteSaver | None = None):
     g.add_edge("outline", "await_outline")
 
     def outline_next(state: SlideState) -> str:
-        return "__end__" if state.get("current_stage") == "playground" else "style"
-    g.add_conditional_edges("await_outline", outline_next, {"style": "style", "__end__": END})
+        stage = state.get("current_stage")
+        if stage == "outline":
+            return "outline"
+        if stage == "visual_playground":
+            return "__end__"
+        return "style"
+    g.add_conditional_edges(
+        "await_outline",
+        outline_next,
+        {"outline": "outline", "style": "style", "__end__": END},
+    )
 
     g.add_edge("style", "await_style")
 
     # Style gate loops back to style when user requests revisions.
     def style_next(state: SlideState) -> str:
-        return "style" if state.get("current_stage") == "style" else "layout"
-    g.add_conditional_edges("await_style", style_next, {"style": "style", "layout": "layout"})
+        stage = state.get("current_stage")
+        if stage == "style":
+            return "style"
+        if stage == "playground":
+            return "__end__"
+        return "layout"
+    g.add_conditional_edges(
+        "await_style",
+        style_next,
+        {"style": "style", "layout": "layout", "__end__": END},
+    )
 
     g.add_edge("layout", "await_layout")
 

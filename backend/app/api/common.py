@@ -98,8 +98,9 @@ def synthetic_interrupt(values: dict[str, Any] | None) -> dict[str, Any] | None:
             "outline_md": values.get("outline_md"),
             "outline_slides": values.get("outline_slides"),
             "hint": (
-                "Return {approved: true} to continue the normal flow, or "
-                "{playground: true} to stop here and create creator playground lanes."
+                "Return {revise: 'free-text feedback'} to regenerate the outline, "
+                "{visual_playground: true} to explore visual style candidates, or "
+                "{approved: true} to continue with legacy visual style generation."
             ),
         }
     if stage == "await_style":
@@ -108,7 +109,8 @@ def synthetic_interrupt(values: dict[str, Any] | None) -> dict[str, Any] | None:
             "visual_style_md": values.get("visual_style_md"),
             "visual_style": values.get("visual_style"),
             "hint": (
-                "Return {approved: true} to continue, or "
+                "Return {approved: true} to continue to layout, "
+                "{playground: true} to open Creator Playground with this locked style, or "
                 "{revise: 'free-text feedback'} to rerun."
             ),
         }
@@ -165,11 +167,28 @@ def _resume_patch_for_synthetic_gate(
             ),
         )
     if stage == "await_outline":
+        if resume.get("playground"):
+            raise ValueError("Creator Playground is available after visual style is locked.")
+        if resume.get("revise"):
+            current_stage = "outline"
+            patch = {
+                "current_stage": current_stage,
+                "outline_revision_feedback": str(resume.get("revise") or ""),
+            }
+            return ("await_outline", patch)
+        if resume.get("visual_playground"):
+            current_stage = "visual_playground"
+        elif resume.get("approved"):
+            current_stage = "style"
+        else:
+            raise ValueError("Outline review requires revise, visual_playground, or approved.")
         return (
             "await_outline",
-            {"current_stage": "playground" if resume.get("playground") else "style"},
+            {"current_stage": current_stage},
         )
     if stage == "await_style":
+        if resume.get("playground"):
+            return ("await_style", {"current_stage": "playground"})
         if resume.get("approved"):
             return ("await_style", {"current_stage": "layout"})
         return (

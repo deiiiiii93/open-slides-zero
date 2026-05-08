@@ -80,14 +80,16 @@ def _stream_graph(
     g = graph()
     cfg = attach_runtime_config_id(cfg)
     cancel_event = stream_module.register_cancel_event(thread_id)
+    cancelled = False
     try:
         for mode, chunk in g.stream(
             input_payload,
             cfg,  # type: ignore[arg-type]
             stream_mode=["custom", "updates"],
         ):
-            if cancel_event.is_set():
+            if cancel_event.is_set() or g.get_state(cfg) is None:  # type: ignore[arg-type]
                 yield _sse({"type": "cancelled", "thread_id": thread_id})
+                cancelled = True
                 break
             if mode == "custom":
                 ch = chunk.get("channel") if isinstance(chunk, dict) else None
@@ -107,6 +109,8 @@ def _stream_graph(
                     for node, patch in chunk.items():
                         safe_patch = _safe_patch(patch)
                         yield _sse({"type": "update", "node": node, "patch": safe_patch})
+        if cancelled:
+            return
         # Finalize: emit interrupt (if any) + final state.
         snap = g.get_state(cfg)  # type: ignore[arg-type]
         if snap and snap.interrupts:
@@ -329,7 +333,10 @@ def stream_resume(
     if snap.interrupts:
         input_payload: Any = Command(resume=body.payload)
     else:
-        recovered_cfg = resume_synthetic_interrupt(thread_id, body.payload)
+        try:
+            recovered_cfg = resume_synthetic_interrupt(thread_id, body.payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         if recovered_cfg is not None:
             cfg = recovered_cfg
             input_payload = None

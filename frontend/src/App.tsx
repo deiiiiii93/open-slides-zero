@@ -20,6 +20,7 @@ import {
 import { LiveStream } from "./LiveStream";
 import { Markdown } from "./Markdown";
 import { PlaygroundPanel } from "./PlaygroundPanel";
+import { VisualPlaygroundPanel } from "./VisualPlaygroundPanel";
 import {
   api,
   STREAM_BASE,
@@ -40,6 +41,7 @@ import {
   type ShareDeckResponse,
   type SharedDeckResponse,
   type ThinkingEffort,
+  type VisualPlaygroundGenerateBody,
 } from "./api";
 import { streamSSE, type StreamEvent } from "./sse";
 import {
@@ -578,6 +580,31 @@ export function App() {
 
   async function onAdvancedChatContinue(draft: AdvancedChatDraft) {
     await onResume({ approved: true, draft });
+  }
+
+  async function onVisualPlaygroundGenerate(body: VisualPlaygroundGenerateBody) {
+    if (!deck) return;
+    await consumeStream(api.visualPlaygroundStreamUrl(deck.thread_id), body);
+  }
+
+  async function onVisualPlaygroundSelect(candidateId: string) {
+    if (!deck || busy) return;
+    setErr(null);
+    setBusy(true);
+    try {
+      const nextDeck = await api.selectVisualPlaygroundCandidate(deck.thread_id, candidateId);
+      setDeck(nextDeck);
+      rememberDeck(nextDeck);
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onVisualPlaygroundContinue(destination: "layout" | "playground") {
+    if (!deck) return;
+    await consumeStream(api.continueVisualPlaygroundStreamUrl(deck.thread_id), { destination });
   }
 
   async function onComment(text: string, box: { x: number; y: number; w: number; h: number }) {
@@ -1437,7 +1464,15 @@ export function App() {
           )}
 
           {(!readyReviewEnabled || selectedReviewStage === "ready") && (
-            stage === "playground" && !hasInterrupt ? (
+            stage === "visual_playground" && !hasInterrupt ? (
+              <VisualPlaygroundPanel
+                deck={deck}
+                busy={busy}
+                onGenerate={onVisualPlaygroundGenerate}
+                onSelect={onVisualPlaygroundSelect}
+                onContinue={onVisualPlaygroundContinue}
+              />
+            ) : stage === "playground" && !hasInterrupt ? (
               <PlaygroundPanel deck={deck} catalog={catalog} />
             ) : (
               <>
@@ -1534,7 +1569,14 @@ export function App() {
         </main>
 
         {showLive && (
-          <aside style={{ position: "sticky", top: 16, alignSelf: "start" }}>
+          <aside
+            style={{
+              position: "sticky",
+              top: 16,
+              alignSelf: "start",
+              marginTop: stage === "visual_playground" && !hasInterrupt ? 12 : 0,
+            }}
+          >
             <LiveStream
               buffersByTag={buffersByTag}
               activeNode={activeNode}
@@ -1738,17 +1780,32 @@ function ImageInsertionPanel({
             Keep exporting the placeholder deck, or review matches and apply real images.
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button type="button" disabled={Boolean(panelBusy) || generationActive} onClick={refreshPlan}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <button
+            type="button"
+            className="osz-button"
+            disabled={Boolean(panelBusy) || generationActive}
+            onClick={refreshPlan}
+          >
             {plan ? "Refresh matches" : "Review matches"}
           </button>
           {plan && (
-            <button type="button" disabled={Boolean(panelBusy) || generationActive} onClick={applyMappings}>
+            <button
+              type="button"
+              className="osz-button osz-button-primary"
+              disabled={Boolean(panelBusy) || generationActive}
+              onClick={applyMappings}
+            >
               Apply selected images
             </button>
           )}
           {plan && noUserImageSlots.length > 0 && (
-            <button type="button" disabled={Boolean(panelBusy) || generationActive} onClick={generateAllNoUserImages}>
+            <button
+              type="button"
+              className="osz-button"
+              disabled={Boolean(panelBusy) || generationActive}
+              onClick={generateAllNoUserImages}
+            >
               Generate all no-user images
             </button>
           )}
@@ -1769,19 +1826,20 @@ function ImageInsertionPanel({
                 className="osz-image-row"
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "minmax(160px, 1fr) minmax(220px, 1.2fr)",
+                  gridTemplateColumns: "minmax(0, 0.95fr) minmax(0, 1.35fr)",
                   gap: 10,
                   padding: 10,
                   border: "1.5px solid #0a0a0a",
                   borderRadius: 0,
                   background: "#f5f3ee",
+                  minWidth: 0,
                 }}
               >
-                <div>
+                <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 12, color: "#5c5852" }}>Slide {slot.slide_idx + 1}</div>
-                  <div style={{ fontSize: 14, fontWeight: 600 }}>{slot.hint}</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, overflowWrap: "anywhere" }}>{slot.hint}</div>
                 </div>
-                <div style={{ display: "grid", gap: 8, position: "relative" }}>
+                <div style={{ display: "grid", gap: 8, position: "relative", minWidth: 0 }}>
                   <button
                     type="button"
                     onClick={() => setOpenPickerSlot((open) => (open === slot.slot_id ? null : slot.slot_id))}
@@ -1799,9 +1857,11 @@ function ImageInsertionPanel({
                       fontSize: 13,
                       cursor: "pointer",
                       textAlign: "left",
+                      minWidth: 0,
+                      boxSizing: "border-box",
                     }}
                   >
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {selectedAsset ? assetLabel(selectedAsset) : "No user image"}
                     </span>
                     <span aria-hidden="true" style={{ color: "#5c5852" }}>▾</span>
@@ -1817,13 +1877,14 @@ function ImageInsertionPanel({
                         maxHeight: 390,
                         overflowY: "auto",
                         display: "grid",
-                        gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+                        gridTemplateColumns: "minmax(0, 1fr)",
                         gap: 8,
                         padding: 10,
                         border: "1.5px solid #0a0a0a",
                         borderRadius: 0,
                         background: "#f5f3ee",
                         boxShadow: "none",
+                        boxSizing: "border-box",
                       }}
                     >
                       <button
@@ -1833,14 +1894,17 @@ function ImageInsertionPanel({
                           setOpenPickerSlot(null);
                         }}
                         style={{
-                          gridColumn: "1 / -1",
-                          padding: 8,
+                          width: "100%",
+                          padding: "9px 10px",
                           border: selectedAsset ? "1.5px solid #0a0a0a" : "2px solid #0a0a0a",
                           borderRadius: 0,
                           background: selectedAsset ? "#f5f3ee" : "#e8e3d8",
                           textAlign: "left",
                           fontFamily: "inherit",
+                          fontSize: 13,
+                          fontWeight: 700,
                           cursor: "pointer",
+                          boxSizing: "border-box",
                         }}
                       >
                         No user image
@@ -1860,17 +1924,19 @@ function ImageInsertionPanel({
                             }}
                             style={{
                               display: "grid",
-                              gridTemplateColumns: "70px minmax(0, 1fr)",
-                              gap: 8,
+                              gridTemplateColumns: "96px minmax(0, 1fr)",
+                              gap: 12,
                               alignItems: "center",
-                              minHeight: 72,
-                              padding: 7,
+                              width: "100%",
+                              minHeight: 82,
+                              padding: 9,
                               border: selected ? "2px solid #0a0a0a" : "1.5px solid #0a0a0a",
                               borderRadius: 0,
                               background: selected ? "#e8e3d8" : "#f5f3ee",
                               cursor: "pointer",
                               textAlign: "left",
                               fontFamily: "inherit",
+                              boxSizing: "border-box",
                             }}
                           >
                             <img
@@ -1878,8 +1944,8 @@ function ImageInsertionPanel({
                               alt=""
                               loading="lazy"
                               style={{
-                                width: 70,
-                                height: 54,
+                                width: 96,
+                                height: 64,
                                 objectFit: "cover",
                                 borderRadius: 0,
                                 border: "1px solid #0a0a0a",
@@ -1889,10 +1955,10 @@ function ImageInsertionPanel({
                             <span
                               style={{
                                 minWidth: 0,
-                                fontSize: 12,
-                                lineHeight: 1.25,
+                                fontSize: 13,
+                                lineHeight: 1.35,
                                 color: "#1c1c1e",
-                                overflowWrap: "anywhere",
+                                overflowWrap: "break-word",
                               }}
                             >
                               {assetLabel(asset)}
@@ -1930,6 +1996,7 @@ function ImageInsertionPanel({
                       />
                       <button
                         type="button"
+                        className="osz-button"
                         disabled={Boolean(panelBusy) || Boolean(generatingHint)}
                         onClick={() => generateForSlot(slot)}
                       >

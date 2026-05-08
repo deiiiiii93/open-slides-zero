@@ -7,7 +7,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api import comments as comments_api
-from app.api import common, decks, hitl, playground_store
+from app.api import common, decks, hitl, playground, playground_store
+from app.api.streaming import _stream_graph
 from app.artifacts import store
 from app.graph import graph as graph_module
 from app.graph.nodes import html_one, layout, outline, style
@@ -47,9 +48,11 @@ def isolated_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     calls: dict[str, object] = {
         "outline_count": 0,
+        "outline_messages": [],
         "style_messages": [],
         "layout_messages": [],
         "html_messages": [],
+        "style_count": 0,
         "style_model": None,
         "layout_model": None,
         "html_models": [],
@@ -67,6 +70,7 @@ def isolated_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             )
         if schema is outline._Outline:
             calls["outline_count"] = int(calls["outline_count"]) + 1
+            calls["outline_messages"] = messages
             return schema(
                 language="en",
                 summary="demo",
@@ -84,6 +88,7 @@ def isolated_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                 ],
             )
         if schema is style._VisualStyle:
+            calls["style_count"] = int(calls["style_count"]) + 1
             calls["style_model"] = model
             calls["style_messages"] = messages
             calls["style_kwargs"] = _kwargs
@@ -189,8 +194,11 @@ def _create_outline_gate_deck() -> dict:
 def _create_playground_base() -> dict:
     outlined = _create_outline_gate_deck()
     assert _interrupt_gate(outlined) == "outline"
+    styled = hitl.resume_deck(outlined["thread_id"], {"approved": True})
+    assert _interrupt_gate(styled) == "style"
     base = hitl.resume_deck(outlined["thread_id"], {"playground": True})
     assert base["values"]["current_stage"] == "playground"
+    assert base["values"].get("visual_style")
     assert not base["interrupts"]
     return base
 
@@ -339,10 +347,33 @@ def test_outline_gate_continues_normal_flow_when_approved(isolated_graph):
     assert _interrupt_gate(styled) == "style"
 
 
-def test_playground_mode_stops_base_deck_after_outline(isolated_graph):
+def test_outline_gate_revise_regenerates_outline_with_human_feedback(isolated_graph):
+    calls = isolated_graph
+    outlined = _create_outline_gate_deck()
+    feedback = "Add a sharper risk mitigation slide."
+
+    revised = hitl.resume_deck(outlined["thread_id"], {"revise": feedback})
+
+    assert _interrupt_gate(revised) == "outline"
+    assert calls["outline_count"] == 2
+    assert _has_prompt(calls["outline_messages"], feedback)
+    assert revised["values"].get("outline_revision_feedback") is None
+
+
+def test_outline_gate_rejects_creator_playground_before_style_lock(isolated_graph):
+    outlined = _create_outline_gate_deck()
+
+    with pytest.raises(Exception) as excinfo:
+        hitl.resume_deck(outlined["thread_id"], {"playground": True})
+
+    assert "after visual style is locked" in str(excinfo.value)
+
+
+def test_playground_mode_stops_base_deck_after_style_lock(isolated_graph):
     base = _create_playground_base()
 
     assert base["values"]["current_stage"] == "playground"
+    assert base["values"].get("visual_style")
     assert base["next"] == []
 
 
@@ -353,15 +384,16 @@ def test_playground_model_options_endpoint(isolated_graph):
 
     assert response.status_code == 200
     stages = response.json()["stages"]
-    assert set(stages) == {"style", "layout", "html"}
+    assert set(stages) == {"layout", "html"}
     assert all(stages[stage]["options"] for stage in stages)
 
 
-def test_lane_creation_clones_outline_and_applies_creator_prompt(isolated_graph):
+def test_lane_creation_clones_locked_style_and_applies_creator_prompt_to_layout_html(isolated_graph):
     calls = isolated_graph
     base = _create_playground_base()
     prompt = "Use a stark black-and-gold investor pitch style."
     client = TestClient(app)
+    base_style_count = calls["style_count"]
 
     response = client.post(
         f"/decks/{base['thread_id']}/playground/lanes/stream",
@@ -376,11 +408,9 @@ def test_lane_creation_clones_outline_and_applies_creator_prompt(isolated_graph)
     assert calls["outline_count"] == 1
     assert lane_state["values"]["parent_thread_id"] == base["thread_id"]
     assert lane_state["values"]["creator_prompt"] == prompt
-    assert _interrupt_gate(lane_state) == "style"
-    assert _has_prompt(calls["style_messages"], prompt)
-
-    laid_out = hitl.resume_deck(lane_state["thread_id"], {"approved": True})
-    assert _interrupt_gate(laid_out) == "layout"
+    assert lane_state["values"]["visual_style"] == base["values"]["visual_style"]
+    assert calls["style_count"] == base_style_count
+    assert _interrupt_gate(lane_state) == "layout"
     assert _has_prompt(calls["layout_messages"], prompt)
 
     ready = hitl.resume_deck(lane_state["thread_id"], {"approved": True, "overrides": {}})
@@ -394,7 +424,6 @@ def test_lane_creation_applies_model_overrides_per_stage(isolated_graph):
     base = _create_playground_base()
     client = TestClient(app)
     overrides = {
-        "style": "google/gemini-3.1-pro-preview",
         "layout": "openai/gpt-5.4",
         "html": "openai/gpt-5.4-mini",
     }
@@ -410,11 +439,8 @@ def test_lane_creation_applies_model_overrides_per_stage(isolated_graph):
     lane_state = done["state"]
 
     assert lane_state["values"]["lane_model_overrides"] == overrides
-    assert calls["style_model"] == overrides["style"]
-
-    laid_out = hitl.resume_deck(lane_state["thread_id"], {"approved": True})
-    assert _interrupt_gate(laid_out) == "layout"
     assert calls["layout_model"] == overrides["layout"]
+    assert _interrupt_gate(lane_state) == "layout"
 
     ready = hitl.resume_deck(lane_state["thread_id"], {"approved": True, "overrides": {}})
     assert ready["values"]["current_stage"] == "ready"
@@ -427,7 +453,6 @@ def test_lane_creation_applies_thinking_effort_overrides_per_stage(isolated_grap
     base = _create_playground_base()
     client = TestClient(app)
     overrides = {
-        "style": "low",
         "layout": "medium",
         "html": "high",
     }
@@ -446,11 +471,8 @@ def test_lane_creation_applies_thinking_effort_overrides_per_stage(isolated_grap
     lane_state = done["state"]
 
     assert lane_state["values"]["lane_thinking_effort_overrides"] == overrides
-    assert calls["style_kwargs"]["reasoning_effort"] == overrides["style"]
-
-    laid_out = hitl.resume_deck(lane_state["thread_id"], {"approved": True})
-    assert _interrupt_gate(laid_out) == "layout"
     assert calls["layout_kwargs"]["reasoning_effort"] == overrides["layout"]
+    assert _interrupt_gate(lane_state) == "layout"
 
     ready = hitl.resume_deck(lane_state["thread_id"], {"approved": True, "overrides": {}})
     assert ready["values"]["current_stage"] == "ready"
@@ -470,22 +492,11 @@ def test_lane_resume_preserves_thinking_effort(isolated_graph):
     assert response.status_code == 200
     done = next(event for event in _parse_sse_events(response.text) if event["type"] == "done")
     lane_thread_id = done["state"]["thread_id"]
-    assert _interrupt_gate(done["state"]) == "style"
+    assert _interrupt_gate(done["state"]) == "layout"
+    assert calls["layout_kwargs"]["reasoning_effort"] == "low"
 
     calls["layout_kwargs"] = {}
     calls["html_kwargs"] = []
-
-    resumed_to_layout = client.post(
-        f"/decks/{lane_thread_id}/resume/stream",
-        json={"payload": {"approved": True}},
-    )
-    assert resumed_to_layout.status_code == 200
-    layout_done = next(
-        event for event in _parse_sse_events(resumed_to_layout.text)
-        if event["type"] == "done"
-    )
-    assert _interrupt_gate(layout_done["state"]) == "layout"
-    assert calls["layout_kwargs"]["reasoning_effort"] == "low"
 
     resumed_to_ready = client.post(
         f"/decks/{lane_thread_id}/resume/stream",
@@ -515,10 +526,7 @@ def test_lane_creation_without_model_overrides_uses_defaults(isolated_graph):
     lane_state = done["state"]
 
     assert lane_state["values"].get("lane_model_overrides") is None
-    assert calls["style_model"] == get_model("style.text")
-
-    laid_out = hitl.resume_deck(lane_state["thread_id"], {"approved": True})
-    assert _interrupt_gate(laid_out) == "layout"
+    assert _interrupt_gate(lane_state) == "layout"
     assert calls["layout_model"] == get_model("layout")
 
     ready = hitl.resume_deck(lane_state["thread_id"], {"approved": True, "overrides": {}})
@@ -536,13 +544,19 @@ def test_lane_creation_rejects_invalid_model_overrides(isolated_graph):
     )
     bad_model = client.post(
         f"/decks/{base['thread_id']}/playground/lanes/stream",
-        json={"model_overrides": {"style": "unknown/provider-model"}},
+        json={"model_overrides": {"layout": "unknown/provider-model"}},
+    )
+    bad_style_stage = client.post(
+        f"/decks/{base['thread_id']}/playground/lanes/stream",
+        json={"model_overrides": {"style": "openai/gpt-5.4"}},
     )
 
     assert bad_stage.status_code == 400
     assert "Unknown model override stage" in bad_stage.json()["detail"]
     assert bad_model.status_code == 400
     assert "Unknown lane model id" in bad_model.json()["detail"]
+    assert bad_style_stage.status_code == 400
+    assert "Unknown model override stage" in bad_style_stage.json()["detail"]
 
 
 def test_lane_creation_rejects_invalid_thinking_effort_overrides(isolated_graph):
@@ -555,13 +569,19 @@ def test_lane_creation_rejects_invalid_thinking_effort_overrides(isolated_graph)
     )
     bad_effort = client.post(
         f"/decks/{base['thread_id']}/playground/lanes/stream",
-        json={"thinking_effort_overrides": {"style": "extreme"}},
+        json={"thinking_effort_overrides": {"layout": "extreme"}},
+    )
+    bad_style_stage = client.post(
+        f"/decks/{base['thread_id']}/playground/lanes/stream",
+        json={"thinking_effort_overrides": {"style": "high"}},
     )
 
     assert bad_stage.status_code == 400
     assert "Unknown thinking effort override stage" in bad_stage.json()["detail"]
     assert bad_effort.status_code == 400
     assert "Unknown thinking effort" in bad_effort.json()["detail"]
+    assert bad_style_stage.status_code == 400
+    assert "Unknown thinking effort override stage" in bad_style_stage.json()["detail"]
 
 
 def test_stale_lane_layout_gate_can_resume_from_synthetic_interrupt(isolated_graph):
@@ -575,14 +595,12 @@ def test_stale_lane_layout_gate_can_resume_from_synthetic_interrupt(isolated_gra
     done = next(event for event in _parse_sse_events(response.text) if event["type"] == "done")
     lane_state = done["state"]
     lane_thread_id = lane_state["thread_id"]
-
-    laid_out = hitl.resume_deck(lane_thread_id, {"approved": True})
-    assert _interrupt_gate(laid_out) == "layout"
+    assert _interrupt_gate(lane_state) == "layout"
 
     graph_module.get_graph().update_state(  # type: ignore[arg-type]
         common.config_for(lane_thread_id),
         {
-            "layouts": laid_out["values"]["layouts"],
+            "layouts": lane_state["values"]["layouts"],
             "current_stage": "await_layout",
         },
         as_node="layout",
@@ -621,14 +639,6 @@ def test_failed_lane_resume_emits_recoverable_done_state(
 ):
     base = _create_playground_base()
     client = TestClient(app)
-    response = client.post(
-        f"/decks/{base['thread_id']}/playground/lanes/stream",
-        json={"creator_prompt": "Use a Kimi lane."},
-    )
-    assert response.status_code == 200
-    done = next(event for event in _parse_sse_events(response.text) if event["type"] == "done")
-    lane_thread_id = done["state"]["thread_id"]
-
     def fail_layout(_model, _messages, schema, **_kwargs):
         if schema is layout._BulkSignals:
             raise RuntimeError("provider rejected params")
@@ -637,8 +647,8 @@ def test_failed_lane_resume_emits_recoverable_done_state(
     monkeypatch.setattr(layout.zenmux, "chat_structured", fail_layout)
 
     failed = client.post(
-        f"/decks/{lane_thread_id}/resume/stream",
-        json={"payload": {"approved": True}},
+        f"/decks/{base['thread_id']}/playground/lanes/stream",
+        json={"creator_prompt": "Use a Kimi lane."},
     )
 
     assert failed.status_code == 200
@@ -669,7 +679,6 @@ def test_playground_lane_comment_stays_html_only_even_if_classifier_says_layout(
     lane_state = done["state"]
     lane_thread_id = lane_state["thread_id"]
 
-    hitl.resume_deck(lane_thread_id, {"approved": True})
     ready = hitl.resume_deck(lane_thread_id, {"approved": True, "overrides": {}})
     original_count = len(ready["values"]["html_slides"])
 
@@ -795,28 +804,21 @@ def test_delete_during_stream_emits_cancelled_event(
     import threading
     import time
 
-    client = TestClient(app)
+    delete_client = TestClient(app)
     base = _create_playground_base()
     parent_thread_id = base["thread_id"]
 
-    response = client.post(
-        f"/decks/{parent_thread_id}/playground/lanes/stream",
-        json={"creator_prompt": "fast lane"},
+    lane, lane_cfg = playground._prepare_lane(
+        parent_thread_id,
+        playground.CreateLaneBody(creator_prompt="fast lane"),
     )
-    assert response.status_code == 200
-    lane = next(
-        event for event in _parse_sse_events(response.text) if event["type"] == "lane"
-    )["lane"]
     lane_thread_id = lane["lane_thread_id"]
     lane_id = lane["lane_id"]
+    layout_started = threading.Event()
 
     def slow_layout(_model, _messages, schema, **_kwargs):
         if schema is layout._BulkSignals:
             for _ in range(50):
-                if common.graph().get_state(  # type: ignore[arg-type]
-                    {"configurable": {"thread_id": lane_thread_id}}
-                ) is None:
-                    break
                 time.sleep(0.05)
         return layout._BulkSignals(slides=[])
 
@@ -825,19 +827,22 @@ def test_delete_during_stream_emits_cancelled_event(
     body_chunks: list[str] = []
 
     def consume() -> None:
-        with client.stream(
-            "POST",
-            f"/decks/{lane_thread_id}/resume/stream",
-            json={"payload": {"approved": True}},
-        ) as resp:
-            for chunk in resp.iter_text():
-                body_chunks.append(chunk)
+        for chunk in _stream_graph(None, lane_cfg, lane_thread_id):
+            body_chunks.append(chunk)
+            for event in _parse_sse_events("".join(body_chunks)):
+                if (
+                    event["type"] == "event"
+                    and event.get("node") == "layout"
+                    and event.get("state") == "started"
+                ):
+                    layout_started.set()
 
     consumer = threading.Thread(target=consume)
     consumer.start()
+    assert layout_started.wait(timeout=5.0)
     time.sleep(0.3)
 
-    deleted = client.delete(
+    deleted = delete_client.delete(
         f"/decks/{parent_thread_id}/playground/lanes/{lane_id}"
     )
     consumer.join(timeout=10.0)

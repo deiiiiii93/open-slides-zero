@@ -152,6 +152,19 @@ def outline_node(state: dict[str, Any]) -> dict[str, Any]:
             "image_slot referencing them.\n"
         )
 
+    revision_feedback = (state.get("outline_revision_feedback") or "").strip()
+    prior_outline = (state.get("outline_md") or "").strip()
+    revision_block = ""
+    if revision_feedback:
+        revision_block = (
+            "\n\nOUTLINE REVISION REQUEST:\n"
+            "Regenerate the outline by applying these human review comments. "
+            "Keep the selected scenario and structure unless the comments explicitly "
+            "require a change.\n\n"
+            f"Human comments:\n{revision_feedback}\n\n"
+            f"Prior outline:\n{prior_outline[:6000] or '(none)'}"
+        )
+
     messages = [
         {
             "role": "system",
@@ -168,7 +181,7 @@ def outline_node(state: dict[str, Any]) -> dict[str, Any]:
                 "Keep bullets short and information-dense. Detect language from the material."
             ),
         },
-        {"role": "user", "content": f"MATERIAL:\n{materials_blob}"},
+        {"role": "user", "content": f"MATERIAL:\n{materials_blob}{revision_block}"},
     ]
     # No max_tokens cap: outlines in dense languages (zh/ja) plus schema overhead
     # regularly exceeded 4000 tokens and truncated mid-JSON, causing the
@@ -205,6 +218,7 @@ def outline_node(state: dict[str, Any]) -> dict[str, Any]:
     return {
         "outline_md": outline_md,
         "outline_slides": [s.model_dump() for s in outline.slides],
+        "outline_revision_feedback": None,
         "language": outline.language,
         "languages": [outline.language],
         "current_stage": "await_outline",

@@ -109,6 +109,50 @@ export type AdvancedChatDraft = {
   visual_style?: Record<string, any>;
 };
 
+export type VisualPlaygroundPreviewSlide = {
+  slide_idx: number;
+  title?: string | null;
+  pattern?: string | null;
+  html?: string | null;
+  error?: string | null;
+};
+
+export type VisualPlaygroundCandidate = {
+  candidate_id: string;
+  label: string;
+  rationale?: string;
+  guidance?: string;
+  visual_style: Record<string, any>;
+  visual_style_md: string;
+  preview_slides: VisualPlaygroundPreviewSlide[];
+  model?: string | null;
+  reasoning_effort?: string | null;
+  created_at?: string | null;
+  source?: string | null;
+  error?: string | null;
+};
+
+export type VisualPlaygroundStatus = {
+  state?: "running" | "ready" | "selected" | string;
+  candidate_count?: number;
+  completed_candidates?: number;
+  selected_candidate_id?: string;
+  guidance?: string;
+  warning?: string;
+  started_at?: string;
+  finished_at?: string;
+  selected_at?: string;
+};
+
+export type VisualPlaygroundGenerateBody = {
+  candidate_count: number;
+  guidance?: string | null;
+};
+
+export type VisualPlaygroundContinueBody = {
+  destination: "layout" | "playground";
+};
+
 export type CatalogResponse = {
   scenarios: Array<{ id: string; name_en: string; name_zh: string; structures: string[] }>;
   structures: Array<{ id: string; name_en: string; name_zh: string; description_en: string }>;
@@ -214,7 +258,7 @@ export type ThinkingEffortOption = {
 };
 
 export type PlaygroundModelOptions = {
-  stages: Record<ModelStage, PlaygroundModelStageOptions>;
+  stages: Partial<Record<ModelStage, PlaygroundModelStageOptions>>;
   thinking_efforts: {
     default_effort: ThinkingEffort | null;
     options: ThinkingEffortOption[];
@@ -304,6 +348,19 @@ export const api = {
 
   advancedChatStreamUrl: (id: string) =>
     `${STREAM_BASE}/decks/${id}/advanced_chat/stream`,
+
+  visualPlaygroundStreamUrl: (id: string) =>
+    `${STREAM_BASE}/decks/${id}/visual_playground/stream`,
+
+  selectVisualPlaygroundCandidate: (id: string, candidateId: string) =>
+    http<DeckState>(
+      "POST",
+      `/decks/${id}/visual_playground/select`,
+      { candidate_id: candidateId },
+    ),
+
+  continueVisualPlaygroundStreamUrl: (id: string) =>
+    `${STREAM_BASE}/decks/${id}/visual_playground/continue/stream`,
 
   regenerate: (id: string, from_stage: string, patch?: Record<string, any>, affected_slides?: number[]) =>
     http<DeckState>("POST", `/decks/${id}/regenerate`, { from_stage, patch, affected_slides }),

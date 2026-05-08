@@ -10,7 +10,7 @@ type StructureSubmit = { scenario_id: string; structure_id: string };
 type StyleSubmit = { feedback: string };
 type LayoutSubmit = { overrides: Record<number, string>; visual_style_preset_id?: string | null };
 type HtmlRetrySubmit = { retry_failed: true };
-type OutlineSubmit = { approved?: true; playground?: true };
+type OutlineSubmit = { approved?: true; visual_playground?: true; revise?: string };
 
 type StructureStageProps = {
   catalog: CatalogResponse | null;
@@ -30,6 +30,8 @@ type StyleStageProps = {
   onSubmit: (payload: StyleSubmit) => Promise<void>;
   approveLabel?: string;
   onApprove?: () => Promise<void>;
+  playgroundLabel?: string;
+  onPlayground?: () => Promise<void>;
 };
 
 type LayoutStageProps = {
@@ -91,10 +93,12 @@ export function HitlReviewPanel({ deck, catalog, onResume }: {
         title="③ Review visual style"
         submitLabel="Revise"
         approveLabel="Approve & continue"
-        visualStyleMd={payload.visual_style_md}
-        visualStyle={payload.visual_style}
+        playgroundLabel="Open Creator Playground"
+        visualStyleMd={(deck.values?.visual_style_md as string | undefined) ?? payload.visual_style_md}
+        visualStyle={(deck.values?.visual_style as Record<string, any> | undefined) ?? payload.visual_style}
         onSubmit={async ({ feedback }) => onResume({ revise: feedback })}
         onApprove={async () => onResume({ approved: true })}
+        onPlayground={async () => onResume({ playground: true })}
       />
     );
   }
@@ -137,10 +141,19 @@ export function HitlReviewPanel({ deck, catalog, onResume }: {
 }
 
 export function OutlineStage({ outlineMd, title, onSubmit }: OutlineStageProps) {
-  const [playground, setPlayground] = useState(false);
+  const [approved, setApproved] = useState(false);
+  const [feedback, setFeedback] = useState("");
 
   return (
-    <div style={{ padding: 24, border: "1.5px solid #0a0a0a", borderRadius: 0, background: "#f5f3ee" }}>
+    <div
+      style={{
+        padding: 24,
+        marginBottom: 16,
+        border: "1.5px solid #0a0a0a",
+        borderRadius: 0,
+        background: "#f5f3ee",
+      }}
+    >
       <h3>{title}</h3>
       <div
         style={{
@@ -154,19 +167,69 @@ export function OutlineStage({ outlineMd, title, onSubmit }: OutlineStageProps) 
       >
         <Markdown>{outlineMd ?? ""}</Markdown>
       </div>
-      <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
-        <input
-          type="checkbox"
-          checked={playground}
-          onChange={(e) => setPlayground(e.target.checked)}
-        />
-        Creator playground mode
-      </label>
-      <div style={{ marginTop: 12 }}>
-        <button onClick={() => onSubmit(playground ? { playground: true } : { approved: true })}>
-          {playground ? "Open playground" : "Continue"}
-        </button>
-      </div>
+      {!approved ? (
+        <>
+          <textarea
+            value={feedback}
+            onChange={(e) => setFeedback(e.target.value)}
+            rows={3}
+            placeholder="Outline revision comments"
+            style={{
+              width: "100%",
+              boxSizing: "border-box",
+              marginTop: 12,
+              padding: 8,
+              border: "1.5px solid #0a0a0a",
+              borderRadius: 0,
+              background: "#f5f3ee",
+              fontFamily: "inherit",
+            }}
+          />
+          <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+            <button
+              className="osz-button"
+              disabled={!feedback.trim()}
+              onClick={() => onSubmit({ revise: feedback.trim() })}
+            >
+              Regenerate outline
+            </button>
+            <button className="osz-button osz-button-primary" onClick={() => setApproved(true)}>
+              Approve outline
+            </button>
+          </div>
+        </>
+      ) : (
+        <div
+          style={{
+            marginTop: 12,
+            padding: 12,
+            border: "1.5px solid #0a0a0a",
+            borderRadius: 0,
+            background: "#e8e3d8",
+            display: "grid",
+            gap: 10,
+          }}
+        >
+          <div style={{ fontWeight: 700 }}>Choose visual style path</div>
+          <div style={{ color: "#5c5852", fontSize: 13 }}>
+            Visual Playground generates sample-slide previews before style lock. Legacy style uses the normal visual style generator.
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              className="osz-button osz-button-primary"
+              onClick={() => onSubmit({ visual_playground: true })}
+            >
+              Use Visual Playground
+            </button>
+            <button className="osz-button" onClick={() => onSubmit({ approved: true })}>
+              Continue with legacy visual style
+            </button>
+            <button className="osz-button" onClick={() => setApproved(false)}>
+              Back to outline review
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -279,6 +342,8 @@ export function StyleStage({
   onSubmit,
   approveLabel,
   onApprove,
+  playgroundLabel,
+  onPlayground,
 }: StyleStageProps) {
   const [feedback, setFeedback] = useState("");
   const swatches = hexSwatches(visualStyle?.palette);
@@ -330,7 +395,14 @@ export function StyleStage({
 
       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
         {approveLabel && onApprove && (
-          <button onClick={() => void onApprove()}>{approveLabel}</button>
+          <button className="osz-button osz-button-primary" onClick={() => void onApprove()}>
+            {approveLabel}
+          </button>
+        )}
+        {playgroundLabel && onPlayground && (
+          <button className="osz-button" onClick={() => void onPlayground()}>
+            {playgroundLabel}
+          </button>
         )}
         <input
           style={{ flex: 1 }}
@@ -338,7 +410,11 @@ export function StyleStage({
           value={feedback}
           onChange={(e) => setFeedback(e.target.value)}
         />
-        <button disabled={!feedback.trim()} onClick={() => onSubmit({ feedback: feedback.trim() })}>
+        <button
+          className="osz-button"
+          disabled={!feedback.trim()}
+          onClick={() => onSubmit({ feedback: feedback.trim() })}
+        >
           {submitLabel}
         </button>
       </div>
@@ -531,6 +607,7 @@ export function LayoutStage({
   const [overrides, setOverrides] = useState<Record<number, string>>({});
   const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>({});
   const [visualPresetId, setVisualPresetId] = useState(selectedVisualStylePresetId ?? "");
+  const [foldedAfterApprove, setFoldedAfterApprove] = useState(false);
   const rows = layouts ?? [];
   const patterns = catalog?.patterns ?? {};
   const patternIds = useMemo(() => Object.keys(patterns), [patterns]);
@@ -543,9 +620,30 @@ export function LayoutStage({
     setVisualPresetId(selectedVisualStylePresetId ?? "");
   }, [selectedVisualStylePresetId]);
 
+  async function submitLayoutReview() {
+    setFoldedAfterApprove(true);
+    await onSubmit({
+      overrides,
+      visual_style_preset_id: visualPresetId || null,
+    });
+  }
+
   return (
     <div style={{ padding: 24, border: "1.5px solid #0a0a0a", borderRadius: 0, background: "#f5f3ee" }}>
-      <h3>{title}</h3>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+        <h3 style={{ marginTop: 0 }}>{title}</h3>
+        {foldedAfterApprove && (
+          <button className="osz-button" type="button" onClick={() => setFoldedAfterApprove(false)}>
+            Reopen review
+          </button>
+        )}
+      </div>
+      {foldedAfterApprove ? (
+        <div style={{ color: "#5c5852", fontSize: 13, lineHeight: 1.45 }}>
+          Layout review approved. Rendering HTML is continuing in the live panel.
+        </div>
+      ) : (
+        <>
       {visualPresets.length > 0 && (
         <div style={{ marginBottom: 14 }}>
           <label style={{ display: "block", fontSize: 13, fontWeight: 600 }}>
@@ -603,6 +701,7 @@ export function LayoutStage({
           const displayPatternIds = expanded ? expandedPatternIds : compactPatternIds;
           const hiddenCount = Math.max(0, expandedPatternIds.length - compactPatternIds.length);
           const currentPattern = patternEntryFor(currentPatternId, patterns, l);
+          const selectedPattern = patternEntryFor(selectedPatternId, patterns, l);
 
           return (
             <div
@@ -620,9 +719,9 @@ export function LayoutStage({
             >
               <div style={{ minWidth: 0 }}>
                 <LayoutWireframe
-                  pattern={currentPatternId}
-                  family={currentPattern.family}
-                  zones={currentPattern.zones}
+                  pattern={selectedPatternId}
+                  family={selectedPattern.family}
+                  zones={selectedPattern.zones}
                   width={280}
                   aspectRatio="16:9"
                 />
@@ -719,17 +818,15 @@ export function LayoutStage({
       </div>
       <div style={{ marginTop: 12 }}>
         <button
+          className="osz-button osz-button-primary"
           disabled={submitDisabledWhenUnchanged && !hasOverrides && !hasPresetChange}
-          onClick={() =>
-            onSubmit({
-              overrides,
-              visual_style_preset_id: visualPresetId || null,
-            })
-          }
+          onClick={() => void submitLayoutReview()}
         >
           {submitLabel}
         </button>
       </div>
+        </>
+      )}
     </div>
   );
 }
