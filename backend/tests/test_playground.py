@@ -214,6 +214,16 @@ def _create_playground_lane(client: TestClient, base: dict, prompt: str = "Try a
     return done["state"]
 
 
+def _create_playground_lane_event(client: TestClient, base: dict, prompt: str) -> dict:
+    response = client.post(
+        f"/decks/{base['thread_id']}/playground/lanes/stream",
+        json={"creator_prompt": prompt},
+    )
+    assert response.status_code == 200, response.text
+    events = _parse_sse_events(response.text)
+    return next(event for event in events if event["type"] == "lane")["lane"]
+
+
 def test_delete_deck_removes_checkpoints_and_artifacts(isolated_graph):
     client = TestClient(app)
     created = decks.create_deck(
@@ -758,6 +768,77 @@ def test_masterpiece_save_list_delete_deduplicates_prompt(isolated_graph):
     deleted = client.delete(f"/masterpieces/{first.json()['masterpiece']['id']}")
     assert deleted.status_code == 200
     assert client.get("/masterpieces").json()["masterpieces"] == []
+
+
+def test_playground_lane_create_returns_derived_lane_name(isolated_graph):
+    base = _create_playground_base()
+    client = TestClient(app)
+
+    lane = _create_playground_lane_event(
+        client,
+        base,
+        "  Make it cinematic\nUse deeper contrast.",
+    )
+
+    assert lane["lane_id"] == "lane-1"
+    assert lane["lane_name"] == "Make it cinematic"
+
+
+def test_playground_lane_create_blank_prompt_falls_back_to_lane_number(isolated_graph):
+    base = _create_playground_base()
+    client = TestClient(app)
+
+    lane = _create_playground_lane_event(client, base, " \n\t ")
+
+    assert lane["lane_id"] == "lane-1"
+    assert lane["lane_name"] == "Lane 1"
+
+
+def test_playground_lane_rename_persists_and_empty_resets(isolated_graph):
+    base = _create_playground_base()
+    client = TestClient(app)
+    lane = _create_playground_lane_event(client, base, "Sharper executive summary")
+
+    renamed = client.patch(
+        f"/decks/{base['thread_id']}/playground/lanes/{lane['lane_id']}",
+        json={"lane_name": "  Board review lane  "},
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["lane"]["lane_name"] == "Board review lane"
+
+    listed = client.get(f"/decks/{base['thread_id']}/playground/lanes")
+    assert listed.status_code == 200
+    assert listed.json()["lanes"][0]["lane_name"] == "Board review lane"
+
+    reset = client.patch(
+        f"/decks/{base['thread_id']}/playground/lanes/{lane['lane_id']}",
+        json={"lane_name": ""},
+    )
+    assert reset.status_code == 200, reset.text
+    assert reset.json()["lane"]["lane_name"] == "Sharper executive summary"
+
+
+def test_playground_lane_rename_unknown_or_unauthorized_returns_404(
+    isolated_graph,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    base = _create_playground_base()
+    client = TestClient(app)
+    lane = _create_playground_lane_event(client, base, "Lane owned by the default test user")
+
+    missing = client.patch(
+        f"/decks/{base['thread_id']}/playground/lanes/lane-999",
+        json={"lane_name": "No lane"},
+    )
+    assert missing.status_code == 404
+
+    monkeypatch.delenv("OSZ_TEST_OWNER_TOKEN", raising=False)
+    stranger = TestClient(app)
+    unauthorized = stranger.patch(
+        f"/decks/{base['thread_id']}/playground/lanes/{lane['lane_id']}",
+        json={"lane_name": "Wrong owner"},
+    )
+    assert unauthorized.status_code == 404
 
 
 def test_concurrent_delete_resolves_to_single_winner(isolated_graph):

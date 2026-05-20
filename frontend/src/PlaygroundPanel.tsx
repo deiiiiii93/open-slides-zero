@@ -115,7 +115,8 @@ function laneIdLabel(laneId: string): string {
 }
 
 function laneLabel(lane: PlaygroundLane): string {
-  return laneIdLabel(lane.lane_id);
+  const name = lane.lane_name?.trim();
+  return name || laneIdLabel(lane.lane_id);
 }
 
 function emptyLaneLive(laneId: string, laneThreadId: string | null = null): LaneLiveState {
@@ -616,6 +617,17 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
     }
   }
 
+  async function renameLane(lane: PlaygroundLane, laneName: string) {
+    setErr(null);
+    try {
+      const result = await api.updatePlaygroundLane(deck.thread_id, lane.lane_id, laneName);
+      upsertLane(result.lane);
+    } catch (e) {
+      setErr(String(e));
+      throw e;
+    }
+  }
+
   async function commentOnLane(
     lane: PlaygroundLane,
     slideIdx: number,
@@ -882,6 +894,7 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
                 onComment={commentOnLane}
                 onDelete={deleteLane}
                 onSaveMasterpiece={saveMasterpiece}
+                onRename={renameLane}
                 onExport={runLaneExport}
               />
             ) : (
@@ -907,17 +920,22 @@ export function PlaygroundPanel({ deck, catalog }: Props) {
           }}
         >
           {liveStreams.map((live) => (
-            <LiveStream
-              key={live.laneId}
-              title={`${laneIdLabel(live.laneId)} live`}
-              subtitle={live.error ? live.error : live.laneThreadId ?? undefined}
-              isActive={live.isRunning}
-              maxHeight={420}
-              buffersByTag={live.buffersByTag}
-              activeNode={live.activeNode}
-              activeSlide={live.activeSlide}
-              elapsedByTag={live.elapsedByTag}
-            />
+            (() => {
+              const liveLane = lanes.find((lane) => lane.lane_id === live.laneId);
+              return (
+                <LiveStream
+                  key={live.laneId}
+                  title={`${liveLane ? laneLabel(liveLane) : laneIdLabel(live.laneId)} live`}
+                  subtitle={live.error ? live.error : live.laneThreadId ?? undefined}
+                  isActive={live.isRunning}
+                  maxHeight={420}
+                  buffersByTag={live.buffersByTag}
+                  activeNode={live.activeNode}
+                  activeSlide={live.activeSlide}
+                  elapsedByTag={live.elapsedByTag}
+                />
+              );
+            })()
           ))}
         </aside>
       )}
@@ -938,6 +956,7 @@ function LaneDetail({
   onComment,
   onDelete,
   onSaveMasterpiece,
+  onRename,
   onExport,
 }: {
   lane: PlaygroundLane;
@@ -957,9 +976,12 @@ function LaneDetail({
   ) => Promise<void>;
   onDelete: (lane: PlaygroundLane) => Promise<void>;
   onSaveMasterpiece: (lane: PlaygroundLane) => Promise<void>;
+  onRename: (lane: PlaygroundLane, laneName: string) => Promise<void>;
   onExport: (lane: PlaygroundLane, label: string, fn: (state: DeckState) => Promise<void>) => Promise<void>;
 }) {
   const [showExport, setShowExport] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [nameDraft, setNameDraft] = useState(laneLabel(lane));
   const state = lane.state;
   const gate = firstInterrupt(state) as any;
   const stage = (state?.values?.current_stage as string | undefined) ?? "pending";
@@ -993,12 +1015,84 @@ function LaneDetail({
   const canComment = hasSlides && stage === "ready" && !busy;
   const canContinue = Boolean(state && !gate && stage !== "ready" && state.next.length > 0);
   const continueDisabled = busy && !taskError;
+  const renameDisabled = busy || deleting;
+
+  useEffect(() => {
+    setNameDraft(laneLabel(lane));
+    setRenaming(false);
+  }, [lane.lane_id, lane.lane_name]);
+
+  async function commitRename() {
+    setRenaming(false);
+    const cleanName = nameDraft.trim();
+    if (cleanName === laneLabel(lane)) return;
+    try {
+      await onRename(lane, cleanName);
+    } catch {
+      setNameDraft(laneLabel(lane));
+    }
+  }
 
   return (
     <div style={{ border: "1.5px solid #0a0a0a", borderRadius: 0, background: "#f5f3ee", padding: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", marginBottom: 12 }}>
         <div style={{ minWidth: 0 }}>
-          <h3 style={{ margin: 0 }}>{laneLabel(lane)}</h3>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            {renaming ? (
+              <input
+                autoFocus
+                value={nameDraft}
+                disabled={renameDisabled}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onBlur={() => {
+                  if (renaming) void commitRename();
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void commitRename();
+                  }
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    setNameDraft(laneLabel(lane));
+                    setRenaming(false);
+                  }
+                }}
+                style={{
+                  minWidth: 220,
+                  maxWidth: "100%",
+                  border: "1.5px solid #0a0a0a",
+                  borderRadius: 0,
+                  background: "#e8e3d8",
+                  color: "#0a0a0a",
+                  padding: "5px 8px",
+                  fontSize: 18,
+                  fontWeight: 700,
+                }}
+              />
+            ) : (
+              <h3 style={{ margin: 0 }}>{laneLabel(lane)}</h3>
+            )}
+            <button
+              className="osz-button"
+              disabled={renameDisabled}
+              onMouseDown={(e) => {
+                if (renaming) e.preventDefault();
+              }}
+              onClick={() => {
+                if (renaming) {
+                  setNameDraft(laneLabel(lane));
+                  setRenaming(false);
+                  return;
+                }
+                setNameDraft(laneLabel(lane));
+                setRenaming(true);
+              }}
+              style={{ padding: "5px 10px", fontSize: 10 }}
+            >
+              {renaming ? "Cancel" : "Rename"}
+            </button>
+          </div>
           <div style={{ color: "#948e83", fontSize: 12, marginTop: 4 }}>
             stage: <code>{stage}</code>
           </div>

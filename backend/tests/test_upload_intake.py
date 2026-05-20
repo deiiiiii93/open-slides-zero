@@ -51,7 +51,11 @@ def _write_pdf(path: Path, pages: list[str | None]) -> None:
         parts.append(f"{obj_num} 0 obj\n{obj}\nendobj\n".encode("latin-1"))
 
     xref_start = sum(len(part) for part in parts)
-    xref = [b"xref\n", f"0 {len(objects) + 1}\n".encode("latin-1"), b"0000000000 65535 f \n"]
+    xref = [
+        b"xref\n",
+        f"0 {len(objects) + 1}\n".encode("latin-1"),
+        b"0000000000 65535 f \n",
+    ]
     for offset in offsets[1:]:
         xref.append(f"{offset:010d} 00000 n \n".encode("latin-1"))
     trailer = (
@@ -66,7 +70,7 @@ def _parse_sse_events(body: str) -> list[dict]:
     for line in body.splitlines():
         if not line.startswith("data:"):
             continue
-        events.append(json.loads(line[len("data:"):].strip()))
+        events.append(json.loads(line[len("data:") :].strip()))
     return events
 
 
@@ -134,7 +138,9 @@ def test_parse_pptx_extracts_slide_text_tables_and_notes(tmp_path: Path):
     slide = presentation.slides.add_slide(presentation.slide_layouts[1])
     slide.shapes.title.text = "Quarterly update"
     slide.placeholders[1].text = "Growth remains above plan"
-    table = slide.shapes.add_table(2, 2, Inches(1), Inches(2), Inches(4), Inches(1.5)).table
+    table = slide.shapes.add_table(
+        2, 2, Inches(1), Inches(2), Inches(4), Inches(1.5)
+    ).table
     table.cell(0, 0).text = "Region"
     table.cell(0, 1).text = "Growth"
     table.cell(1, 0).text = "APAC"
@@ -235,7 +241,9 @@ def test_parse_pdf_reports_pages_where_ocr_fails(
 
     assert "Intro" in parsed.text
     assert parsed.note is not None
-    assert "Page 2 had no extractable text; OCR could not recover content." in parsed.note
+    assert (
+        "Page 2 had no extractable text; OCR could not recover content." in parsed.note
+    )
 
 
 def test_parse_pdf_retries_with_empty_password_when_initial_open_fails(
@@ -293,7 +301,9 @@ def test_parse_pdf_caps_ocr_pages_and_records_skipped(
 def test_extract_notes_text_filters_housekeeping_placeholders():
     from types import SimpleNamespace
 
-    def shape(text: str, *, has_text_frame: bool = True, placeholder_name: str | None = None):
+    def shape(
+        text: str, *, has_text_frame: bool = True, placeholder_name: str | None = None
+    ):
         placeholder_format = (
             SimpleNamespace(type=SimpleNamespace(name=placeholder_name))
             if placeholder_name is not None
@@ -319,10 +329,14 @@ def test_extract_notes_text_filters_housekeeping_placeholders():
         )
     )
 
-    assert ingest._extract_notes_text(slide) == "Real notes\nPlain shape, no placeholder"
+    assert (
+        ingest._extract_notes_text(slide) == "Real notes\nPlain shape, no placeholder"
+    )
 
 
-def test_image_material_uses_zenmux_ocr_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_image_material_uses_zenmux_ocr_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     path = tmp_path / "chart.png"
     path.write_bytes(b"fake-image")
     seen: dict[str, object] = {}
@@ -346,7 +360,9 @@ def test_ingest_node_raises_when_all_materials_are_empty(tmp_path: Path):
     path.write_text("", encoding="utf-8")
 
     with pytest.raises(ValueError, match="No usable content could be extracted"):
-        ingest.ingest_node({"materials": [{"kind": "file", "uri": str(path), "name": "empty.txt"}]})
+        ingest.ingest_node(
+            {"materials": [{"kind": "file", "uri": str(path), "name": "empty.txt"}]}
+        )
 
 
 def test_image_material_routes_to_glm_ocr_when_configured(
@@ -356,7 +372,9 @@ def test_image_material_routes_to_glm_ocr_when_configured(
     path.write_bytes(b"\x89PNG\r\n\x1a\nfake-png-bytes")
 
     monkeypatch.setenv("OSZ_MODEL_OCR", "glm-ocr")
-    monkeypatch.setenv("OSZ_MODEL_OCR_BASE_URL", "https://api.z.ai/api/paas/v4/layout_parsing")
+    monkeypatch.setenv(
+        "OSZ_MODEL_OCR_BASE_URL", "https://api.z.ai/api/paas/v4/layout_parsing"
+    )
     monkeypatch.setenv("OSZ_MODEL_OCR_KEY", "test-key")
 
     captured: dict[str, str] = {}
@@ -368,7 +386,9 @@ def test_image_material_routes_to_glm_ocr_when_configured(
     monkeypatch.setattr(ingest.glm_ocr, "extract_markdown", fake_extract)
 
     def zenmux_should_not_be_called(*_a, **_kw):
-        raise AssertionError("zenmux.chat must not be called when GLM-OCR is configured")
+        raise AssertionError(
+            "zenmux.chat must not be called when GLM-OCR is configured"
+        )
 
     monkeypatch.setattr(ingest.zenmux, "chat", zenmux_should_not_be_called)
 
@@ -386,7 +406,9 @@ def test_pdf_image_pages_route_to_glm_ocr_when_configured(
     _write_pdf(path, [None, None])
 
     monkeypatch.setenv("OSZ_MODEL_OCR", "glm-ocr")
-    monkeypatch.setenv("OSZ_MODEL_OCR_BASE_URL", "https://api.z.ai/api/paas/v4/layout_parsing")
+    monkeypatch.setenv(
+        "OSZ_MODEL_OCR_BASE_URL", "https://api.z.ai/api/paas/v4/layout_parsing"
+    )
     monkeypatch.setenv("OSZ_MODEL_OCR_KEY", "test-key")
 
     calls: list[str] = []
@@ -414,7 +436,9 @@ def test_glm_ocr_partial_env_still_falls_back_to_zenmux(
     path.write_bytes(b"fake-image")
 
     monkeypatch.setenv("OSZ_MODEL_OCR", "glm-ocr")
-    monkeypatch.setenv("OSZ_MODEL_OCR_BASE_URL", "https://api.z.ai/api/paas/v4/layout_parsing")
+    monkeypatch.setenv(
+        "OSZ_MODEL_OCR_BASE_URL", "https://api.z.ai/api/paas/v4/layout_parsing"
+    )
     # OSZ_MODEL_OCR_KEY intentionally unset
 
     def fake_chat(_model, _messages, **_kwargs):
@@ -432,7 +456,9 @@ def test_glm_ocr_partial_env_still_falls_back_to_zenmux(
 
 
 @pytest.mark.asyncio
-async def test_normalize_uploaded_materials_uniquifies_duplicate_filenames(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+async def test_normalize_uploaded_materials_uniquifies_duplicate_filenames(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     monkeypatch.setattr(store, "ROOT", tmp_path / "threads")
 
     materials = await decks.normalize_uploaded_materials(
@@ -450,7 +476,9 @@ async def test_normalize_uploaded_materials_uniquifies_duplicate_filenames(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_normalize_uploaded_materials_rejects_unsupported_extensions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+async def test_normalize_uploaded_materials_rejects_unsupported_extensions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     monkeypatch.setattr(store, "ROOT", tmp_path / "threads")
 
     with pytest.raises(HTTPException) as exc_info:
@@ -488,7 +516,10 @@ def test_upload_stream_preserves_text_then_file_order(isolated_graph):
     done = next(event for event in events if event["type"] == "done")
     materials = done["state"]["values"]["materials"]
 
-    assert [material["name"] for material in materials if material.get("name")] == ["alpha.txt", "beta.markdown"]
+    assert [material["name"] for material in materials if material.get("name")] == [
+        "alpha.txt",
+        "beta.markdown",
+    ]
     assert materials[0]["kind"] == "text"
     assert materials[0]["parsed"] == "Lead with the headline"
     assert materials[1]["parsed"] == "Revenue up"
@@ -546,7 +577,7 @@ def test_stream_create_deck_rejects_empty_materials(isolated_graph):
 def test_stream_create_deck_accepts_model_overrides(isolated_graph):
     client = TestClient(app)
     overrides = {
-        "style": "google/gemini-3.1-pro-preview",
+        "style": "google/gemini-3.5-flash",
         "layout": "openai/gpt-5.4",
         "html": "openai/gpt-5.4-mini",
     }
@@ -561,7 +592,9 @@ def test_stream_create_deck_accepts_model_overrides(isolated_graph):
     )
 
     assert response.status_code == 200
-    done = next(event for event in _parse_sse_events(response.text) if event["type"] == "done")
+    done = next(
+        event for event in _parse_sse_events(response.text) if event["type"] == "done"
+    )
     assert done["state"]["values"]["lane_model_overrides"] == overrides
 
 
@@ -583,7 +616,9 @@ def test_stream_create_deck_accepts_thinking_effort_overrides(isolated_graph):
     )
 
     assert response.status_code == 200
-    done = next(event for event in _parse_sse_events(response.text) if event["type"] == "done")
+    done = next(
+        event for event in _parse_sse_events(response.text) if event["type"] == "done"
+    )
     assert done["state"]["values"]["lane_thinking_effort_overrides"] == overrides
 
 
@@ -638,7 +673,7 @@ def test_stream_create_deck_rejects_invalid_thinking_effort_overrides(isolated_g
 def test_upload_stream_accepts_model_overrides(isolated_graph):
     client = TestClient(app)
     overrides = {
-        "style": "google/gemini-3.1-pro-preview",
+        "style": "google/gemini-3.5-flash",
         "layout": "openai/gpt-5.4",
         "html": "openai/gpt-5.4-mini",
     }
@@ -656,7 +691,9 @@ def test_upload_stream_accepts_model_overrides(isolated_graph):
     )
 
     assert response.status_code == 200
-    done = next(event for event in _parse_sse_events(response.text) if event["type"] == "done")
+    done = next(
+        event for event in _parse_sse_events(response.text) if event["type"] == "done"
+    )
     assert done["state"]["values"]["lane_model_overrides"] == overrides
 
 
@@ -681,7 +718,9 @@ def test_upload_stream_accepts_thinking_effort_overrides(isolated_graph):
     )
 
     assert response.status_code == 200
-    done = next(event for event in _parse_sse_events(response.text) if event["type"] == "done")
+    done = next(
+        event for event in _parse_sse_events(response.text) if event["type"] == "done"
+    )
     assert done["state"]["values"]["lane_thinking_effort_overrides"] == overrides
 
 
@@ -754,7 +793,12 @@ def test_upload_stream_unsupported_extension_leaves_no_zombie(isolated_graph):
 
     response = client.post(
         "/decks/upload/stream",
-        data={"expected_pages": "4", "aspect_ratio": "16:9", "density_preference": "balanced", "language": "en"},
+        data={
+            "expected_pages": "4",
+            "aspect_ratio": "16:9",
+            "density_preference": "balanced",
+            "language": "en",
+        },
         files=[("files", ("payload.exe", b"bad", "application/octet-stream"))],
     )
 
@@ -763,14 +807,21 @@ def test_upload_stream_unsupported_extension_leaves_no_zombie(isolated_graph):
     assert client.get("/decks").json()["decks"] == []
 
 
-def test_upload_stream_rejects_oversize_single_file(isolated_graph, monkeypatch: pytest.MonkeyPatch):
+def test_upload_stream_rejects_oversize_single_file(
+    isolated_graph, monkeypatch: pytest.MonkeyPatch
+):
     monkeypatch.setattr(decks, "MAX_UPLOAD_BYTES", 1024)
     client = TestClient(app)
 
     oversize_payload = b"A" * (1024 + 1)
     response = client.post(
         "/decks/upload/stream",
-        data={"expected_pages": "4", "aspect_ratio": "16:9", "density_preference": "balanced", "language": "en"},
+        data={
+            "expected_pages": "4",
+            "aspect_ratio": "16:9",
+            "density_preference": "balanced",
+            "language": "en",
+        },
         files=[("files", ("big.txt", oversize_payload, "text/plain"))],
     )
 
@@ -778,18 +829,27 @@ def test_upload_stream_rejects_oversize_single_file(isolated_graph, monkeypatch:
     assert "per-file upload limit" in response.json()["detail"]
     assert client.get("/decks").json()["decks"] == []
     # Cleanup invariant: no orphaned bytes from the partially-streamed file.
-    materials_dirs = list((store.ROOT).glob("*/materials")) if store.ROOT.exists() else []
+    materials_dirs = (
+        list((store.ROOT).glob("*/materials")) if store.ROOT.exists() else []
+    )
     assert all(not any(p.is_file() for p in d.iterdir()) for d in materials_dirs)
 
 
-def test_upload_stream_rejects_oversize_request_total(isolated_graph, monkeypatch: pytest.MonkeyPatch):
+def test_upload_stream_rejects_oversize_request_total(
+    isolated_graph, monkeypatch: pytest.MonkeyPatch
+):
     monkeypatch.setattr(decks, "MAX_UPLOAD_BYTES", 10_000)
     monkeypatch.setattr(decks, "MAX_REQUEST_BYTES", 1500)
     client = TestClient(app)
 
     response = client.post(
         "/decks/upload/stream",
-        data={"expected_pages": "4", "aspect_ratio": "16:9", "density_preference": "balanced", "language": "en"},
+        data={
+            "expected_pages": "4",
+            "aspect_ratio": "16:9",
+            "density_preference": "balanced",
+            "language": "en",
+        },
         files=[
             ("files", ("one.txt", b"A" * 800, "text/plain")),
             ("files", ("two.txt", b"B" * 800, "text/plain")),

@@ -81,6 +81,8 @@ const SUPPORTED_UPLOAD_EXTENSIONS = new Set(
 const MODEL_STAGE_ORDER: ModelStage[] = ["style", "layout", "html"];
 const RECENT_DECKS_PAGE_SIZE = 5;
 const SESSION_DECK_HISTORY_KEY = "osz.session.history";
+const UI_DENSITY_KEY = "osz.ui.density";
+type UiDensity = "comfortable" | "compact";
 
 function isSupportedUpload(file: File): boolean {
   const dot = file.name.lastIndexOf(".");
@@ -251,6 +253,10 @@ export function App() {
   const [runtimeModelOptions, setRuntimeModelOptions] = useState<RuntimeModelOptions | null>(null);
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig>(() => readRuntimeConfig());
   const [showConfig, setShowConfig] = useState(false);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [uiDensity, setUiDensity] = useState<UiDensity>(() =>
+    localStorage.getItem(UI_DENSITY_KEY) === "compact" ? "compact" : "comfortable",
+  );
   const [identityReady, setIdentityReady] = useState(false);
   const [selectedReviewStage, setSelectedReviewStage] = useState<ReviewStage>("ready");
 
@@ -307,6 +313,18 @@ export function App() {
     setErr(null);
   }, []);
 
+  const refreshRuntimeModelOptions = useCallback(async () => {
+    try {
+      setRuntimeModelOptions(await api.listRuntimeModelOptions());
+    } catch {
+      /* Keep the last known options if the backend is temporarily unavailable. */
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(UI_DENSITY_KEY, uiDensity);
+  }, [uiDensity]);
+
   const refreshDeckList = useCallback(async () => {
     if (!identityReady) return;
     try {
@@ -349,8 +367,8 @@ export function App() {
   }, [catalog]);
 
   useEffect(() => {
-    if (!runtimeModelOptions) void api.listRuntimeModelOptions().then(setRuntimeModelOptions).catch(() => undefined);
-  }, [runtimeModelOptions]);
+    if (!runtimeModelOptions) void refreshRuntimeModelOptions();
+  }, [refreshRuntimeModelOptions, runtimeModelOptions]);
 
   useEffect(() => {
     if (!deck && identityReady) void refreshDeckList();
@@ -671,6 +689,7 @@ export function App() {
     setShowMasterpieces(false);
     setShowOwnedHistory(false);
     setShowShare(false);
+    setShowMoreMenu(false);
     window.history.replaceState({}, "", window.location.pathname);
   }
 
@@ -813,6 +832,7 @@ export function App() {
         runtimeConfig={runtimeConfig}
         runtimeModelOptions={runtimeModelOptions}
         onRuntimeConfigChange={updateRuntimeConfig}
+        onRuntimeModelOptionsRefresh={refreshRuntimeModelOptions}
         recentDecks={visibleSessionDecks}
         ownedDecks={deckList ?? []}
         deletingDeckId={deletingDeckId}
@@ -872,7 +892,11 @@ export function App() {
     (imageInsertionStatus !== "unavailable" || hasImagePlan || imageAssets.length > 0);
 
   return (
-    <div style={{ padding: 16, maxWidth: 1520, margin: "0 auto" }}>
+    <div
+      className={`osz-page ${uiDensity === "compact" ? "osz-density-compact" : ""}`}
+      data-density={uiDensity}
+      style={{ padding: uiDensity === "compact" ? 8 : 16, maxWidth: 1520, margin: "0 auto" }}
+    >
       <header className="osz-app-header">
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <strong
@@ -922,179 +946,206 @@ export function App() {
             </span>
           )}
         </div>
-	        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", position: "relative" }}>
-	          <button
-	            className="osz-header-btn"
-	            onClick={() => {
-	              setShowMasterpieces(false);
-	              setShowExport(false);
-	              setShowHistory(false);
-	              setShowOwnedHistory(false);
-	              setShowShare(false);
-	              setShowConfig((s) => !s);
-	            }}
-	          >
-            Config
-          </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", position: "relative" }}>
+          <button className="osz-header-btn" onClick={onNewDeck}>New deck</button>
           <button
             className="osz-header-btn"
-	            onClick={() => {
-	              setShowExport(false);
-	              setShowHistory(false);
-	              setShowOwnedHistory(false);
-	              setShowShare(false);
-	              setShowConfig(false);
-	              setShowMasterpieces((s) => !s);
-	            }}
+            onClick={() => {
+              setUiDensity((value) => (value === "compact" ? "comfortable" : "compact"));
+            }}
           >
-            Masterpieces
+            Compact: {uiDensity === "compact" ? "On" : "Off"}
           </button>
           <button
             className="osz-header-btn"
-	            onClick={() => {
-	              setShowMasterpieces(false);
-	              setShowExport(false);
-	              setShowConfig(false);
-	              setShowOwnedHistory(false);
-	              setShowShare(false);
-	              setShowHistory((s) => {
-	                const next = !s;
-	                if (next) void refreshDeckList();
-	                return next;
-	              });
-	            }}
-	          >
-	            Session decks
-	          </button>
-	          <button
-	            className="osz-header-btn"
-	            onClick={() => {
-	              setShowMasterpieces(false);
-	              setShowExport(false);
-	              setShowConfig(false);
-	              setShowHistory(false);
-	              setShowShare(false);
-	              setShowOwnedHistory((s) => {
-	                const next = !s;
-	                if (next) void refreshDeckList();
-	                return next;
-	              });
-	            }}
-	          >
-	            My history
-	          </button>
-	          <div style={{ position: "relative" }}>
-            <button
-              className="osz-header-btn"
-              disabled={!hasExportableSlides(deck) || exporting !== null}
-              onClick={() => {
-	                setShowMasterpieces(false);
-	                setShowHistory(false);
-	                setShowOwnedHistory(false);
-	                setShowShare(false);
-	                setShowConfig(false);
-	                setShowExport((s) => !s);
-	              }}
-            >
-              {exporting ? `Exporting ${exporting}…` : "Export"}
-            </button>
-            {showExport && (
-              <div
-                style={{
-                  position: "absolute",
-                  top: "calc(100% + 4px)",
-                  right: 0,
-	                minWidth: 320,
-	                maxHeight: "min(680px, calc(100vh - 96px))",
-	                overflowY: "auto",
-                  background: "#f5f3ee",
-                  border: "1.5px solid #0a0a0a",
-                  borderRadius: 0,
-                  boxShadow: "none",
-                  zIndex: 100,
-                  padding: "4px 0",
+            onClick={() => {
+              setShowExport(false);
+              setShowShare(false);
+              setShowMoreMenu((s) => !s);
+            }}
+          >
+            More
+          </button>
+          {showMoreMenu && (
+            <div className="osz-header-menu">
+              <button
+                className="osz-header-menu-item"
+                onClick={() => {
+                  setShowMoreMenu(false);
+                  setShowMasterpieces(false);
+                  setShowExport(false);
+                  setShowHistory(false);
+                  setShowOwnedHistory(false);
+                  setShowShare(false);
+                  setShowConfig((s) => !s);
                 }}
               >
-                {[
-                  { key: "html", label: "Current HTML (single file)", fn: (d: DeckState) => exportHtmlSingle(d) },
-                  { key: "zip", label: "Current HTML (zip of slides)", fn: (d: DeckState) => exportHtmlZip(d) },
-                  { key: "pngs", label: "Current PNGs (zip of slides)", fn: (d: DeckState) => exportPngZip(d) },
-                  { key: "pptx", label: "Current PPTX (editable)", fn: (d: DeckState, onProgress?: ExportProgress) => exportPptx(d, onProgress) },
-                  ...(hasOriginalSlides(deck)
-                    ? [
-                        {
-                          key: "html-original",
-                          label: "Original HTML before images",
-                          fn: (d: DeckState) => exportHtmlSingle(deckWithBaseSlides(d)),
-                        },
-                        {
-                          key: "pngs-original",
-                          label: "Original PNGs before images",
-                          fn: (d: DeckState) => exportPngZip(d, { useBaseSlides: true }),
-                        },
-                        {
-                          key: "pptx-original",
-                          label: "Original PPTX before images",
-                          fn: (d: DeckState, onProgress?: ExportProgress) =>
-                            exportPptx(deckWithBaseSlides(d), onProgress),
-                        },
-                      ]
-                    : []),
-                ].map((opt) => (
-                  <button
-                    key={opt.key}
-                    onClick={() => void runExport(opt.key, opt.fn)}
-                    style={{
-                      display: "block",
-                      width: "100%",
-                      textAlign: "left",
-                      padding: "6px 12px",
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
-                      fontSize: 13,
-                      fontFamily: "inherit",
-                    }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = "#e8e3d8")}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-	          <button
-	            className="osz-header-btn"
-	            disabled={busy || Boolean(deletingDeckId)}
-	            onClick={() =>
-              void onDeleteDeck(
-                deck.thread_id,
-                (deck.values?.deck_name as string | undefined) || deck.thread_id,
-              )
-            }
-          >
-	            {deletingDeckId === deck.thread_id ? "Deleting…" : "Delete deck"}
-	          </button>
-	          <button
-	            className="osz-header-btn"
-	            disabled={busy || Boolean(deletingDeckId)}
-	            onClick={() => {
-	              setShowMasterpieces(false);
-	              setShowExport(false);
-	              setShowHistory(false);
-	              setShowOwnedHistory(false);
-	              setShowConfig(false);
-	              if (shareInfo?.thread_id === deck.thread_id) {
-	                setShowShare((s) => !s);
-	              } else {
-	                void onShareDeck();
-	              }
-	            }}
-	          >
-	            Share deck
-	          </button>
-	          <button className="osz-header-btn" onClick={onNewDeck}>New deck</button>
+                Config
+              </button>
+              <button
+                className="osz-header-menu-item"
+                onClick={() => {
+                  setShowMoreMenu(false);
+                  setShowExport(false);
+                  setShowHistory(false);
+                  setShowOwnedHistory(false);
+                  setShowShare(false);
+                  setShowConfig(false);
+                  setShowMasterpieces((s) => !s);
+                }}
+              >
+                Masterpieces
+              </button>
+              <button
+                className="osz-header-menu-item"
+                onClick={() => {
+                  setShowMoreMenu(false);
+                  setShowMasterpieces(false);
+                  setShowExport(false);
+                  setShowConfig(false);
+                  setShowOwnedHistory(false);
+                  setShowShare(false);
+                  setShowHistory((s) => {
+                    const next = !s;
+                    if (next) void refreshDeckList();
+                    return next;
+                  });
+                }}
+              >
+                Session decks
+              </button>
+              <button
+                className="osz-header-menu-item"
+                onClick={() => {
+                  setShowMoreMenu(false);
+                  setShowMasterpieces(false);
+                  setShowExport(false);
+                  setShowConfig(false);
+                  setShowHistory(false);
+                  setShowShare(false);
+                  setShowOwnedHistory((s) => {
+                    const next = !s;
+                    if (next) void refreshDeckList();
+                    return next;
+                  });
+                }}
+              >
+                My history
+              </button>
+              <button
+                className="osz-header-menu-item"
+                disabled={!hasExportableSlides(deck) || exporting !== null}
+                onClick={() => {
+                  setShowMoreMenu(false);
+                  setShowMasterpieces(false);
+                  setShowHistory(false);
+                  setShowOwnedHistory(false);
+                  setShowShare(false);
+                  setShowConfig(false);
+                  setShowExport((s) => !s);
+                }}
+              >
+                {exporting ? `Exporting ${exporting}...` : "Export"}
+              </button>
+              <button
+                className="osz-header-menu-item"
+                disabled={busy || Boolean(deletingDeckId)}
+                onClick={() => {
+                  setShowMoreMenu(false);
+                  void onDeleteDeck(
+                    deck.thread_id,
+                    (deck.values?.deck_name as string | undefined) || deck.thread_id,
+                  );
+                }}
+              >
+                {deletingDeckId === deck.thread_id ? "Deleting..." : "Delete deck"}
+              </button>
+              <button
+                className="osz-header-menu-item"
+                disabled={busy || Boolean(deletingDeckId)}
+                onClick={() => {
+                  setShowMoreMenu(false);
+                  setShowMasterpieces(false);
+                  setShowExport(false);
+                  setShowHistory(false);
+                  setShowOwnedHistory(false);
+                  setShowConfig(false);
+                  if (shareInfo?.thread_id === deck.thread_id) {
+                    setShowShare((s) => !s);
+                  } else {
+                    void onShareDeck();
+                  }
+                }}
+              >
+                Share deck
+              </button>
+            </div>
+          )}
+          {showExport && (
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(100% + 4px)",
+                right: 0,
+                minWidth: 320,
+                maxHeight: "min(680px, calc(100vh - 96px))",
+                overflowY: "auto",
+                background: "#f5f3ee",
+                border: "1.5px solid #0a0a0a",
+                borderRadius: 0,
+                boxShadow: "none",
+                zIndex: 100,
+                padding: "4px 0",
+              }}
+            >
+              {[
+                { key: "html", label: "Current HTML (single file)", fn: (d: DeckState) => exportHtmlSingle(d) },
+                { key: "zip", label: "Current HTML (zip of slides)", fn: (d: DeckState) => exportHtmlZip(d) },
+                { key: "pngs", label: "Current PNGs (zip of slides)", fn: (d: DeckState) => exportPngZip(d) },
+                { key: "pptx", label: "Current PPTX (editable)", fn: (d: DeckState, onProgress?: ExportProgress) => exportPptx(d, onProgress) },
+                ...(hasOriginalSlides(deck)
+                  ? [
+                      {
+                        key: "html-original",
+                        label: "Original HTML before images",
+                        fn: (d: DeckState) => exportHtmlSingle(deckWithBaseSlides(d)),
+                      },
+                      {
+                        key: "pngs-original",
+                        label: "Original PNGs before images",
+                        fn: (d: DeckState) => exportPngZip(d, { useBaseSlides: true }),
+                      },
+                      {
+                        key: "pptx-original",
+                        label: "Original PPTX before images",
+                        fn: (d: DeckState, onProgress?: ExportProgress) =>
+                          exportPptx(deckWithBaseSlides(d), onProgress),
+                      },
+                    ]
+                  : []),
+              ].map((opt) => (
+                <button
+                  key={opt.key}
+                  onClick={() => void runExport(opt.key, opt.fn)}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "6px 12px",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: 13,
+                    fontFamily: "inherit",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "#e8e3d8")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          )}
 	          {showShare && shareInfo && (
 	            <div
 	              style={{
@@ -1358,6 +1409,7 @@ export function App() {
           config={runtimeConfig}
           modelOptions={runtimeModelOptions}
           onChange={updateRuntimeConfig}
+          onRefreshModelOptions={refreshRuntimeModelOptions}
           busy={busy}
         />
       )}
@@ -2236,11 +2288,13 @@ function RuntimeConfigPanel({
   config,
   modelOptions,
   onChange,
+  onRefreshModelOptions,
   busy,
 }: {
   config: RuntimeConfig;
   modelOptions: RuntimeModelOptions | null;
   onChange: (config: RuntimeConfig) => void;
+  onRefreshModelOptions: () => Promise<void>;
   busy: boolean;
 }) {
   const stages = Object.entries(modelOptions?.stages ?? {});
@@ -2267,6 +2321,10 @@ function RuntimeConfigPanel({
     else delete next[stage];
     update({ thinkingEffortOverrides: next });
   }
+
+  useEffect(() => {
+    if (showAdvanced) void onRefreshModelOptions();
+  }, [onRefreshModelOptions, showAdvanced]);
 
   return (
     <section className="osz-panel runtime-config-panel">
@@ -2519,6 +2577,7 @@ function CreateForm({
   runtimeConfig,
   runtimeModelOptions,
   onRuntimeConfigChange,
+  onRuntimeModelOptionsRefresh,
   recentDecks,
   ownedDecks,
   deletingDeckId,
@@ -2545,6 +2604,7 @@ function CreateForm({
   runtimeConfig: RuntimeConfig;
   runtimeModelOptions: RuntimeModelOptions | null;
   onRuntimeConfigChange: (config: RuntimeConfig) => void;
+  onRuntimeModelOptionsRefresh: () => Promise<void>;
   recentDecks: DeckListItem[] | null;
   ownedDecks: DeckListItem[];
   deletingDeckId: string | null;
@@ -2633,6 +2693,7 @@ function CreateForm({
         config={runtimeConfig}
         modelOptions={runtimeModelOptions}
         onChange={onRuntimeConfigChange}
+        onRefreshModelOptions={onRuntimeModelOptionsRefresh}
         busy={busy}
       />
 

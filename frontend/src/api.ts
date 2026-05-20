@@ -239,6 +239,7 @@ export type PlaygroundLane = {
   lane_id: string;
   lane_thread_id: string;
   creator_prompt: string;
+  lane_name: string;
   created_at: string;
   state: DeckState | null;
 };
@@ -430,6 +431,13 @@ export const api = {
 
   deletePlaygroundLane: (id: string, laneId: string) =>
     http<DeletePlaygroundLaneResponse>("DELETE", `/decks/${id}/playground/lanes/${laneId}`),
+
+  updatePlaygroundLane: (id: string, laneId: string, laneName: string) =>
+    http<{ ok: boolean; lane: PlaygroundLane }>(
+      "PATCH",
+      `/decks/${id}/playground/lanes/${laneId}`,
+      { lane_name: laneName },
+    ),
 
   saveLaneMasterpiece: (id: string, laneId: string) =>
     http<{ ok: boolean; masterpiece: Masterpiece }>("POST", `/decks/${id}/playground/lanes/${laneId}/masterpiece`, {}),

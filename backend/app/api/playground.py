@@ -38,6 +38,10 @@ class CreateLaneBody(BaseModel):
     thinking_effort_overrides: dict[str, str] | None = None
 
 
+class UpdateLaneBody(BaseModel):
+    lane_name: str = ""
+
+
 def _lane_response(row: dict[str, Any]) -> dict[str, Any]:
     state: dict[str, Any] | None
     try:
@@ -48,6 +52,7 @@ def _lane_response(row: dict[str, Any]) -> dict[str, Any]:
         "lane_id": row["lane_id"],
         "lane_thread_id": row["lane_thread_id"],
         "creator_prompt": row["creator_prompt"],
+        "lane_name": row["lane_name"],
         "created_at": row["created_at"],
         "state": state,
     }
@@ -188,6 +193,21 @@ def delete_playground_lane(
         "thread_id": row["lane_thread_id"],
         "deleted_thread_ids": [row["lane_thread_id"]],
     }
+
+
+@router.patch("/decks/{thread_id}/playground/lanes/{lane_id}")
+def update_playground_lane(
+    thread_id: str,
+    lane_id: str,
+    body: UpdateLaneBody,
+    owner: Owner = Depends(current_owner),
+) -> dict[str, Any]:
+    require_deck_owner(thread_id, owner)
+    _require_playground_base(thread_id)
+    row = playground_store.update_lane_name(thread_id, lane_id, body.lane_name)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Unknown playground lane")
+    return {"ok": True, "lane": _lane_response(row)}
 
 
 @router.get("/masterpieces")

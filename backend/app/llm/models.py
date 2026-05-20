@@ -15,23 +15,23 @@ from .runtime_config import get_model_override, get_thinking_effort_override
 #   - high-stakes reasoning / HTML composition → anthropic/claude-sonnet-4.6
 #   - merge / classification / cheap tasks     → openai/gpt-5.4-mini
 #   - HTML quality critique                    → deepseek/deepseek-v4-flash
-#   - vision / OCR                             → google/gemini-3.1-pro-preview
+#   - vision / OCR                             → google/gemini-3.5-flash
 #   - image generation                         → openai/gpt-image-2
 _DEFAULTS: dict[str, str] = {
-    "ingest.ocr":     "google/gemini-3.1-pro-preview",
-    "digest":         "openai/gpt-5.4-mini",
-    "embeddings":     "openai/text-embedding-3-small",
-    "advanced_chat":  "anthropic/claude-sonnet-4.6",
-    "outline":        "anthropic/claude-sonnet-4.6",
-    "style.text":     "anthropic/claude-sonnet-4.6",
-    "style.vision":   "google/gemini-3.1-pro-preview",
-    "layout":         "anthropic/claude-sonnet-4.6",
-    "consolidate":    "openai/gpt-5.4-mini",
-    "html":           "anthropic/claude-sonnet-4.6",
-    "html.critic":    "deepseek/deepseek-v4-flash",
-    "image_plan":     "openai/gpt-5.4-mini",
-    "edit.intent":    "openai/gpt-5.4-mini",
-    "image_gen":      "openai/gpt-image-2",
+    "ingest.ocr": "google/gemini-3.5-flash",
+    "digest": "openai/gpt-5.4-mini",
+    "embeddings": "openai/text-embedding-3-small",
+    "advanced_chat": "anthropic/claude-sonnet-4.6",
+    "outline": "anthropic/claude-sonnet-4.6",
+    "style.text": "anthropic/claude-sonnet-4.6",
+    "style.vision": "google/gemini-3.5-flash",
+    "layout": "anthropic/claude-sonnet-4.6",
+    "consolidate": "openai/gpt-5.4-mini",
+    "html": "anthropic/claude-sonnet-4.6",
+    "html.critic": "deepseek/deepseek-v4-flash",
+    "image_plan": "openai/gpt-5.4-mini",
+    "edit.intent": "openai/gpt-5.4-mini",
+    "image_gen": "openai/gpt-image-2",
 }
 
 LANE_MODEL_STAGES = ("style", "layout", "html")
@@ -44,9 +44,19 @@ _CURATED_LANE_MODEL_OPTIONS: list[dict[str, str]] = [
         "description": "Strong default for creative slide reasoning and HTML composition.",
     },
     {
+        "id": "anthropic/claude-opus-4.7",
+        "label": "Claude Opus 4.7",
+        "description": "Anthropic's higher-capability option for demanding slide reasoning and composition.",
+    },
+    {
+        "id": "google/gemini-3.5-flash",
+        "label": "Gemini 3.5 Flash",
+        "description": "Vision-capable option for lanes that need image-aware styling.",
+    },
+    {
         "id": "google/gemini-3.1-pro-preview",
         "label": "Gemini 3.1 Pro Preview",
-        "description": "Vision-capable option for lanes that need image-aware styling.",
+        "description": "Google preview model for stronger style, layout, and HTML experiments.",
     },
     {
         "id": "openai/gpt-5.4",
@@ -67,6 +77,16 @@ _CURATED_LANE_MODEL_OPTIONS: list[dict[str, str]] = [
         "id": "deepseek/deepseek-v4-flash",
         "label": "DeepSeek V4 Flash",
         "description": "Fast DeepSeek option for lower-latency style, layout, and HTML trials.",
+    },
+    {
+        "id": "z-ai/glm-5.1",
+        "label": "GLM 5.1",
+        "description": "Z.ai GLM option for alternate reasoning and composition runs.",
+    },
+    {
+        "id": "minimax/minimax-m2.7",
+        "label": "MiniMax M2.7",
+        "description": "MiniMax option for alternate slide generation and composition runs.",
     },
     {
         "id": "xiaomi/mimo-v2.5",
@@ -138,6 +158,16 @@ _IMAGE_MODEL_OPTIONS: list[dict[str, str]] = [
         "id": "openai/gpt-image-2",
         "label": "GPT Image 2",
         "description": "Default image generation model routed through ZenMux.",
+    },
+    {
+        "id": "google/gemini-3.1-flash-image-preview",
+        "label": "Gemini 3.1 Flash Image Preview",
+        "description": "Google preview image model for fast generated image drafts.",
+    },
+    {
+        "id": "google/gemini-3-pro-image-preview",
+        "label": "Gemini 3 Pro Image Preview",
+        "description": "Google preview image model for higher-capability generated image drafts.",
     },
 ]
 
@@ -234,7 +264,9 @@ def normalize_lane_model_overrides(
         stage = str(raw_stage)
         if stage not in allowed_stages:
             allowed = ", ".join(allowed_stages)
-            raise ValueError(f"Unknown model override stage '{stage}'. Allowed stages: {allowed}.")
+            raise ValueError(
+                f"Unknown model override stage '{stage}'. Allowed stages: {allowed}."
+            )
         model = str(raw_model).strip()
         if not model:
             continue
@@ -334,19 +366,19 @@ def vision_capable(model_id: str) -> bool:
 
 
 # Preferred vision fallback when the routed model doesn't accept images.
-VISION_FALLBACK = "google/gemini-3.1-pro-preview"
+VISION_FALLBACK = "google/gemini-3.5-flash"
 
 
 # Per-preset overlays for the html stage. Each entry may set a "model" id and/or
 # a "temperature". A missing field falls back to the html default and 0.4 — so
 # adding a preset here only changes the behaviors that are explicitly listed.
 _HTML_PRESET_OVERLAYS: dict[str, dict[str, object]] = {
-    "cartoon_fairytale_worlds":     {"temperature": 0.7},
-    "design_portfolio_expression":  {"temperature": 0.6},
-    "cultural_luxury":              {"temperature": 0.55},
-    "product_clarity":              {"temperature": 0.4},
-    "editorial_authority":          {"temperature": 0.3},
-    "strategic_prestige":           {"temperature": 0.25},
+    "cartoon_fairytale_worlds": {"temperature": 0.7},
+    "design_portfolio_expression": {"temperature": 0.6},
+    "cultural_luxury": {"temperature": 0.55},
+    "product_clarity": {"temperature": 0.4},
+    "editorial_authority": {"temperature": 0.3},
+    "strategic_prestige": {"temperature": 0.25},
 }
 
 

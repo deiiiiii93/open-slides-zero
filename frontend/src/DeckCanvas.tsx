@@ -77,6 +77,7 @@ export function DeckCanvas({
   };
 
   const currentPosition = sortedIdx.indexOf(currentSlide);
+  const currentReady = typeof slides[currentSlide] === "string" && slides[currentSlide].length > 0;
 
   return (
     <div className="osz-deck-shell" style={{ display: "flex", gap: 16 }}>
@@ -86,6 +87,10 @@ export function DeckCanvas({
           className="osz-deck-mobile-nav-select"
           value={currentSlide}
           onChange={(e) => onSelectSlide(Number(e.target.value))}
+          style={{
+            background: currentReady ? "#0a0a0a" : "#e8e3d8",
+            color: currentReady ? "#f5f3ee" : "#0a0a0a",
+          }}
         >
           {sortedIdx.map((i) => {
             const isReady = typeof slides[i] === "string" && slides[i].length > 0;
@@ -133,6 +138,7 @@ export function DeckCanvas({
         </div>
         {sortedIdx.map((i) => {
           const isReady = typeof slides[i] === "string" && slides[i].length > 0;
+          const selected = i === currentSlide;
           return (
             <button
               key={i}
@@ -144,14 +150,14 @@ export function DeckCanvas({
                 textAlign: "left",
                 padding: "12px 14px",
                 marginBottom: 8,
-                border: i === currentSlide
+                border: selected
                   ? "2px solid #0a0a0a"
                   : isReady
                   ? "1.5px solid #0a0a0a"
                   : "1.5px solid #948e83",
                 borderRadius: 0,
-                background: "#f5f3ee",
-                color: isReady ? "#0a0a0a" : "#948e83",
+                background: selected ? "#0a0a0a" : "#f5f3ee",
+                color: selected ? "#f5f3ee" : isReady ? "#0a0a0a" : "#948e83",
                 cursor: "pointer",
                 transition: "border-color 100ms linear, background 100ms linear",
               }}
@@ -161,7 +167,7 @@ export function DeckCanvas({
                   fontFamily: "'Playfair Display', Georgia, serif",
                   fontWeight: 700,
                   fontSize: 14,
-                  color: isReady ? "#0a0a0a" : "#948e83",
+                  color: selected ? "#f5f3ee" : isReady ? "#0a0a0a" : "#948e83",
                   lineHeight: 1.0,
                 }}
               >
@@ -171,7 +177,7 @@ export function DeckCanvas({
                 <div
                   style={{
                     fontSize: 10,
-                    color: "#948e83",
+                    color: selected ? "#cfc8b9" : "#948e83",
                     marginTop: 4,
                     letterSpacing: 0.4,
                   }}

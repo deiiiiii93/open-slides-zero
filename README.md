@@ -228,7 +228,7 @@ For local backend-only runs, override any node with environment variables:
 
 ```bash
 OSZ_MODEL_OUTLINE=anthropic/claude-sonnet-4.6
-OSZ_MODEL_STYLE_VISION=google/gemini-3.1-pro-preview
+OSZ_MODEL_STYLE_VISION=google/gemini-3.5-flash
 OSZ_MODEL_HTML=anthropic/claude-sonnet-4.6
 ```
 

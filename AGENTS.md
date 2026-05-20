@@ -39,7 +39,7 @@ print('nodes:', list(get_graph().nodes.keys()))
 
 ### Split-stack harness (why there's no LangChain)
 - **LangGraph** handles the state machine, SQLite checkpointer, HITL interrupts, and `Send` fan-out.
-- **OpenAI SDK pointed at ZenMux** handles every LLM call. Per-subagent model IDs (`anthropic/Codex-sonnet-4.6`, `google/gemini-3.1-pro-preview`, etc.) are a config value in `app/llm/models.py`, not a provider wrapper class.
+- **OpenAI SDK pointed at ZenMux** handles every LLM call. Per-subagent model IDs (`anthropic/Codex-sonnet-4.6`, `google/gemini-3.5-flash`, etc.) are a config value in `app/llm/models.py`, not a provider wrapper class.
 - Do **not** reach for `langchain.chat_models` or `AgentExecutor` — multi-provider routing is ZenMux's job, and each subagent is a structured-output call, not an open-ended tool-using agent. The one LLM adapter `app/llm/zenmux.py` concentrates everything split-stack costs you (retry, structured-output with `json-repair` fallback, streaming, vision-capability guard).
 
 ### Data flow for one full run
