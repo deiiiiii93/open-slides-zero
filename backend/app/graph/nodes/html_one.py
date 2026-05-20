@@ -655,15 +655,17 @@ def html_one_node(state: dict[str, Any]) -> dict[str, Any]:
     overlay_temperature = overlay.get("temperature")
     temperature = float(overlay_temperature) if isinstance(overlay_temperature, (int, float)) else 0.4
     max_cycles = _html_react_max_cycles()
+    critic_enabled = brief.get("html_critic_enabled", True) is not False
     event: dict[str, Any] = {
         "node": "html_one",
         "slide_idx": slide_idx,
         "state": "started",
         "model": model,
-        "critic_model": critic_model,
+        "critic_model": critic_model if critic_enabled else None,
         "preset_id": preset_id,
         "temperature": temperature,
         "max_cycles": max_cycles,
+        "critic_enabled": critic_enabled,
     }
     if reasoning_effort:
         event["reasoning_effort"] = reasoning_effort
@@ -849,6 +851,44 @@ def html_one_node(state: dict[str, Any]) -> dict[str, Any]:
             continue
 
         last_valid_html = html
+        if not critic_enabled:
+            cycles_metadata.append(
+                _cycle_metadata(
+                    cycle=cycle,
+                    composer_finish_reason=result.finish_reason,
+                    validation_error_count=0,
+                    validation_warning_count=len(warnings),
+                    stop_reason="validator_accept",
+                )
+            )
+            push_event({
+                "node": "html_one",
+                "slide_idx": slide_idx,
+                "state": "finished",
+                "model": model,
+                "cycle": cycle,
+                "accepted_by": "validator",
+                "critic_enabled": False,
+            })
+            metadata = _html_generation_metadata(
+                slide_idx=slide_idx,
+                status="succeeded",
+                model=model,
+                critic_model=None,
+                reasoning_effort=reasoning_effort,
+                preset_id=preset_id,
+                temperature=temperature,
+                max_cycles=max_cycles,
+                cycles=cycles_metadata,
+                accepted_by="validator",
+                final_finish_reason=result.finish_reason,
+            )
+            return _with_html_metadata(
+                slide_idx,
+                metadata,
+                {"html_slides": {slide_idx: html}},
+            )
+
         push_event({
             "node": "html_one",
             "slide_idx": slide_idx,

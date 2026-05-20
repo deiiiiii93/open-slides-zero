@@ -71,6 +71,7 @@ function frameSize(aspectRatio: string, width: number): { width: number; baseW: 
 export function VisualPlaygroundPanel({ deck, busy, onGenerate, onSelect, onContinue }: Props) {
   const [candidateCount, setCandidateCount] = useState(DEFAULT_CANDIDATES);
   const [guidance, setGuidance] = useState("");
+  const [htmlCriticEnabled, setHtmlCriticEnabled] = useState(true);
   const [acknowledged, setAcknowledged] = useState(false);
   const [selectingId, setSelectingId] = useState<string | null>(null);
   const candidates = candidatesFromDeck(deck);
@@ -88,6 +89,7 @@ export function VisualPlaygroundPanel({ deck, busy, onGenerate, onSelect, onCont
     await onGenerate({
       candidate_count: candidateCount,
       guidance: guidance.trim() || null,
+      html_critic_enabled: htmlCriticEnabled,
     });
   }
 
@@ -220,6 +222,22 @@ export function VisualPlaygroundPanel({ deck, busy, onGenerate, onSelect, onCont
           />
         </label>
       </div>
+
+      <label style={{ display: "flex", gap: 8, alignItems: "start", color: "#5c5852", fontSize: 13 }}>
+        <input
+          type="checkbox"
+          checked={htmlCriticEnabled}
+          disabled={busy}
+          onChange={(event) => setHtmlCriticEnabled(event.target.checked)}
+          style={{ marginTop: 2 }}
+        />
+        <span>
+          HTML critic
+          <span style={{ display: "block", color: "#948e83", fontSize: 12, lineHeight: 1.35 }}>
+            Review preview HTML after validation for stronger composition. Disable for faster, cheaper previews.
+          </span>
+        </span>
+      </label>
 
       <label style={{ display: "flex", gap: 8, alignItems: "start", color: "#5c5852", fontSize: 13 }}>
         <input

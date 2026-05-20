@@ -76,7 +76,7 @@ def isolated_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     graph_module._compiled = None
     monkeypatch.setattr(graph_module, "DB_PATH", tmp_path / "threads.sqlite")
     monkeypatch.setattr(store, "ROOT", tmp_path / "threads")
-    calls = {"layout": 0, "preview_html": 0}
+    calls = {"layout": 0, "preview_html": 0, "preview_critic": 0}
 
     def fake_embeddings(_model: str, inputs: list[str], **_kwargs):
         return [[1.0, float(idx)] for idx, _ in enumerate(inputs)]
@@ -159,6 +159,7 @@ def isolated_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                 ]
             )
         if schema is html_one._HtmlCritique:
+            calls["preview_critic"] += 1
             return schema(decision="accept", issues=[], revision_instructions="")
         if schema is layout._BulkSignals:
             calls["layout"] += 1
@@ -289,6 +290,42 @@ def test_visual_playground_runs_from_outline_gate_and_continues_to_layout(isolat
     assert _interrupt_gate(continued_done["state"]) == "layout"
     assert isolated_graph["layout"] == 1
     assert not continued_done["state"]["values"].get("html_slides")
+
+
+def test_visual_playground_can_disable_html_critic(isolated_graph):
+    client = TestClient(app)
+    created = decks.create_deck(
+        decks.CreateDeckBody(
+            deck_name="No critic previews",
+            expected_pages=2,
+            materials=[decks.Material(kind="text", uri="text:Revenue up. Margin stable.")],
+        )
+    )
+    hitl.resume_deck(
+        created["thread_id"],
+        {
+            "scenario_id": created["values"]["scenario_id"],
+            "structure_id": created["values"]["structure_candidates"][0],
+        },
+    )
+    visual_stage = client.post(
+        f"/decks/{created['thread_id']}/resume/stream",
+        json={"payload": {"visual_playground": True}},
+    )
+    assert visual_stage.status_code == 200, visual_stage.text
+
+    generated = client.post(
+        f"/decks/{created['thread_id']}/visual_playground/stream",
+        json={"candidate_count": 1, "html_critic_enabled": False},
+    )
+
+    assert generated.status_code == 200, generated.text
+    done = next(event for event in _parse_sse_events(generated.text) if event["type"] == "done")
+    values = done["state"]["values"]
+    assert values["visual_playground_status"]["html_critic_enabled"] is False
+    assert values["visual_playground_candidates"][0]["preview_slides"]
+    assert isolated_graph["preview_html"] > 0
+    assert isolated_graph["preview_critic"] == 0
 
 
 def test_visual_playground_can_open_creator_playground_after_selection(isolated_graph):

@@ -307,6 +307,34 @@ def test_html_react_accepts_first_valid_draft(monkeypatch: pytest.MonkeyPatch):
     assert critic_calls == 1
 
 
+def test_html_react_can_skip_critic_when_disabled(monkeypatch: pytest.MonkeyPatch):
+    composer_calls = 0
+
+    def fake_html(_model, messages, **_kwargs):
+        nonlocal composer_calls
+        composer_calls += 1
+        title, pattern = _prompt_metadata(messages)
+        return CompletionResult(text=_good_html(title, pattern), finish_reason="stop")
+
+    def fail_critic(*_args, **_kwargs):
+        raise AssertionError("critic should not run when disabled")
+
+    brief = {**_single_slide_brief(), "html_critic_enabled": False}
+    monkeypatch.setattr(html_one.zenmux, "chat_with_metadata", fake_html)
+    monkeypatch.setattr(html_one.zenmux, "chat_structured", fail_critic)
+
+    result = html_one.html_one_node({"slide_idx": 0, "brief": brief})
+
+    assert 0 in result["html_slides"]
+    metadata = result["html_generation_metadata"][0]
+    assert metadata["status"] == "succeeded"
+    assert metadata["accepted_by"] == "validator"
+    assert metadata["critic_model"] is None
+    assert metadata["cycles_run"] == 1
+    assert metadata["cycles"][0]["stop_reason"] == "validator_accept"
+    assert composer_calls == 1
+
+
 def test_html_react_revision_uses_critic_feedback(monkeypatch: pytest.MonkeyPatch):
     composer_messages: list[list[dict[str, object]]] = []
     critic_calls = 0

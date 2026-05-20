@@ -47,6 +47,7 @@ _SENTINEL = object()
 class VisualPlaygroundGenerateBody(BaseModel):
     candidate_count: int = DEFAULT_VISUAL_PLAYGROUND_CANDIDATES
     guidance: str | None = None
+    html_critic_enabled: bool = True
 
     @field_validator("candidate_count")
     @classmethod
@@ -265,6 +266,8 @@ def _preview_brief(
     candidate: dict[str, Any],
     outline_slides: list[dict[str, Any]],
     preview_indices: list[int],
+    *,
+    html_critic_enabled: bool,
 ) -> dict[str, Any]:
     brief_slides = [
         _brief_slide(
@@ -294,6 +297,7 @@ def _preview_brief(
         "creator_prompt": "",
         "lane_model_overrides": values.get("lane_model_overrides"),
         "lane_thinking_effort_overrides": values.get("lane_thinking_effort_overrides"),
+        "html_critic_enabled": html_critic_enabled,
         "slides": brief_slides,
     }
 
@@ -302,10 +306,19 @@ def _render_preview_slides(
     values: dict[str, Any],
     source: str,
     candidate: dict[str, Any],
+    *,
+    html_critic_enabled: bool,
 ) -> list[dict[str, Any]]:
     outline_slides = _source_outline(values, source)
     preview_indices = _preview_slide_indices(outline_slides)
-    brief = _preview_brief(values, source, candidate, outline_slides, preview_indices)
+    brief = _preview_brief(
+        values,
+        source,
+        candidate,
+        outline_slides,
+        preview_indices,
+        html_critic_enabled=html_critic_enabled,
+    )
     previews: list[dict[str, Any]] = []
     for slide in brief["slides"]:
         slide_idx = int(slide["slide_idx"])
@@ -341,6 +354,7 @@ def _run_visual_playground(
         "state": "running",
         "candidate_count": body.candidate_count,
         "guidance": guidance,
+        "html_critic_enabled": body.html_critic_enabled,
         "started_at": _now(),
         "warning": (
             "This mode can be very token-consuming. These previews lock only visual style; "
@@ -406,7 +420,12 @@ def _run_visual_playground(
             "label": spec.label,
         })
         try:
-            payload["preview_slides"] = _render_preview_slides(values, source, payload)
+            payload["preview_slides"] = _render_preview_slides(
+                values,
+                source,
+                payload,
+                html_critic_enabled=body.html_critic_enabled,
+            )
         except Exception as exc:  # noqa: BLE001
             log.exception("visual playground preview failed")
             payload["error"] = redact_secrets(exc)

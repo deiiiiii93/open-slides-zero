@@ -154,6 +154,7 @@ export type VisualPlaygroundStatus = {
 export type VisualPlaygroundGenerateBody = {
   candidate_count: number;
   guidance?: string | null;
+  html_critic_enabled?: boolean;
 };
 
 export type VisualPlaygroundContinueBody = {
