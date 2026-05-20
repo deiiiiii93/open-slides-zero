@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { normalizeImagePlaceholders } from "./imagePlaceholders";
 import { Markdown } from "./Markdown";
 import type {
@@ -20,8 +20,7 @@ type Props = {
   deck: DeckState;
   busy: boolean;
   onGenerate: (body: VisualPlaygroundGenerateBody) => Promise<void>;
-  onSelect: (candidateId: string) => Promise<void>;
-  onContinue?: (destination: "layout" | "playground") => Promise<void>;
+  onContinue?: (destination: "layout" | "playground", candidateIds: string[]) => Promise<void>;
 };
 
 function candidatesFromDeck(deck: DeckState): VisualPlaygroundCandidate[] {
@@ -34,12 +33,19 @@ function statusFromDeck(deck: DeckState): VisualPlaygroundStatus {
   return raw && typeof raw === "object" ? raw : {};
 }
 
-function selectedCandidateId(deck: DeckState): string | null {
-  return (
-    (deck.values?.visual_playground_selected_candidate_id as string | null | undefined) ??
-    (statusFromDeck(deck).selected_candidate_id as string | null | undefined) ??
-    null
-  );
+function selectedCandidateIds(deck: DeckState): string[] {
+  const values = deck.values ?? {};
+  const status = statusFromDeck(deck);
+  const rawList =
+    (values.visual_playground_selected_candidate_ids as unknown) ??
+    (status.selected_candidate_ids as unknown);
+  if (Array.isArray(rawList)) {
+    return rawList.map((item) => String(item)).filter(Boolean);
+  }
+  const single =
+    (values.visual_playground_selected_candidate_id as string | null | undefined) ??
+    (status.selected_candidate_id as string | null | undefined);
+  return single ? [single] : [];
 }
 
 function hasVisualPlaygroundSource(deck: DeckState): boolean {
@@ -68,24 +74,36 @@ function frameSize(aspectRatio: string, width: number): { width: number; baseW: 
   return { width, baseW, baseH, height: (baseH * width) / baseW, scale: width / baseW };
 }
 
-export function VisualPlaygroundPanel({ deck, busy, onGenerate, onSelect, onContinue }: Props) {
+export function VisualPlaygroundPanel({ deck, busy, onGenerate, onContinue }: Props) {
   const [candidateCount, setCandidateCount] = useState(DEFAULT_CANDIDATES);
   const [guidance, setGuidance] = useState("");
   const [htmlCriticEnabled, setHtmlCriticEnabled] = useState(true);
   const [acknowledged, setAcknowledged] = useState(false);
-  const [selectingId, setSelectingId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>(() => selectedCandidateIds(deck));
   const candidates = candidatesFromDeck(deck);
   const status = statusFromDeck(deck);
-  const selectedId = selectedCandidateId(deck);
   const sourceReady = hasVisualPlaygroundSource(deck);
   const running = busy && status.state === "running";
   const inVisualPlayground = deck.values?.current_stage === "visual_playground";
-  const canContinue = Boolean(onContinue && selectedId && inVisualPlayground);
+  const canContinueToLayout = Boolean(onContinue && selectedIds.length === 1 && inVisualPlayground);
+  const canOpenPlayground = Boolean(onContinue && selectedIds.length >= 1 && inVisualPlayground);
   const canGenerate = !busy && acknowledged && sourceReady;
   const aspectRatio = (deck.values?.aspect_ratio as string | undefined) ?? "16:9";
   const previewFrame = useMemo(() => frameSize(aspectRatio, 320), [aspectRatio]);
+  const candidateIdsKey = candidates.map((candidate) => candidate.candidate_id).join("|");
+  const persistedIdsKey = selectedCandidateIds(deck).join("|");
+
+  useEffect(() => {
+    const validIds = new Set(candidates.map((candidate) => candidate.candidate_id));
+    const persistedIds = selectedCandidateIds(deck).filter((candidateId) => validIds.has(candidateId));
+    setSelectedIds((prev) => {
+      const kept = prev.filter((candidateId) => validIds.has(candidateId));
+      return kept.length > 0 ? kept : persistedIds;
+    });
+  }, [candidateIdsKey, persistedIdsKey, deck]);
 
   async function generate() {
+    setSelectedIds([]);
     await onGenerate({
       candidate_count: candidateCount,
       guidance: guidance.trim() || null,
@@ -93,13 +111,13 @@ export function VisualPlaygroundPanel({ deck, busy, onGenerate, onSelect, onCont
     });
   }
 
-  async function selectCandidate(candidateId: string) {
-    setSelectingId(candidateId);
-    try {
-      await onSelect(candidateId);
-    } finally {
-      setSelectingId(null);
-    }
+  function toggleCandidate(candidateId: string) {
+    if (busy) return;
+    setSelectedIds((prev) =>
+      prev.includes(candidateId)
+        ? prev.filter((item) => item !== candidateId)
+        : [...prev, candidateId],
+    );
   }
 
   return (
@@ -275,17 +293,17 @@ export function VisualPlaygroundPanel({ deck, busy, onGenerate, onSelect, onCont
             <>
               <button
                 type="button"
-                className={`osz-button ${canContinue ? "osz-button-primary" : ""}`}
-                disabled={busy || !canContinue}
-                onClick={() => void onContinue("layout")}
+                className={`osz-button ${canContinueToLayout ? "osz-button-primary" : ""}`}
+                disabled={busy || !canContinueToLayout}
+                onClick={() => void onContinue("layout", selectedIds)}
               >
                 Continue to layout
               </button>
               <button
                 type="button"
-                className="osz-button"
-                disabled={busy || !canContinue}
-                onClick={() => void onContinue("playground")}
+                className={`osz-button ${canOpenPlayground ? "osz-button-primary" : ""}`}
+                disabled={busy || !canOpenPlayground}
+                onClick={() => void onContinue("playground", selectedIds)}
               >
                 Open Creator Playground
               </button>
@@ -303,7 +321,7 @@ export function VisualPlaygroundPanel({ deck, busy, onGenerate, onSelect, onCont
           }}
         >
           {candidates.map((candidate) => {
-            const selected = selectedId === candidate.candidate_id;
+            const selected = selectedIds.includes(candidate.candidate_id);
             const candidateSwatches = swatches(candidate);
             return (
               <article
@@ -328,15 +346,11 @@ export function VisualPlaygroundPanel({ deck, busy, onGenerate, onSelect, onCont
                   </div>
                   <button
                     type="button"
-                    className={`osz-button ${!busy && !selected && selectingId !== candidate.candidate_id ? "osz-button-primary" : ""}`}
-                    disabled={busy || selected || selectingId === candidate.candidate_id}
-                    onClick={() => void selectCandidate(candidate.candidate_id)}
+                    className={`osz-button ${!busy && !selected ? "osz-button-primary" : ""}`}
+                    disabled={busy}
+                    onClick={() => toggleCandidate(candidate.candidate_id)}
                   >
-                    {selected
-                      ? "Style selected"
-                      : selectingId === candidate.candidate_id
-                        ? "Selecting..."
-                        : "Use this style"}
+                    {selected ? "Selected" : "Select style"}
                   </button>
                 </div>
 

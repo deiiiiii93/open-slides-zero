@@ -136,8 +136,7 @@ function hasLiveContent(live: LaneLiveState): boolean {
   return (
     live.isRunning ||
     live.error != null ||
-    live.activeNode != null ||
-    Object.keys(live.buffersByTag).length > 0
+    live.activeNode != null
   );
 }
 

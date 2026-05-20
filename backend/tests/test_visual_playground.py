@@ -279,6 +279,7 @@ def test_visual_playground_runs_from_outline_gate_and_continues_to_layout(isolat
     )
     assert selected.status_code == 200, selected.text
     assert selected.json()["values"]["visual_style"]["palette"]["primary"] == "#663300"
+    assert selected.json()["values"]["visual_playground_selected_candidate_ids"] == [candidate["candidate_id"]]
     assert selected.json()["values"]["current_stage"] == "visual_playground"
 
     continued = client.post(
@@ -290,6 +291,88 @@ def test_visual_playground_runs_from_outline_gate_and_continues_to_layout(isolat
     assert _interrupt_gate(continued_done["state"]) == "layout"
     assert isolated_graph["layout"] == 1
     assert not continued_done["state"]["values"].get("html_slides")
+
+
+def test_visual_playground_layout_continue_uses_candidate_id_without_preselect(isolated_graph):
+    client = TestClient(app)
+    created = decks.create_deck(
+        decks.CreateDeckBody(
+            deck_name="Direct layout pick",
+            expected_pages=2,
+            materials=[decks.Material(kind="text", uri="text:Revenue up. Margin stable.")],
+        )
+    )
+    hitl.resume_deck(
+        created["thread_id"],
+        {
+            "scenario_id": created["values"]["scenario_id"],
+            "structure_id": created["values"]["structure_candidates"][0],
+        },
+    )
+    visual_stage = client.post(
+        f"/decks/{created['thread_id']}/resume/stream",
+        json={"payload": {"visual_playground": True}},
+    )
+    assert visual_stage.status_code == 200, visual_stage.text
+    generated = client.post(
+        f"/decks/{created['thread_id']}/visual_playground/stream",
+        json={"candidate_count": 2},
+    )
+    done = next(event for event in _parse_sse_events(generated.text) if event["type"] == "done")
+    candidate = done["state"]["values"]["visual_playground_candidates"][1]
+
+    continued = client.post(
+        f"/decks/{created['thread_id']}/visual_playground/continue/stream",
+        json={"destination": "layout", "candidate_ids": [candidate["candidate_id"]]},
+    )
+
+    assert continued.status_code == 200, continued.text
+    continued_done = next(event for event in _parse_sse_events(continued.text) if event["type"] == "done")
+    values = continued_done["state"]["values"]
+    assert values["visual_style"]["palette"]["primary"] == "#003366"
+    assert values["visual_playground_selected_candidate_id"] == candidate["candidate_id"]
+    assert values["visual_playground_selected_candidate_ids"] == [candidate["candidate_id"]]
+    assert _interrupt_gate(continued_done["state"]) == "layout"
+
+
+def test_visual_playground_layout_rejects_multiple_candidate_ids(isolated_graph):
+    client = TestClient(app)
+    created = decks.create_deck(
+        decks.CreateDeckBody(
+            deck_name="Too many layout picks",
+            expected_pages=2,
+            materials=[decks.Material(kind="text", uri="text:Revenue up. Margin stable.")],
+        )
+    )
+    hitl.resume_deck(
+        created["thread_id"],
+        {
+            "scenario_id": created["values"]["scenario_id"],
+            "structure_id": created["values"]["structure_candidates"][0],
+        },
+    )
+    visual_stage = client.post(
+        f"/decks/{created['thread_id']}/resume/stream",
+        json={"payload": {"visual_playground": True}},
+    )
+    assert visual_stage.status_code == 200, visual_stage.text
+    generated = client.post(
+        f"/decks/{created['thread_id']}/visual_playground/stream",
+        json={"candidate_count": 2},
+    )
+    done = next(event for event in _parse_sse_events(generated.text) if event["type"] == "done")
+    candidate_ids = [
+        candidate["candidate_id"]
+        for candidate in done["state"]["values"]["visual_playground_candidates"][:2]
+    ]
+
+    response = client.post(
+        f"/decks/{created['thread_id']}/visual_playground/continue/stream",
+        json={"destination": "layout", "candidate_ids": candidate_ids},
+    )
+
+    assert response.status_code == 409
+    assert isolated_graph["layout"] == 0
 
 
 def test_visual_playground_can_disable_html_critic(isolated_graph):
@@ -370,6 +453,155 @@ def test_visual_playground_can_open_creator_playground_after_selection(isolated_
     done = next(event for event in _parse_sse_events(opened.text) if event["type"] == "done")
     assert done["state"]["values"]["current_stage"] == "playground"
     assert done["state"]["values"]["visual_style"]["palette"]["primary"] == "#663300"
+    listed = client.get(f"/decks/{created['thread_id']}/playground/lanes")
+    assert listed.status_code == 200, listed.text
+    lanes = listed.json()["lanes"]
+    assert len(lanes) == 1
+    assert lanes[0]["lane_name"] == "Editorial contrast"
+    assert lanes[0]["creator_prompt"] == ""
+    assert lanes[0]["state"]["values"]["visual_style"]["palette"]["primary"] == "#663300"
+    assert _interrupt_gate(lanes[0]["state"]) == "layout"
+    assert isolated_graph["layout"] == 1
+
+
+def test_visual_playground_opens_creator_playground_with_multiple_style_lanes(isolated_graph):
+    client = TestClient(app)
+    created = decks.create_deck(
+        decks.CreateDeckBody(
+            deck_name="Visual playground multi lane",
+            expected_pages=2,
+            materials=[decks.Material(kind="text", uri="text:Revenue up. Margin stable.")],
+        )
+    )
+    hitl.resume_deck(
+        created["thread_id"],
+        {
+            "scenario_id": created["values"]["scenario_id"],
+            "structure_id": created["values"]["structure_candidates"][0],
+        },
+    )
+    visual_stage = client.post(
+        f"/decks/{created['thread_id']}/resume/stream",
+        json={"payload": {"visual_playground": True}},
+    )
+    assert visual_stage.status_code == 200, visual_stage.text
+    generated = client.post(
+        f"/decks/{created['thread_id']}/visual_playground/stream",
+        json={"candidate_count": 3},
+    )
+    generated_done = next(event for event in _parse_sse_events(generated.text) if event["type"] == "done")
+    candidates = generated_done["state"]["values"]["visual_playground_candidates"][:2]
+    candidate_ids = [candidate["candidate_id"] for candidate in candidates]
+
+    opened = client.post(
+        f"/decks/{created['thread_id']}/visual_playground/continue/stream",
+        json={"destination": "playground", "candidate_ids": candidate_ids},
+    )
+
+    assert opened.status_code == 200, opened.text
+    opened_events = _parse_sse_events(opened.text)
+    event_types = [event["type"] for event in opened_events]
+    assert event_types.count("lane_started") == 2
+    assert event_types.count("lane_done") == 2
+    assert "token" not in event_types
+    assert "event" not in event_types
+    done = next(event for event in opened_events if event["type"] == "done")
+    values = done["state"]["values"]
+    assert values["current_stage"] == "playground"
+    assert values["visual_playground_selected_candidate_id"] is None
+    assert values["visual_playground_selected_candidate_ids"] == candidate_ids
+    assert values["visual_style"]["palette"]["primary"] == "#663300"
+    assert values.get("layouts") in (None, [])
+    listed = client.get(f"/decks/{created['thread_id']}/playground/lanes")
+    assert listed.status_code == 200, listed.text
+    lanes = listed.json()["lanes"]
+    assert [lane["lane_name"] for lane in lanes] == ["Editorial contrast", "Product clarity"]
+    assert [lane["creator_prompt"] for lane in lanes] == ["", ""]
+    assert [lane["state"]["values"]["visual_style"]["palette"]["primary"] for lane in lanes] == [
+        "#663300",
+        "#003366",
+    ]
+    assert [_interrupt_gate(lane["state"]) for lane in lanes] == ["layout", "layout"]
+    assert isolated_graph["layout"] == 2
+
+
+def test_visual_playground_continue_rejects_unknown_candidate_id(isolated_graph):
+    client = TestClient(app)
+    created = decks.create_deck(
+        decks.CreateDeckBody(
+            deck_name="Unknown candidate",
+            expected_pages=2,
+            materials=[decks.Material(kind="text", uri="text:Revenue up. Margin stable.")],
+        )
+    )
+    hitl.resume_deck(
+        created["thread_id"],
+        {
+            "scenario_id": created["values"]["scenario_id"],
+            "structure_id": created["values"]["structure_candidates"][0],
+        },
+    )
+    visual_stage = client.post(
+        f"/decks/{created['thread_id']}/resume/stream",
+        json={"payload": {"visual_playground": True}},
+    )
+    assert visual_stage.status_code == 200, visual_stage.text
+    generated = client.post(
+        f"/decks/{created['thread_id']}/visual_playground/stream",
+        json={"candidate_count": 1},
+    )
+    assert generated.status_code == 200, generated.text
+
+    response = client.post(
+        f"/decks/{created['thread_id']}/visual_playground/continue/stream",
+        json={"destination": "layout", "candidate_ids": ["vp-missing"]},
+    )
+
+    assert response.status_code == 404
+    assert isolated_graph["layout"] == 0
+
+
+def test_visual_playground_open_creator_rejects_lane_capacity_overflow(
+    isolated_graph,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(visual_playground.playground_store, "MAX_LANES_PER_DECK", 1)
+    client = TestClient(app)
+    created = decks.create_deck(
+        decks.CreateDeckBody(
+            deck_name="Too many visual lanes",
+            expected_pages=2,
+            materials=[decks.Material(kind="text", uri="text:Revenue up. Margin stable.")],
+        )
+    )
+    hitl.resume_deck(
+        created["thread_id"],
+        {
+            "scenario_id": created["values"]["scenario_id"],
+            "structure_id": created["values"]["structure_candidates"][0],
+        },
+    )
+    visual_stage = client.post(
+        f"/decks/{created['thread_id']}/resume/stream",
+        json={"payload": {"visual_playground": True}},
+    )
+    assert visual_stage.status_code == 200, visual_stage.text
+    generated = client.post(
+        f"/decks/{created['thread_id']}/visual_playground/stream",
+        json={"candidate_count": 2},
+    )
+    done = next(event for event in _parse_sse_events(generated.text) if event["type"] == "done")
+    candidate_ids = [
+        candidate["candidate_id"]
+        for candidate in done["state"]["values"]["visual_playground_candidates"][:2]
+    ]
+
+    response = client.post(
+        f"/decks/{created['thread_id']}/visual_playground/continue/stream",
+        json={"destination": "playground", "candidate_ids": candidate_ids},
+    )
+
+    assert response.status_code == 409
     assert isolated_graph["layout"] == 0
 
 
@@ -444,6 +676,7 @@ def test_visual_playground_selection_updates_only_current_visual_style(isolated_
     assert selected.status_code == 200, selected.text
     values = selected.json()["values"]
     assert values["visual_playground_selected_candidate_id"] == candidate["candidate_id"]
+    assert values["visual_playground_selected_candidate_ids"] == [candidate["candidate_id"]]
     assert values["visual_style"]["palette"]["primary"] == "#663300"
     assert values["visual_style_md"].startswith("# Visual Style")
     assert values.get("layouts") in (None, [])

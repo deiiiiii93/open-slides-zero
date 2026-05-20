@@ -144,6 +144,7 @@ export type VisualPlaygroundStatus = {
   candidate_count?: number;
   completed_candidates?: number;
   selected_candidate_id?: string;
+  selected_candidate_ids?: string[];
   guidance?: string;
   warning?: string;
   started_at?: string;
@@ -159,6 +160,7 @@ export type VisualPlaygroundGenerateBody = {
 
 export type VisualPlaygroundContinueBody = {
   destination: "layout" | "playground";
+  candidate_ids?: string[];
 };
 
 export type CatalogResponse = {

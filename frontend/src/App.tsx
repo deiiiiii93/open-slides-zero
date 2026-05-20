@@ -463,6 +463,10 @@ export function App() {
       }
       case "done": {
         setDeck(ev.state);
+        if ((ev.state?.values?.current_stage as string | undefined) === "playground") {
+          setBuffersByTag({});
+          tagStartRef.current = {};
+        }
         if ((ev.state?.values?.current_stage as string | undefined) === "advanced_chat") {
           setBuffersByTag((prev) => {
             if (!prev.advanced_chat) return prev;
@@ -625,24 +629,12 @@ export function App() {
     await consumeStream(api.visualPlaygroundStreamUrl(deck.thread_id), body);
   }
 
-  async function onVisualPlaygroundSelect(candidateId: string) {
-    if (!deck || busy) return;
-    setErr(null);
-    setBusy(true);
-    try {
-      const nextDeck = await api.selectVisualPlaygroundCandidate(deck.thread_id, candidateId);
-      setDeck(nextDeck);
-      rememberDeck(nextDeck);
-    } catch (e) {
-      setErr(String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function onVisualPlaygroundContinue(destination: "layout" | "playground") {
+  async function onVisualPlaygroundContinue(destination: "layout" | "playground", candidateIds: string[]) {
     if (!deck) return;
-    await consumeStream(api.continueVisualPlaygroundStreamUrl(deck.thread_id), { destination });
+    await consumeStream(
+      api.continueVisualPlaygroundStreamUrl(deck.thread_id),
+      { destination, candidate_ids: candidateIds },
+    );
   }
 
   async function onComment(text: string, box: { x: number; y: number; w: number; h: number }) {
@@ -1563,7 +1555,6 @@ export function App() {
                 deck={deck}
                 busy={busy}
                 onGenerate={onVisualPlaygroundGenerate}
-                onSelect={onVisualPlaygroundSelect}
                 onContinue={onVisualPlaygroundContinue}
               />
             ) : stage === "playground" && !hasInterrupt ? (

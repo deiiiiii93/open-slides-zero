@@ -6,6 +6,11 @@ import { runtimeConfigHeaders } from "./runtimeConfig";
 export type StreamEvent =
   | { type: "thread"; thread_id: string; parent_thread_id?: string; lane_id?: string }
   | { type: "lane"; lane: any }
+  | { type: "lane_started"; lane_id: string; thread_id: string; lane: any }
+  | { type: "lane_thread"; lane_id: string; thread_id: string }
+  | { type: "lane_update"; lane_id: string; thread_id: string; node?: string }
+  | { type: "lane_interrupt"; lane_id: string; thread_id: string; payload: any }
+  | { type: "lane_done"; lane_id: string; thread_id: string; lane: any }
   | { type: "token"; tag: string | null; text: string }
   | {
       type: "event";

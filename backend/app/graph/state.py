@@ -168,6 +168,7 @@ class SlideState(TypedDict, total=False):
     # ---- F'': visual playground style previews ----
     visual_playground_candidates: list[dict[str, Any]]
     visual_playground_selected_candidate_id: str | None
+    visual_playground_selected_candidate_ids: list[str]
     visual_playground_status: dict[str, Any] | None
 
     # ---- C / D: structure choice ----

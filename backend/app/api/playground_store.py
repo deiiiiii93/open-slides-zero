@@ -132,7 +132,9 @@ def create_lane_record(
     parent_thread_id: str,
     lane_thread_id: str,
     creator_prompt: str,
+    lane_name: str | None = None,
 ) -> dict[str, Any]:
+    stored_lane_name = " ".join((lane_name or "").strip().split())[:80] or None
     with _connect() as conn:
         rows = conn.execute(
             "SELECT lane_id FROM playground_lanes WHERE parent_thread_id = ?",
@@ -163,7 +165,7 @@ def create_lane_record(
                 lane_id,
                 lane_thread_id,
                 creator_prompt,
-                default_lane_name(lane_id, creator_prompt),
+                stored_lane_name or default_lane_name(lane_id, creator_prompt),
                 created_at,
             ),
         )
@@ -173,7 +175,7 @@ def create_lane_record(
         "lane_id": lane_id,
         "lane_thread_id": lane_thread_id,
         "creator_prompt": creator_prompt,
-        "lane_name": default_lane_name(lane_id, creator_prompt),
+        "lane_name": stored_lane_name or default_lane_name(lane_id, creator_prompt),
         "created_at": created_at,
     }
 

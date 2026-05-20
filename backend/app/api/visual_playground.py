@@ -10,6 +10,7 @@ style back into graph state.
 from __future__ import annotations
 
 import contextvars
+import json
 import logging
 import queue as _queue
 import uuid
@@ -31,8 +32,10 @@ from ..llm.runtime_config import (
     use_runtime_config,
 )
 from ..llm.stream import push_event, tagged_stream, writer_override
+from . import playground_store
 from .common import config_for, current_state, graph, mirror_to_disk
-from .owners import Owner, current_owner, require_deck_owner
+from .history import _clone_checkpoint_lineage
+from .owners import Owner, assign_deck_to_owner, current_owner, require_deck_owner
 from .streaming import SSE_HEADERS, _sse, _stream_graph
 
 router = APIRouter()
@@ -65,6 +68,7 @@ class VisualPlaygroundSelectBody(BaseModel):
 
 class VisualPlaygroundContinueBody(BaseModel):
     destination: Literal["layout", "playground"] = "layout"
+    candidate_ids: list[str] = Field(default_factory=list)
 
 
 class _CandidateSpec(BaseModel):
@@ -139,6 +143,65 @@ def _style_markdown(style: advanced_chat.AdvancedVisualStyle | dict[str, Any]) -
         "## Rationale",
         parsed.rationale,
     ])
+
+
+def _candidate_style(candidate: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    try:
+        style = advanced_chat.AdvancedVisualStyle.model_validate(candidate.get("visual_style") or {})
+    except ValidationError as exc:
+        label = candidate.get("label") or candidate.get("candidate_id") or "candidate"
+        raise HTTPException(status_code=409, detail=f"Candidate {label} style is invalid: {exc}") from exc
+    return style.model_dump(), _style_markdown(style)
+
+
+def _candidate_ids_from_request(
+    values: dict[str, Any],
+    body: VisualPlaygroundContinueBody | None,
+) -> list[str]:
+    requested = list((body.candidate_ids if body else []) or [])
+    if not requested:
+        stored_ids = values.get("visual_playground_selected_candidate_ids")
+        if isinstance(stored_ids, list):
+            requested = [str(item) for item in stored_ids if str(item).strip()]
+    if not requested and values.get("visual_playground_selected_candidate_id"):
+        requested = [str(values["visual_playground_selected_candidate_id"])]
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in requested:
+        candidate_id = str(item).strip()
+        if candidate_id and candidate_id not in seen:
+            out.append(candidate_id)
+            seen.add(candidate_id)
+    return out
+
+
+def _resolve_selected_candidates(
+    values: dict[str, Any],
+    body: VisualPlaygroundContinueBody | None,
+) -> list[dict[str, Any]]:
+    candidate_ids = _candidate_ids_from_request(values, body)
+    candidates = list(values.get("visual_playground_candidates") or [])
+    by_id = {str(item.get("candidate_id")): item for item in candidates if item.get("candidate_id")}
+    missing = [candidate_id for candidate_id in candidate_ids if candidate_id not in by_id]
+    if missing:
+        raise HTTPException(status_code=404, detail=f"Unknown visual playground candidate: {missing[0]}")
+    return [by_id[candidate_id] for candidate_id in candidate_ids]
+
+
+def _selection_status_update(
+    values: dict[str, Any],
+    selected_candidates: list[dict[str, Any]],
+) -> dict[str, Any]:
+    selected_ids = [str(candidate["candidate_id"]) for candidate in selected_candidates]
+    status = dict(values.get("visual_playground_status") or {})
+    return {
+        **status,
+        "state": "selected",
+        "selected_candidate_id": selected_ids[0] if len(selected_ids) == 1 else None,
+        "selected_candidate_ids": selected_ids,
+        "selected_at": _now(),
+    }
 
 
 def _source_outline(values: dict[str, Any], source: str) -> list[dict[str, Any]]:
@@ -367,6 +430,7 @@ def _run_visual_playground(
             "visual_playground_status": status,
             "visual_playground_candidates": [],
             "visual_playground_selected_candidate_id": None,
+            "visual_playground_selected_candidate_ids": [],
             "current_stage": "visual_playground",
         },
     )
@@ -575,21 +639,12 @@ def select_visual_playground_candidate(
     )
     if candidate is None:
         raise HTTPException(status_code=404, detail="Unknown visual playground candidate.")
-    try:
-        style = advanced_chat.AdvancedVisualStyle.model_validate(candidate.get("visual_style") or {})
-    except ValidationError as exc:
-        raise HTTPException(status_code=409, detail=f"Candidate style is invalid: {exc}") from exc
-    style_payload = style.model_dump()
-    style_md = _style_markdown(style)
+    style_payload, style_md = _candidate_style(candidate)
 
     update: dict[str, Any] = {
         "visual_playground_selected_candidate_id": body.candidate_id,
-        "visual_playground_status": {
-            **dict(values.get("visual_playground_status") or {}),
-            "state": "selected",
-            "selected_candidate_id": body.candidate_id,
-            "selected_at": _now(),
-        },
+        "visual_playground_selected_candidate_ids": [body.candidate_id],
+        "visual_playground_status": _selection_status_update(values, [candidate]),
     }
     update.update({
         "visual_style": style_payload,
@@ -599,6 +654,104 @@ def select_visual_playground_candidate(
 
     _persist_visual_playground_state(thread_id, update)
     return current_state(thread_id)
+
+
+def _lane_response(row: dict[str, Any]) -> dict[str, Any]:
+    try:
+        state = current_state(row["lane_thread_id"])
+    except Exception:
+        state = None
+    return {
+        "lane_id": row["lane_id"],
+        "lane_thread_id": row["lane_thread_id"],
+        "creator_prompt": row["creator_prompt"],
+        "lane_name": row["lane_name"],
+        "created_at": row["created_at"],
+        "state": state,
+    }
+
+
+def _prepare_candidate_lane(
+    *,
+    thread_id: str,
+    source_cfg: dict[str, Any],
+    base_values: dict[str, Any],
+    candidate: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    lane_thread_id = uuid.uuid4().hex[:12]
+    creator_prompt = ""
+    lane_name = str(candidate.get("label") or candidate.get("candidate_id") or "").strip() or None
+    style_payload, style_md = _candidate_style(candidate)
+    lane = playground_store.create_lane_record(
+        thread_id,
+        lane_thread_id,
+        creator_prompt,
+        lane_name=lane_name,
+    )
+    try:
+        new_target_cfg = _clone_checkpoint_lineage(thread_id, source_cfg, lane_thread_id)
+        lane_cfg = graph().update_state(  # type: ignore[arg-type]
+            new_target_cfg,
+            {
+                "thread_id": lane_thread_id,
+                "deck_name": f"{base_values.get('deck_name') or thread_id} · {lane['lane_name']}",
+                "parent_thread_id": thread_id,
+                "lane_id": lane["lane_id"],
+                "creator_prompt": creator_prompt,
+                "lane_model_overrides": None,
+                "lane_thinking_effort_overrides": None,
+                "visual_style": style_payload,
+                "visual_style_md": style_md,
+                "current_stage": "layout",
+            },
+            as_node="await_style",
+        )
+    except Exception:
+        playground_store.delete_lane_record(thread_id, lane["lane_id"])
+        raise
+    return lane, lane_cfg
+
+
+def _parse_sse_frame(frame: str) -> dict[str, Any] | None:
+    for line in frame.splitlines():
+        if not line.startswith("data:"):
+            continue
+        raw = line[len("data:"):].strip()
+        if not raw:
+            continue
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+    return None
+
+
+def _stream_candidate_lane(
+    lane: dict[str, Any],
+    lane_cfg: dict[str, Any],
+) -> Iterator[str]:
+    lane_id = str(lane["lane_id"])
+    lane_thread_id = str(lane["lane_thread_id"])
+    yield _sse({
+        "type": "lane_started",
+        "lane_id": lane_id,
+        "thread_id": lane_thread_id,
+        "lane": _lane_response(lane),
+    })
+    for frame in _stream_graph(None, lane_cfg, lane_thread_id):
+        event = _parse_sse_frame(frame)
+        if not event:
+            continue
+        event_type = event.get("type")
+        if event_type == "error":
+            yield _sse({**event, "lane_id": lane_id, "thread_id": lane_thread_id})
+        elif event_type == "done":
+            yield _sse({
+                "type": "lane_done",
+                "lane_id": lane_id,
+                "thread_id": lane_thread_id,
+                "lane": _lane_response(lane),
+            })
 
 
 @router.post("/decks/{thread_id}/visual_playground/continue/stream")
@@ -615,26 +768,70 @@ def continue_visual_playground(
     values = dict(snap.values or {})
     if values.get("current_stage") != "visual_playground":
         raise HTTPException(status_code=409, detail="Deck is not in visual playground.")
-    if not values.get("visual_playground_selected_candidate_id") or not values.get("visual_style"):
-        raise HTTPException(status_code=409, detail="Select a visual playground candidate before continuing.")
     destination = (body.destination if body else "layout")
+    selected_candidates = _resolve_selected_candidates(values, body)
+    if destination == "layout" and len(selected_candidates) != 1:
+        raise HTTPException(
+            status_code=409,
+            detail="Continue to layout requires exactly one selected visual playground candidate.",
+        )
+    if destination == "playground" and not selected_candidates:
+        raise HTTPException(
+            status_code=409,
+            detail="Open Creator Playground requires at least one selected visual playground candidate.",
+        )
+    selected_ids = [str(candidate["candidate_id"]) for candidate in selected_candidates]
+    first_style_payload, first_style_md = _candidate_style(selected_candidates[0])
+    selection_update = {
+        "visual_playground_selected_candidate_id": selected_ids[0] if len(selected_ids) == 1 else None,
+        "visual_playground_selected_candidate_ids": selected_ids,
+        "visual_playground_status": _selection_status_update(values, selected_candidates),
+        "visual_style": first_style_payload,
+        "visual_style_md": first_style_md,
+    }
     if destination == "playground":
+        existing_lanes = playground_store.list_lanes(thread_id)
+        if len(existing_lanes) + len(selected_candidates) > playground_store.MAX_LANES_PER_DECK:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Selected visual styles exceed the remaining Creator Playground lane capacity."
+                ),
+            )
+        prepared_lanes: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        try:
+            for candidate in selected_candidates:
+                lane, lane_cfg = _prepare_candidate_lane(
+                    thread_id=thread_id,
+                    source_cfg=snap.config,
+                    base_values=values,
+                    candidate=candidate,
+                )
+                assign_deck_to_owner(lane["lane_thread_id"], owner)
+                prepared_lanes.append((lane, lane_cfg))
+        except Exception:
+            for lane, _lane_cfg in prepared_lanes:
+                playground_store.delete_lane_record(thread_id, lane["lane_id"])
+            raise
         graph().update_state(  # type: ignore[arg-type]
             snap.config,
-            {"current_stage": "playground"},
+            {**selection_update, "current_stage": "playground"},
             as_node="await_style",
         )
         mirror_to_disk(thread_id)
 
         def gen_playground() -> Iterable[str]:
             yield _sse({"type": "thread", "thread_id": thread_id})
+            with use_runtime_config(runtime_config):
+                for lane, lane_cfg in prepared_lanes:
+                    yield from _stream_candidate_lane(lane, lane_cfg)
             yield _sse({"type": "done", "state": current_state(thread_id)})
 
         return StreamingResponse(gen_playground(), headers=SSE_HEADERS)
 
     lane_cfg = graph().update_state(  # type: ignore[arg-type]
         snap.config,
-        {"current_stage": "layout"},
+        {**selection_update, "current_stage": "layout"},
         as_node="await_style",
     )
 
