@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OTC Desk Agent Arena Reports</title>
+    <meta
+      name="description"
+      content="Public Arena reports evaluating LLMs operating a real OTC derivatives trading desk."
+    />
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7f4ee;
+        --paper: #fffdf8;
+        --ink: #191612;
+        --muted: #60584d;
+        --line: #d7cdbf;
+        --accent: #9f351f;
+        --accent-2: #1f5f68;
+        --shadow: 0 24px 70px rgba(55, 39, 24, 0.12);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background:
+          linear-gradient(115deg, rgba(159, 53, 31, 0.08), transparent 34%),
+          linear-gradient(245deg, rgba(31, 95, 104, 0.12), transparent 36%),
+          var(--bg);
+        color: var(--ink);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+        line-height: 1.5;
+      }
+
+      a {
+        color: inherit;
+        text-decoration-color: rgba(159, 53, 31, 0.45);
+        text-underline-offset: 4px;
+      }
+
+      a:hover {
+        color: var(--accent);
+      }
+
+      .page {
+        width: min(1120px, calc(100% - 40px));
+        margin: 0 auto;
+        padding: 40px 0 56px;
+      }
+
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        padding: 12px 0 40px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-weight: 800;
+        letter-spacing: 0;
+      }
+
+      .mark {
+        width: 36px;
+        height: 36px;
+        border: 1px solid var(--ink);
+        display: grid;
+        place-items: center;
+        background: var(--paper);
+        box-shadow: 5px 5px 0 var(--ink);
+      }
+
+      nav {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+        gap: 32px;
+        align-items: stretch;
+      }
+
+      h1 {
+        max-width: 900px;
+        margin: 0;
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: clamp(48px, 8vw, 92px);
+        line-height: 0.95;
+        letter-spacing: 0;
+      }
+
+      .lead {
+        max-width: 700px;
+        margin: 24px 0 0;
+        color: var(--muted);
+        font-size: 20px;
+      }
+
+      .hero-panel,
+      .report-card,
+      .note,
+      .contact {
+        background: rgba(255, 253, 248, 0.9);
+        border: 1px solid var(--line);
+        box-shadow: var(--shadow);
+      }
+
+      .hero-panel {
+        padding: 24px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        min-height: 320px;
+      }
+
+      .metric {
+        border-bottom: 1px solid var(--line);
+        padding: 0 0 18px;
+        margin-bottom: 18px;
+      }
+
+      .metric:last-child {
+        border-bottom: 0;
+        margin-bottom: 0;
+        padding-bottom: 0;
+      }
+
+      .metric strong {
+        display: block;
+        font-size: 34px;
+        line-height: 1;
+      }
+
+      .metric span {
+        display: block;
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      section {
+        margin-top: 52px;
+      }
+
+      h2 {
+        margin: 0 0 18px;
+        font-size: 28px;
+        line-height: 1.15;
+      }
+
+      .reports {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 20px;
+      }
+
+      .report-card {
+        padding: 24px;
+      }
+
+      .report-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 18px;
+      }
+
+      .chip {
+        border: 1px solid var(--line);
+        background: #f4eadc;
+        color: #473f36;
+        padding: 5px 9px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      h3 {
+        margin: 0;
+        font-size: 23px;
+        line-height: 1.2;
+      }
+
+      .report-card p,
+      .note p,
+      .contact p {
+        color: var(--muted);
+      }
+
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 22px;
+      }
+
+      .button {
+        display: inline-flex;
+        min-height: 40px;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--ink);
+        background: var(--ink);
+        color: var(--paper);
+        padding: 9px 14px;
+        font-size: 14px;
+        font-weight: 800;
+        text-decoration: none;
+      }
+
+      .button.secondary {
+        background: transparent;
+        color: var(--ink);
+      }
+
+      .note,
+      .contact {
+        padding: 24px;
+      }
+
+      .note ul {
+        margin: 14px 0 0;
+        padding-left: 20px;
+        color: var(--muted);
+      }
+
+      .contact-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+        margin-top: 18px;
+      }
+
+      .contact-item {
+        border-top: 1px solid var(--line);
+        padding-top: 14px;
+      }
+
+      .label {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .value {
+        display: block;
+        margin-top: 6px;
+        font-weight: 800;
+        word-break: break-word;
+      }
+
+      footer {
+        margin-top: 42px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      @media (max-width: 760px) {
+        .page {
+          width: min(100% - 28px, 1120px);
+          padding-top: 22px;
+        }
+
+        header,
+        nav {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .hero,
+        .reports,
+        .contact-grid {
+          grid-template-columns: 1fr;
+        }
+
+        h1 {
+          font-size: clamp(42px, 15vw, 62px);
+        }
+
+        .lead {
+          font-size: 18px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header>
+        <a class="brand" href="/" aria-label="Open Slides Zero home">
+          <span class="mark">A</span>
+          <span>Artena</span>
+        </a>
+        <nav aria-label="Report links">
+          <a href="#reports">Reports</a>
+          <a href="#method">Method</a>
+          <a href="#contact">Contact</a>
+        </nav>
+      </header>
+
+      <main>
+        <section class="hero" aria-labelledby="page-title">
+          <div>
+            <h1 id="page-title">OTC Desk Agent Arena</h1>
+            <p class="lead">
+              Public reports from controlled, repeated-trial evaluations of LLMs
+              operating a real structured-derivatives trading desk without human
+              intervention.
+            </p>
+            <div class="links">
+              <a class="button" href="#reports">Read the reports</a>
+              <a class="button secondary" href="https://github.com/deiiiiii93/open-otc-trading">
+                View GitHub repo
+              </a>
+            </div>
+          </div>
+
+          <aside class="hero-panel" aria-label="Arena summary">
+            <div class="metric">
+              <strong>2</strong>
+              <span>published Arena report runs</span>
+            </div>
+            <div class="metric">
+              <strong>19</strong>
+              <span>model configurations measured across the current public corpus</span>
+            </div>
+            <div class="metric">
+              <strong>real desk</strong>
+              <span>production workflows, trace logs, scoring rubrics, and generated artifacts</span>
+            </div>
+          </aside>
+        </section>
+
+        <section id="reports" aria-labelledby="reports-title">
+          <h2 id="reports-title">Published Reports</h2>
+          <div class="reports">
+            <article class="report-card">
+              <div class="report-meta">
+                <span class="chip">Run #9</span>
+                <span class="chip">2026-06-28</span>
+                <span class="chip">Flash tier</span>
+              </div>
+              <h3>Risk Manager Control Day: Flash Models</h3>
+              <p>
+                Gemini 3.5 Flash and Step 3.7 Flash finish close on score, while
+                the cost-efficiency ranking tells a very different story.
+              </p>
+              <div class="links">
+                <a class="button" href="./2026-06-28-run9-otc-desk-agent-arena.html">HTML</a>
+                <a class="button secondary" href="./2026-06-28-run9-otc-desk-agent-arena.pdf">PDF</a>
+                <a class="button secondary" href="./2026-06-28-run9-otc-desk-agent-arena.md">Markdown</a>
+                <a class="button secondary" href="./2026-06-28-run9-otc-desk-agent-arena.charts.json">Charts JSON</a>
+              </div>
+            </article>
+
+            <article class="report-card">
+              <div class="report-meta">
+                <span class="chip">Run #8</span>
+                <span class="chip">2026-06-27</span>
+                <span class="chip">Frontier tier</span>
+              </div>
+              <h3>Risk Manager Control Day: Frontier Models</h3>
+              <p>
+                Claude Opus 4.8 and GPT-5.5 land in a statistical tie at the top,
+                with repeated trials exposing differences in reliability and governance narration.
+              </p>
+              <div class="links">
+                <a class="button" href="./2026-06-27-run8-otc-desk-agent-arena.html">HTML</a>
+                <a class="button secondary" href="./2026-06-27-run8-otc-desk-agent-arena.pdf">PDF</a>
+                <a class="button secondary" href="./2026-06-27-run8-otc-desk-agent-arena.md">Markdown</a>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section id="method" class="note" aria-labelledby="method-title">
+          <h2 id="method-title">What the Arena Measures</h2>
+          <p>
+            The Arena is designed for financial-agent evaluation, not generic prompt
+            scoring. Each trial drives live desk workflows, reconstructs the transcript
+            from trace logs, and combines objective criteria with judge review.
+          </p>
+          <ul>
+            <li>Stateful, multi-step OTC derivatives workflows.</li>
+            <li>Headless operation with no human approval between steps.</li>
+            <li>Repeated trials to separate average ability from reliability.</li>
+            <li>Artifacts published as stable HTML, PDF, Markdown, and data files.</li>
+          </ul>
+        </section>
+
+        <section id="contact" class="contact" aria-labelledby="contact-title">
+          <h2 id="contact-title">Contact and Source</h2>
+          <p>
+            For questions about the Arena reports, methodology, or financial workflow
+            evaluation, use the contact below or inspect the public repository.
+          </p>
+          <div class="contact-grid">
+            <div class="contact-item">
+              <span class="label">Email</span>
+              <a class="value" href="mailto:yaofuxin1993@gmail.com">yaofuxin1993@gmail.com</a>
+            </div>
+            <div class="contact-item">
+              <span class="label">GitHub</span>
+              <a class="value" href="https://github.com/deiiiiii93/open-otc-trading">
+                github.com/deiiiiii93/open-otc-trading
+              </a>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer>
+        Published on Artena for readers who want to understand how LLMs behave in
+        realistic financial-agent workflows.
+      </footer>
+    </div>
+  </body>
+</html>
