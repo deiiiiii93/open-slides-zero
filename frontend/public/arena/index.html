@@ -112,6 +112,7 @@
       }
 
       .hero-panel,
+      .leaderboard-card,
       .report-card,
       .note,
       .contact {
@@ -167,6 +168,88 @@
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 20px;
+      }
+
+      .leaderboards {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .leaderboard-card {
+        padding: 20px;
+      }
+
+      .leaderboard-card h3 {
+        font-size: 18px;
+      }
+
+      .leaderboard-card .subtitle {
+        margin: 8px 0 18px;
+        min-height: 44px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .rank-list {
+        display: grid;
+        gap: 12px;
+      }
+
+      .rank-row {
+        display: grid;
+        grid-template-columns: 28px minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .rank {
+        color: var(--accent);
+        font-weight: 900;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .model {
+        min-width: 0;
+      }
+
+      .model strong,
+      .model span {
+        display: block;
+      }
+
+      .model strong {
+        overflow-wrap: anywhere;
+        font-size: 14px;
+        line-height: 1.2;
+      }
+
+      .model span {
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .score {
+        border: 1px solid var(--ink);
+        background: var(--paper);
+        padding: 3px 8px;
+        font-size: 13px;
+        font-weight: 900;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .bar-track {
+        grid-column: 2 / 4;
+        height: 7px;
+        overflow: hidden;
+        background: #eadfcc;
+      }
+
+      .bar-fill {
+        display: block;
+        height: 100%;
+        background: linear-gradient(90deg, var(--accent), var(--accent-2));
       }
 
       .report-card {
@@ -285,6 +368,7 @@
         }
 
         .hero,
+        .leaderboards,
         .reports,
         .contact-grid {
           grid-template-columns: 1fr;
@@ -308,6 +392,7 @@
           <span>Artena</span>
         </a>
         <nav aria-label="Report links">
+          <a href="#leaderboards">Leaderboards</a>
           <a href="#reports">Reports</a>
           <a href="#method">Method</a>
           <a href="#contact">Contact</a>
@@ -323,12 +408,6 @@
               operating a real structured-derivatives trading desk without human
               intervention.
             </p>
-            <div class="links">
-              <a class="button" href="#reports">Read the reports</a>
-              <a class="button secondary" href="https://github.com/deiiiiii93/open-otc-trading">
-                View GitHub repo
-              </a>
-            </div>
           </div>
 
           <aside class="hero-panel" aria-label="Arena summary">
@@ -347,6 +426,86 @@
           </aside>
         </section>
 
+        <section id="leaderboards" aria-labelledby="leaderboards-title">
+          <h2 id="leaderboards-title">Arena Leaderboards</h2>
+          <div class="leaderboards">
+            <article class="leaderboard-card">
+              <h3>Frontier Quality</h3>
+              <p class="subtitle">Run #8 mean total score across five autonomous trials.</p>
+              <div class="rank-list" aria-label="Run 8 frontier quality ranking">
+                <div class="rank-row">
+                  <span class="rank">1</span>
+                  <span class="model"><strong>Claude Opus 4.8</strong><span>Frontier tier</span></span>
+                  <span class="score">66.4</span>
+                  <span class="bar-track"><span class="bar-fill" style="width: 100%"></span></span>
+                </div>
+                <div class="rank-row">
+                  <span class="rank">2</span>
+                  <span class="model"><strong>GPT-5.5</strong><span>Frontier tier</span></span>
+                  <span class="score">66.3</span>
+                  <span class="bar-track"><span class="bar-fill" style="width: 99.8%"></span></span>
+                </div>
+                <div class="rank-row">
+                  <span class="rank">3</span>
+                  <span class="model"><strong>Claude Sonnet 4.6</strong><span>Most consistent</span></span>
+                  <span class="score">59.1</span>
+                  <span class="bar-track"><span class="bar-fill" style="width: 89%"></span></span>
+                </div>
+              </div>
+            </article>
+
+            <article class="leaderboard-card">
+              <h3>Flash Quality</h3>
+              <p class="subtitle">Run #9 mean total score; censored Doubao rows excluded from placement.</p>
+              <div class="rank-list" aria-label="Run 9 flash quality ranking">
+                <div class="rank-row">
+                  <span class="rank">1</span>
+                  <span class="model"><strong>Gemini 3.5 Flash</strong><span>Highest placed flash score</span></span>
+                  <span class="score">59.1</span>
+                  <span class="bar-track"><span class="bar-fill" style="width: 100%"></span></span>
+                </div>
+                <div class="rank-row">
+                  <span class="rank">2</span>
+                  <span class="model"><strong>Step 3.7 Flash</strong><span>Steadiest flash operator</span></span>
+                  <span class="score">57.9</span>
+                  <span class="bar-track"><span class="bar-fill" style="width: 98%"></span></span>
+                </div>
+                <div class="rank-row">
+                  <span class="rank">3</span>
+                  <span class="model"><strong>DeepSeek V4 Flash</strong><span>Bronze placement</span></span>
+                  <span class="score">49.2</span>
+                  <span class="bar-track"><span class="bar-fill" style="width: 83.2%"></span></span>
+                </div>
+              </div>
+            </article>
+
+            <article class="leaderboard-card">
+              <h3>Flash Value</h3>
+              <p class="subtitle">Run #9 score per measured dollar, where deployment economics invert the board.</p>
+              <div class="rank-list" aria-label="Run 9 flash value ranking">
+                <div class="rank-row">
+                  <span class="rank">1</span>
+                  <span class="model"><strong>MiMo V2.5</strong><span>Value champion</span></span>
+                  <span class="score">85.3</span>
+                  <span class="bar-track"><span class="bar-fill" style="width: 100%"></span></span>
+                </div>
+                <div class="rank-row">
+                  <span class="rank">2</span>
+                  <span class="model"><strong>DeepSeek V4 Flash</strong><span>Strong cost efficiency</span></span>
+                  <span class="score">72.2</span>
+                  <span class="bar-track"><span class="bar-fill" style="width: 84.6%"></span></span>
+                </div>
+                <div class="rank-row">
+                  <span class="rank">3</span>
+                  <span class="model"><strong>Step 3.7 Flash</strong><span>Near-top quality at about $1/match</span></span>
+                  <span class="score">55.6</span>
+                  <span class="bar-track"><span class="bar-fill" style="width: 65.2%"></span></span>
+                </div>
+              </div>
+            </article>
+          </div>
+        </section>
+
         <section id="reports" aria-labelledby="reports-title">
           <h2 id="reports-title">Published Reports</h2>
           <div class="reports">
@@ -362,10 +521,7 @@
                 the cost-efficiency ranking tells a very different story.
               </p>
               <div class="links">
-                <a class="button" href="./2026-06-28-run9-otc-desk-agent-arena.html">HTML</a>
-                <a class="button secondary" href="./2026-06-28-run9-otc-desk-agent-arena.pdf">PDF</a>
-                <a class="button secondary" href="./2026-06-28-run9-otc-desk-agent-arena.md">Markdown</a>
-                <a class="button secondary" href="./2026-06-28-run9-otc-desk-agent-arena.charts.json">Charts JSON</a>
+                <a class="button" href="./2026-06-28-run9-otc-desk-agent-arena.html">Detail</a>
               </div>
             </article>
 
@@ -381,9 +537,7 @@
                 with repeated trials exposing differences in reliability and governance narration.
               </p>
               <div class="links">
-                <a class="button" href="./2026-06-27-run8-otc-desk-agent-arena.html">HTML</a>
-                <a class="button secondary" href="./2026-06-27-run8-otc-desk-agent-arena.pdf">PDF</a>
-                <a class="button secondary" href="./2026-06-27-run8-otc-desk-agent-arena.md">Markdown</a>
+                <a class="button" href="./2026-06-27-run8-otc-desk-agent-arena.html">Detail</a>
               </div>
             </article>
           </div>

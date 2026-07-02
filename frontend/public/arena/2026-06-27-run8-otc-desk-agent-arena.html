@@ -67,9 +67,23 @@ td:first-child,th:first-child{white-space:nowrap}
 .masthead{border-bottom:3px solid var(--ink); padding-bottom:.6em; margin-bottom:1.4em}
 .footer-note{margin-top:3em; padding-top:1em; border-top:1px solid var(--line);
   font-size:.8rem; color:var(--muted); font-family:-apple-system,"Inter",sans-serif}
+.report-toolbar{display:flex; align-items:center; justify-content:space-between; gap:12px;
+  margin:-24px 0 28px; padding:10px 0 16px; border-bottom:1px solid var(--line);
+  font-family:-apple-system,"Inter","Segoe UI",Helvetica,Arial,sans-serif}
+.report-toolbar a,.report-toolbar summary{color:var(--accent); font-size:.9rem; font-weight:700}
+.download-menu{position:relative}
+.download-menu summary{list-style:none; cursor:pointer; border:1px solid var(--accent);
+  padding:7px 12px; border-radius:4px; background:#fff}
+.download-menu summary::-webkit-details-marker{display:none}
+.download-menu[open] summary{background:var(--soft)}
+.download-menu .menu{position:absolute; right:0; z-index:2; min-width:170px; margin-top:6px;
+  padding:6px; background:#fff; border:1px solid var(--line); box-shadow:0 14px 32px rgba(26,29,33,.12)}
+.download-menu .menu a{display:block; padding:8px 10px; border-radius:4px; white-space:nowrap}
+.download-menu .menu a:hover{background:var(--soft)}
 
 @page{size:A4; margin:16mm 15mm}
 @media print{
+  .report-toolbar{display:none}
   body{max-width:none; margin:0; padding:0; font-size:10.6pt}
   h2{margin-top:1.4em}
   h2,h3,h4{break-after:avoid}
@@ -79,6 +93,16 @@ td:first-child,th:first-child{white-space:nowrap}
 }
 </style>
 </head><body>
+<nav class="report-toolbar" aria-label="Report actions">
+  <a href="./">Arena index</a>
+  <details class="download-menu">
+    <summary>Download</summary>
+    <div class="menu">
+      <a href="./2026-06-27-run8-otc-desk-agent-arena.pdf" download>PDF</a>
+      <a href="./2026-06-27-run8-otc-desk-agent-arena.md" download>Markdown</a>
+    </div>
+  </details>
+</nav>
 <h1>The OTC Desk Agent Arena — Methodology &amp; Results (Run #8)</h1>
 <p><em>A controlled, repeated-trial evaluation of ten LLMs operating a real OTC
 derivatives trading desk, fully autonomously, with no human in the loop.</em></p>
