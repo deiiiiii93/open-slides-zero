@@ -17,7 +17,7 @@ body{
   max-width:820px; margin:0 auto; padding:56px 40px 80px; font-size:16.5px;
 }
 h1,h2,h3,h4{font-family:-apple-system,"Inter","Segoe UI",Helvetica,Arial,sans-serif;
-  line-height:1.22; letter-spacing:-.01em; color:var(--ink)}
+  line-height:1.22; letter-spacing:0; color:var(--ink)}
 h1{font-size:2.05rem; margin:.2em 0 .1em; font-weight:800}
 h2{font-size:1.42rem; margin:2.1em 0 .55em; padding-bottom:.28em;
   border-bottom:2px solid var(--line); font-weight:750}
@@ -80,27 +80,42 @@ td:first-child,th:first-child{white-space:nowrap}
   padding:6px; background:#fff; border:1px solid var(--line); box-shadow:0 14px 32px rgba(26,29,33,.12)}
 .download-menu .menu a{display:block; padding:8px 10px; border-radius:4px; white-space:nowrap}
 .download-menu .menu a:hover{background:var(--soft)}
-.ability-card-showcase{margin:1.8em 0 2.2em; padding:1.35em;
-  background:linear-gradient(135deg,#f4f6f9,#e9eef5); border:1px solid var(--line)}
-.ability-card-showcase h2{margin:.1em 0 .25em; border:0; padding:0}
-.ability-card-showcase>p{margin:.3em 0 1.15em; color:var(--muted); font-family:-apple-system,"Inter",sans-serif; font-size:.9rem}
-.ability-card-wrap{display:grid; grid-template-columns:minmax(0,1fr) minmax(238px,.88fr); gap:1.4em; align-items:center}
-.ability-card-copy{font-family:-apple-system,"Inter","Segoe UI",Helvetica,Arial,sans-serif}
-.ability-card-copy p{margin:.45em 0; font-size:.95rem}
-.ability-card-copy strong{color:var(--accent)}
-.ability-card{position:relative; width:min(100%,360px); aspect-ratio:1003/1568; justify-self:center; color:#fff; text-align:center;
+.ability-card-showcase{margin:2em 0 2.4em; padding:1.55em 0 1.7em; border-top:1px solid var(--line); border-bottom:1px solid var(--line)}
+.ability-card-showcase h2{margin:0 0 .25em; border:0; padding:0; font-size:1.2rem}
+.ability-card-showcase>p{max-width:620px; margin:.25em 0 0; color:var(--muted); font-family:-apple-system,"Inter",sans-serif; font-size:.84rem}
+.ability-card-wrap{display:grid; grid-template-columns:280px minmax(0,1fr); gap:2.25em; align-items:center; margin-top:1.2em}
+.ability-card-copy{padding-left:1.55em; border-left:1px solid var(--line); font-family:-apple-system,"Inter","Segoe UI",Helvetica,Arial,sans-serif}
+.ability-card-thesis{margin:0 0 1.25em; color:#2b3038; font-family:"Charter","Georgia",serif; font-size:1.08rem; line-height:1.45}
+.ability-card-thesis span{display:block; margin-bottom:.35em; color:var(--accent); font-family:-apple-system,"Inter",sans-serif; font-size:.7rem; font-weight:800; letter-spacing:0; text-transform:uppercase}
+.ability-key{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.62em 1.25em; margin:0}
+.ability-key div{display:grid; grid-template-columns:2.55em minmax(0,1fr); gap:.35em; align-items:baseline}
+.ability-key dt{color:var(--accent); font-size:.78rem; font-weight:850; letter-spacing:0}
+.ability-key dd{margin:0; color:var(--muted); font-size:.78rem}
+.ability-card-note{margin:1.25em 0 0; color:var(--muted); font-size:.74rem; line-height:1.5}
+.ability-card{position:relative; width:min(100%,280px); aspect-ratio:1122/1402; justify-self:center; color:var(--ink); text-align:center;
   font-family:-apple-system,"Inter","Segoe UI",Helvetica,Arial,sans-serif}
-.ability-card-art{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:0}
+.ability-card-art{position:absolute; inset:0; width:100%; height:100%; object-fit:contain; z-index:0; filter:drop-shadow(0 18px 20px rgba(37,43,52,.15))}
 .ability-card .card-kicker,.ability-card .card-model,.ability-card .card-ovr,.ability-card .card-ovr-label,.ability-stats{position:absolute; z-index:1; margin:0; left:0; right:0}
-.ability-card .card-kicker{top:10.5%; color:#f5d875; font-size:.68rem; font-weight:800; letter-spacing:.12em; text-transform:uppercase}
-.ability-card .card-model{top:14%; padding:0 14%; font-size:1.18rem; font-weight:800; line-height:1.08; text-shadow:0 2px 10px rgba(0,0,0,.6)}
-.ability-card .card-ovr{top:31%; color:#f5d875; font-size:4.75rem; font-weight:900; line-height:.9; font-variant-numeric:tabular-nums; text-shadow:0 3px 12px rgba(0,0,0,.56)}
-.ability-card .card-ovr-label{top:41.2%; color:#fff; font-size:.67rem; font-weight:800; letter-spacing:.12em; text-shadow:0 2px 8px rgba(0,0,0,.72); text-transform:uppercase}
-.ability-stats{left:13%; right:13%; bottom:10.2%; display:grid; grid-template-columns:repeat(3,1fr); gap:1.65em .4em}
+.ability-card .card-kicker{top:10.5%; color:var(--accent); font-size:.58rem; font-weight:850; letter-spacing:0; text-transform:uppercase}
+.ability-card .card-model{top:14.5%; padding:0 13%; color:#1e232a; font-size:1.03rem; font-weight:850; line-height:1.08}
+.ability-card .card-ovr{top:46.2%; color:#1e232a; font-size:3.55rem; font-weight:900; line-height:.9; font-variant-numeric:tabular-nums}
+.ability-card .card-ovr-label{top:57%; color:#4f5965; font-size:.52rem; font-weight:850; letter-spacing:0; text-transform:uppercase}
+.ability-stats{left:14.5%; right:14.5%; bottom:10.7%; display:grid; grid-template-columns:repeat(3,1fr); gap:1.25em .35em}
 .ability-stat{display:grid; gap:.08em; font-variant-numeric:tabular-nums}
-.ability-stat strong{font-size:1.08rem; line-height:1.1; text-shadow:0 2px 8px rgba(0,0,0,.68)}
-.ability-stat span{color:#f5d875; font-size:.62rem; font-weight:800; letter-spacing:.06em; text-shadow:0 2px 8px rgba(0,0,0,.72)}
-@media (max-width:600px){.ability-card-wrap{grid-template-columns:1fr}.ability-card-copy{order:2}.ability-card{width:min(100%,340px)}}
+.ability-stat strong{color:#1e232a; font-size:.88rem; line-height:1.1}
+.ability-stat span{color:var(--accent); font-size:.5rem; font-weight:850; letter-spacing:0}
+@media (max-width:600px){
+  body{padding:30px 20px 56px; font-size:15.5px}
+  h1{font-size:1.72rem}
+  .report-toolbar{margin:-8px 0 24px}
+  table{display:block; overflow-x:auto}
+  .chart .row{gap:7px}
+  .chart .lbl{flex-basis:96px; font-size:.72rem}
+  .chart .val{flex-basis:92px; font-size:.68rem}
+  .ability-card-wrap{grid-template-columns:1fr; gap:1.35em}
+  .ability-card-copy{padding:1.25em 0 0; border-left:0; border-top:1px solid var(--line)}
+  .ability-card{width:min(100%,270px)}
+}
 
 @page{size:A4; margin:16mm 15mm}
 @media print{
@@ -141,7 +156,7 @@ added afterward and supplies a clean generational A/B against Gemini 3.5 Flash.<
 <p>Run #33 winner, scored from the published two-trial trader RFQ-to-booking results.</p>
 <div class="ability-card-wrap">
   <div class="ability-card" aria-label="GPT-5.6 Terra: overall rating 91, grounding 96, adherence 94, synthesis 99, procedure 94, efficiency 84, consistency 79">
-    <img class="ability-card-art" src="./model-ability-card-bg-v1.webp" alt="" />
+    <img class="ability-card-art" src="./model-ability-card-bg-v2.webp" alt="" />
     <p class="card-kicker">Run #33 winner</p>
     <p class="card-model">GPT-5.6 Terra</p>
     <p class="card-ovr">91</p>
@@ -156,8 +171,16 @@ added afterward and supplies a clean generational A/B against Gemini 3.5 Flash.<
     </div>
   </div>
   <div class="ability-card-copy">
-    <p><strong>GRD</strong> grounding, <strong>ADH</strong> adherence, <strong>SYN</strong> synthesis, and <strong>PRC</strong> procedure form the capability view.</p>
-    <p><strong>EFF</strong> measures lean execution; <strong>CON</strong> records trial-to-trial consistency. OVR combines the five scored ability axes, with consistency applied as a reliability penalty.</p>
+    <p class="ability-card-thesis"><span>Why it won</span>Near-top capability, delivered with lean execution and steady repeatability.</p>
+    <dl class="ability-key">
+      <div><dt>GRD</dt><dd>Grounding</dd></div>
+      <div><dt>ADH</dt><dd>Adherence</dd></div>
+      <div><dt>SYN</dt><dd>Synthesis</dd></div>
+      <div><dt>PRC</dt><dd>Procedure</dd></div>
+      <div><dt>EFF</dt><dd>Efficiency</dd></div>
+      <div><dt>CON</dt><dd>Consistency</dd></div>
+    </dl>
+    <p class="ability-card-note">OVR combines the five scored ability axes; consistency adjusts the result for reliability across trials.</p>
   </div>
 </div>
 </section>
