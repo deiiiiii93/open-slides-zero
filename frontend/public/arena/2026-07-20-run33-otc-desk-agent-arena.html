@@ -81,29 +81,23 @@ td:first-child,th:first-child{white-space:nowrap}
 .download-menu .menu a{display:block; padding:8px 10px; border-radius:4px; white-space:nowrap}
 .download-menu .menu a:hover{background:var(--soft)}
 .ability-card-showcase{margin:2em 0 2.4em; padding:1.55em 0 1.7em; border-top:1px solid var(--line); border-bottom:1px solid var(--line)}
-.ability-card-showcase h2{margin:0 0 .25em; border:0; padding:0; font-size:1.2rem}
+.ability-card-showcase>h2{margin:0 0 .25em; border:0; padding:0; font-size:1.2rem}
 .ability-card-showcase>p{max-width:620px; margin:.25em 0 0; color:var(--muted); font-family:-apple-system,"Inter",sans-serif; font-size:.84rem}
-.ability-card-wrap{display:grid; grid-template-columns:280px minmax(0,1fr); gap:2.25em; align-items:center; margin-top:1.2em}
-.ability-card-copy{padding-left:1.55em; border-left:1px solid var(--line); font-family:-apple-system,"Inter","Segoe UI",Helvetica,Arial,sans-serif}
-.ability-card-thesis{margin:0 0 1.25em; color:#2b3038; font-family:"Charter","Georgia",serif; font-size:1.08rem; line-height:1.45}
-.ability-card-thesis span{display:block; margin-bottom:.35em; color:var(--accent); font-family:-apple-system,"Inter",sans-serif; font-size:.7rem; font-weight:800; letter-spacing:0; text-transform:uppercase}
-.ability-key{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.62em 1.25em; margin:0}
-.ability-key div{display:grid; grid-template-columns:2.55em minmax(0,1fr); gap:.35em; align-items:baseline}
-.ability-key dt{color:var(--accent); font-size:.78rem; font-weight:850; letter-spacing:0}
-.ability-key dd{margin:0; color:var(--muted); font-size:.78rem}
-.ability-card-note{margin:1.25em 0 0; color:var(--muted); font-size:.74rem; line-height:1.5}
-.ability-card{position:relative; width:min(100%,280px); aspect-ratio:1122/1402; justify-self:center; color:var(--ink); text-align:center;
-  font-family:-apple-system,"Inter","Segoe UI",Helvetica,Arial,sans-serif}
-.ability-card-art{position:absolute; inset:0; width:100%; height:100%; object-fit:contain; z-index:0; filter:drop-shadow(0 18px 20px rgba(37,43,52,.15))}
-.ability-card .card-kicker,.ability-card .card-model,.ability-card .card-ovr,.ability-card .card-ovr-label,.ability-stats{position:absolute; z-index:1; margin:0; left:0; right:0}
-.ability-card .card-kicker{top:10.5%; color:var(--accent); font-size:.58rem; font-weight:850; letter-spacing:0; text-transform:uppercase}
-.ability-card .card-model{top:14.5%; padding:0 13%; color:#1e232a; font-size:1.03rem; font-weight:850; line-height:1.08}
-.ability-card .card-ovr{top:46.2%; color:#1e232a; font-size:3.55rem; font-weight:900; line-height:.9; font-variant-numeric:tabular-nums}
-.ability-card .card-ovr-label{top:57%; color:#4f5965; font-size:.52rem; font-weight:850; letter-spacing:0; text-transform:uppercase}
-.ability-stats{left:14.5%; right:14.5%; bottom:10.7%; display:grid; grid-template-columns:repeat(3,1fr); gap:1.25em .35em}
-.ability-stat{display:grid; gap:.08em; font-variant-numeric:tabular-nums}
-.ability-stat strong{color:#1e232a; font-size:.88rem; line-height:1.1}
-.ability-stat span{color:var(--accent); font-size:.5rem; font-weight:850; letter-spacing:0}
+.ability-card{width:min(100%,520px); margin:1.25em auto 0; padding:1.3em 1.45em 1.05em; border:1px solid #d7d4ca; border-radius:4px;
+  background:#fff; font-family:-apple-system,"Inter","Segoe UI",Helvetica,Arial,sans-serif}
+.ability-card-header h3{margin:0; color:var(--ink); font-size:1.25rem}
+.ability-card-task{margin:.22em 0 .75em; color:#444b53; font-size:.95rem}
+.ability-card-state{display:block; padding:.28em .75em; border:1px solid #d7d1c2; border-radius:999px; background:#f7f4ec;
+  color:#45413a; font-size:.72rem; font-weight:750; line-height:1.15; text-transform:uppercase}
+.ability-card-body{display:grid; grid-template-columns:72px minmax(0,1fr); gap:.7em; align-items:center; margin-top:.65em}
+.ability-overall{text-align:center; font-variant-numeric:tabular-nums}
+.ability-overall strong{display:block; color:#111315; font-size:2.75rem; font-weight:800; line-height:.82}
+.ability-overall span{display:block; margin-top:.35em; color:#3f454d; font-size:.78rem; font-weight:750}
+.ability-radar{display:block; width:100%; height:auto; overflow:visible}
+.radar-grid polygon{fill:none; stroke:#cbc7ba; stroke-width:1.2}
+.radar-axis{stroke:#cbc7ba; stroke-width:1}
+.radar-score{fill:rgba(47,93,138,.14); stroke:var(--accent); stroke-width:2.5; stroke-linejoin:round}
+.radar-label{fill:#3f3a34; font-size:13px; font-weight:750; text-anchor:middle}
 @media (max-width:600px){
   body{padding:30px 20px 56px; font-size:15.5px}
   h1{font-size:1.72rem}
@@ -112,9 +106,10 @@ td:first-child,th:first-child{white-space:nowrap}
   .chart .row{gap:7px}
   .chart .lbl{flex-basis:96px; font-size:.72rem}
   .chart .val{flex-basis:92px; font-size:.68rem}
-  .ability-card-wrap{grid-template-columns:1fr; gap:1.35em}
-  .ability-card-copy{padding:1.25em 0 0; border-left:0; border-top:1px solid var(--line)}
-  .ability-card{width:min(100%,270px)}
+  .ability-card{padding:1.1em 1em .8em}
+  .ability-card-body{grid-template-columns:58px minmax(0,1fr); gap:.25em}
+  .ability-overall strong{font-size:2.3rem}
+  .radar-label{font-size:12px}
 }
 
 @page{size:A4; margin:16mm 15mm}
@@ -154,35 +149,41 @@ added afterward and supplies a clean generational A/B against Gemini 3.5 Flash.<
 <section class="ability-card-showcase" aria-labelledby="terra-run33-card-title">
 <h2 id="terra-run33-card-title">Model Ability Card</h2>
 <p>Run #33 winner, scored from the published two-trial trader RFQ-to-booking results.</p>
-<div class="ability-card-wrap">
-  <div class="ability-card" aria-label="GPT-5.6 Terra: overall rating 91, grounding 96, adherence 94, synthesis 99, procedure 94, efficiency 84, consistency 79">
-    <img class="ability-card-art" src="./model-ability-card-bg-v2.webp" alt="" />
-    <p class="card-kicker">Run #33 winner</p>
-    <p class="card-model">GPT-5.6 Terra</p>
-    <p class="card-ovr">91</p>
-    <p class="card-ovr-label">Overall rating</p>
-    <div class="ability-stats">
-      <span class="ability-stat"><strong>96</strong><span>GRD</span></span>
-      <span class="ability-stat"><strong>94</strong><span>ADH</span></span>
-      <span class="ability-stat"><strong>99</strong><span>SYN</span></span>
-      <span class="ability-stat"><strong>94</strong><span>PRC</span></span>
-      <span class="ability-stat"><strong>84</strong><span>EFF</span></span>
-      <span class="ability-stat"><strong>79</strong><span>CON</span></span>
-    </div>
+<article class="ability-card" aria-label="GPT-5.6 Terra: overall rating 91, grounding 96, adherence 94, synthesis 99, procedure 94, efficiency 84, consistency 79">
+  <header class="ability-card-header">
+    <h3>GPT-5.6 Terra</h3>
+    <p class="ability-card-task">trader-rfq-booking-day</p>
+    <span class="ability-card-state">Scored · Run #33 winner</span>
+  </header>
+  <div class="ability-card-body">
+    <div class="ability-overall"><strong>91</strong><span>OVR</span></div>
+    <svg class="ability-radar" viewBox="0 0 340 260" role="img" aria-label="Six-axis score hexagon">
+      <g class="radar-grid">
+        <polygon points="205,111 221.45,120.5 221.45,139.5 205,149 188.55,139.5 188.55,120.5" />
+        <polygon points="205,92 237.9,111 237.9,149 205,168 172.1,149 172.1,111" />
+        <polygon points="205,73 254.35,101.5 254.35,158.5 205,187 155.65,158.5 155.65,101.5" />
+        <polygon points="205,54 270.82,92 270.82,168 205,206 139.18,168 139.18,92" />
+      </g>
+      <g>
+        <line class="radar-axis" x1="205" y1="130" x2="205" y2="54" />
+        <line class="radar-axis" x1="205" y1="130" x2="270.82" y2="92" />
+        <line class="radar-axis" x1="205" y1="130" x2="270.82" y2="168" />
+        <line class="radar-axis" x1="205" y1="130" x2="205" y2="206" />
+        <line class="radar-axis" x1="205" y1="130" x2="139.18" y2="168" />
+        <line class="radar-axis" x1="205" y1="130" x2="139.18" y2="92" />
+      </g>
+      <polygon class="radar-score" points="205,57.04 266.87,94.28 270.16,167.62 205,193.84 143.13,165.72 153,99.98" />
+      <g>
+        <text class="radar-label" x="205" y="35">GRD</text>
+        <text class="radar-label" x="294" y="85">ADH</text>
+        <text class="radar-label" x="294" y="183">SYN</text>
+        <text class="radar-label" x="205" y="232">EFF</text>
+        <text class="radar-label" x="115" y="183">PRC</text>
+        <text class="radar-label" x="115" y="85">CON</text>
+      </g>
+    </svg>
   </div>
-  <div class="ability-card-copy">
-    <p class="ability-card-thesis"><span>Why it won</span>Near-top capability, delivered with lean execution and steady repeatability.</p>
-    <dl class="ability-key">
-      <div><dt>GRD</dt><dd>Grounding</dd></div>
-      <div><dt>ADH</dt><dd>Adherence</dd></div>
-      <div><dt>SYN</dt><dd>Synthesis</dd></div>
-      <div><dt>PRC</dt><dd>Procedure</dd></div>
-      <div><dt>EFF</dt><dd>Efficiency</dd></div>
-      <div><dt>CON</dt><dd>Consistency</dd></div>
-    </dl>
-    <p class="ability-card-note">OVR combines the five scored ability axes; consistency adjusts the result for reliability across trials.</p>
-  </div>
-</div>
+</article>
 </section>
 <hr />
 <h2>Abstract</h2>
