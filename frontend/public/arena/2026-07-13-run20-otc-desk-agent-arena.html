@@ -80,10 +80,35 @@ td:first-child,th:first-child{white-space:nowrap}
   padding:6px; background:#fff; border:1px solid var(--line); box-shadow:0 14px 32px rgba(26,29,33,.12)}
 .download-menu .menu a{display:block; padding:8px 10px; border-radius:4px; white-space:nowrap}
 .download-menu .menu a:hover{background:var(--soft)}
+.ability-card-showcase{margin:1.8em 0 2.2em; padding:1.35em;
+  background:linear-gradient(135deg,#f4f6f9,#e9eef5); border:1px solid var(--line)}
+.ability-card-showcase h2{margin:.1em 0 .25em; border:0; padding:0}
+.ability-card-showcase>p{margin:.3em 0 1.15em; color:var(--muted); font-family:-apple-system,"Inter",sans-serif; font-size:.9rem}
+.ability-card-wrap{display:grid; grid-template-columns:minmax(0,1fr) minmax(238px,.88fr); gap:1.4em; align-items:center}
+.ability-card-copy{font-family:-apple-system,"Inter","Segoe UI",Helvetica,Arial,sans-serif}
+.ability-card-copy p{margin:.45em 0; font-size:.95rem}
+.ability-card-copy strong{color:var(--accent)}
+.ability-card{position:relative; width:min(100%,330px); aspect-ratio:.8; justify-self:center; display:flex; flex-direction:column;
+  align-items:center; padding:2.45em 2.25em 2em; overflow:hidden; color:#fff; text-align:center;
+  clip-path:polygon(50% 0,95% 14%,100% 50%,95% 86%,50% 100%,5% 86%,0 50%,5% 14%);
+  background:linear-gradient(145deg,#163d66 0%,#2f5d8a 53%,#17455d 100%); box-shadow:0 18px 34px rgba(26,48,75,.24);
+  font-family:-apple-system,"Inter","Segoe UI",Helvetica,Arial,sans-serif}
+.ability-card::before{content:""; position:absolute; inset:10px; border:1px solid rgba(255,255,255,.42);
+  clip-path:polygon(50% 0,95% 14%,100% 50%,95% 86%,50% 100%,5% 86%,0 50%,5% 14%)}
+.ability-card>*{position:relative}
+.ability-card .card-kicker{margin:0; color:#f5d875; font-size:.68rem; font-weight:800; letter-spacing:.12em; text-transform:uppercase}
+.ability-card .card-model{margin:.32em 0 0; font-size:1.15rem; font-weight:800; line-height:1.08}
+.ability-card .card-ovr{margin:.12em 0 0; color:#f5d875; font-size:4.4rem; font-weight:900; line-height:.9; font-variant-numeric:tabular-nums}
+.ability-card .card-ovr-label{margin:.18em 0 .9em; font-size:.67rem; font-weight:800; letter-spacing:.12em; text-transform:uppercase}
+.ability-stats{width:100%; display:grid; grid-template-columns:repeat(3,1fr); gap:.55em .3em}
+.ability-stat{display:grid; gap:.08em; font-variant-numeric:tabular-nums}
+.ability-stat strong{font-size:1.05rem; line-height:1.1}
+.ability-stat span{color:rgba(255,255,255,.78); font-size:.62rem; font-weight:800; letter-spacing:.06em}
+@media (max-width:600px){.ability-card-wrap{grid-template-columns:1fr}.ability-card-copy{order:2}.ability-card{width:min(100%,310px)}}
 
 @page{size:A4; margin:16mm 15mm}
 @media print{
-  .report-toolbar{display:none}
+  .report-toolbar,.ability-card-showcase{display:none}
   body{max-width:none; margin:0; padding:0; font-size:10.6pt}
   h2{margin-top:1.4em}
   h2,h3,h4{break-after:avoid}
@@ -111,6 +136,30 @@ by a new </em><em>Model Ability Card</em><em> built to answer one question a ble
 cannot: </em><em>which model should you trust to run the desk unattended, day after day?</em>**</p>
 <p><strong>Date:</strong> 2026-07-13 · <strong>Run:</strong> #20 · <strong>Task:</strong> <code>risk-manager-control-day</code> (v2, 9-step / 39-point)
 · <strong>Trials:</strong> 2 per model · <strong>Gateway:</strong> ZenMux (+ direct DeepSeek) · <strong>Field:</strong> 16 models, cross-tier</p>
+<section class="ability-card-showcase" aria-labelledby="terra-run20-card-title">
+<h2 id="terra-run20-card-title">Model Ability Card</h2>
+<p>Run #20 winner, scored from the published two-trial risk-manager control-day results.</p>
+<div class="ability-card-wrap">
+  <div class="ability-card" aria-label="GPT-5.6 Terra: overall rating 86, grounding 99, adherence 68, synthesis 99, procedure 92, efficiency 76, consistency 92">
+    <p class="card-kicker">Run #20 winner</p>
+    <p class="card-model">GPT-5.6 Terra</p>
+    <p class="card-ovr">86</p>
+    <p class="card-ovr-label">Overall rating</p>
+    <div class="ability-stats">
+      <span class="ability-stat"><strong>99</strong><span>GRD</span></span>
+      <span class="ability-stat"><strong>68</strong><span>ADH</span></span>
+      <span class="ability-stat"><strong>99</strong><span>SYN</span></span>
+      <span class="ability-stat"><strong>92</strong><span>PRC</span></span>
+      <span class="ability-stat"><strong>76</strong><span>EFF</span></span>
+      <span class="ability-stat"><strong>92</strong><span>CON</span></span>
+    </div>
+  </div>
+  <div class="ability-card-copy">
+    <p><strong>GRD</strong> grounding, <strong>ADH</strong> adherence, <strong>SYN</strong> synthesis, and <strong>PRC</strong> procedure form the capability view.</p>
+    <p><strong>EFF</strong> measures lean execution; <strong>CON</strong> records trial-to-trial consistency. OVR combines the five scored ability axes, with consistency applied as a reliability penalty.</p>
+  </div>
+</div>
+</section>
 <hr />
 <h2>Abstract</h2>
 <p>Run #9 measured nine flash-tier models and reported a single blended number per
