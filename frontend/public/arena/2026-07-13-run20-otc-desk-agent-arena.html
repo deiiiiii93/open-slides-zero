@@ -88,23 +88,19 @@ td:first-child,th:first-child{white-space:nowrap}
 .ability-card-copy{font-family:-apple-system,"Inter","Segoe UI",Helvetica,Arial,sans-serif}
 .ability-card-copy p{margin:.45em 0; font-size:.95rem}
 .ability-card-copy strong{color:var(--accent)}
-.ability-card{position:relative; width:min(100%,330px); aspect-ratio:.8; justify-self:center; display:flex; flex-direction:column;
-  align-items:center; padding:2.45em 2.25em 2em; overflow:hidden; color:#fff; text-align:center;
-  clip-path:polygon(50% 0,94% 25%,94% 75%,50% 100%,6% 75%,6% 25%);
-  background:linear-gradient(145deg,#163d66 0%,#2f5d8a 53%,#17455d 100%); box-shadow:0 18px 34px rgba(26,48,75,.24);
+.ability-card{position:relative; width:min(100%,360px); aspect-ratio:1003/1568; justify-self:center; color:#fff; text-align:center;
   font-family:-apple-system,"Inter","Segoe UI",Helvetica,Arial,sans-serif}
-.ability-card::before{content:""; position:absolute; inset:10px; border:1px solid rgba(255,255,255,.42);
-  clip-path:polygon(50% 0,94% 25%,94% 75%,50% 100%,6% 75%,6% 25%)}
-.ability-card>*{position:relative}
-.ability-card .card-kicker{margin:0; color:#f5d875; font-size:.68rem; font-weight:800; letter-spacing:.12em; text-transform:uppercase}
-.ability-card .card-model{margin:.32em 0 0; font-size:1.15rem; font-weight:800; line-height:1.08}
-.ability-card .card-ovr{margin:.12em 0 0; color:#f5d875; font-size:4.4rem; font-weight:900; line-height:.9; font-variant-numeric:tabular-nums}
-.ability-card .card-ovr-label{margin:.18em 0 .9em; font-size:.67rem; font-weight:800; letter-spacing:.12em; text-transform:uppercase}
-.ability-stats{width:100%; display:grid; grid-template-columns:repeat(3,1fr); gap:.55em .3em}
+.ability-card-art{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:0}
+.ability-card .card-kicker,.ability-card .card-model,.ability-card .card-ovr,.ability-card .card-ovr-label,.ability-stats{position:absolute; z-index:1; margin:0; left:0; right:0}
+.ability-card .card-kicker{top:10.5%; color:#f5d875; font-size:.68rem; font-weight:800; letter-spacing:.12em; text-transform:uppercase}
+.ability-card .card-model{top:14%; padding:0 14%; font-size:1.18rem; font-weight:800; line-height:1.08; text-shadow:0 2px 10px rgba(0,0,0,.6)}
+.ability-card .card-ovr{top:31%; color:#f5d875; font-size:4.75rem; font-weight:900; line-height:.9; font-variant-numeric:tabular-nums; text-shadow:0 3px 12px rgba(0,0,0,.56)}
+.ability-card .card-ovr-label{top:41.2%; color:#fff; font-size:.67rem; font-weight:800; letter-spacing:.12em; text-shadow:0 2px 8px rgba(0,0,0,.72); text-transform:uppercase}
+.ability-stats{left:13%; right:13%; bottom:10.2%; display:grid; grid-template-columns:repeat(3,1fr); gap:1.65em .4em}
 .ability-stat{display:grid; gap:.08em; font-variant-numeric:tabular-nums}
-.ability-stat strong{font-size:1.05rem; line-height:1.1}
-.ability-stat span{color:rgba(255,255,255,.78); font-size:.62rem; font-weight:800; letter-spacing:.06em}
-@media (max-width:600px){.ability-card-wrap{grid-template-columns:1fr}.ability-card-copy{order:2}.ability-card{width:min(100%,310px)}}
+.ability-stat strong{font-size:1.08rem; line-height:1.1; text-shadow:0 2px 8px rgba(0,0,0,.68)}
+.ability-stat span{color:#f5d875; font-size:.62rem; font-weight:800; letter-spacing:.06em; text-shadow:0 2px 8px rgba(0,0,0,.72)}
+@media (max-width:600px){.ability-card-wrap{grid-template-columns:1fr}.ability-card-copy{order:2}.ability-card{width:min(100%,340px)}}
 
 @page{size:A4; margin:16mm 15mm}
 @media print{
@@ -141,6 +137,7 @@ cannot: </em><em>which model should you trust to run the desk unattended, day af
 <p>Run #20 winner, scored from the published two-trial risk-manager control-day results.</p>
 <div class="ability-card-wrap">
   <div class="ability-card" aria-label="GPT-5.6 Terra: overall rating 86, grounding 99, adherence 68, synthesis 99, procedure 92, efficiency 76, consistency 92">
+    <img class="ability-card-art" src="./model-ability-card-bg-v1.webp" alt="" />
     <p class="card-kicker">Run #20 winner</p>
     <p class="card-model">GPT-5.6 Terra</p>
     <p class="card-ovr">86</p>
