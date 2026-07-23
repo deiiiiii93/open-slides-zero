@@ -83,23 +83,31 @@ td:first-child,th:first-child{white-space:nowrap}
 .ability-card-showcase{margin:2em 0 2.4em; padding:1.55em 0 1.7em; border-top:1px solid var(--line); border-bottom:1px solid var(--line)}
 .ability-card-showcase>h2{margin:0 0 .25em; border:0; padding:0; font-size:1.2rem}
 .ability-card-showcase>p{max-width:620px; margin:.25em 0 0; color:var(--muted); font-family:-apple-system,"Inter",sans-serif; font-size:.84rem}
-.ability-card{width:min(100%,520px); margin:1.25em auto 0; padding:1.3em 1.45em 1.05em; border:1px solid #d7d4ca; border-radius:4px;
+.ability-card-grid{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.75em; margin-top:1.25em}
+.ability-card{min-width:0; padding:1em .8em .65em; border:1px solid #d7d4ca; border-top-width:3px; border-radius:4px;
   background:#fff; font-family:-apple-system,"Inter","Segoe UI",Helvetica,Arial,sans-serif}
-.ability-card-header h3{margin:0; color:var(--ink); font-size:1.25rem}
-.ability-card-task{margin:.22em 0 .75em; color:#444b53; font-size:.95rem}
-.ability-card-state{display:block; padding:.28em .75em; border:1px solid #d7d1c2; border-radius:999px; background:#f7f4ec;
-  color:#45413a; font-size:.72rem; font-weight:750; line-height:1.15; text-transform:uppercase}
-.ability-card-body{display:grid; grid-template-columns:84px minmax(0,1fr); gap:.7em; align-items:center; margin-top:.65em}
+.ability-card.rank-1{border-top-color:var(--gold)}
+.ability-card.rank-2{border-top-color:var(--silver)}
+.ability-card.rank-3{border-top-color:var(--bronze)}
+.ability-card-header h3{min-height:2.4em; margin:0; color:var(--ink); font-size:1rem; line-height:1.2}
+.ability-card-state{display:block; margin-top:.45em; padding:.25em .62em; border:1px solid #d7d1c2; border-radius:999px; background:#f7f4ec;
+  color:#45413a; font-size:.65rem; font-weight:750; line-height:1.1; text-transform:uppercase}
+.ability-card-body{margin-top:.5em}
 .ability-overall{text-align:center; font-variant-numeric:tabular-nums}
 .ability-overall strong{display:block; color:#111315; font-family:"Avenir Next Condensed","Arial Narrow","Roboto Condensed",sans-serif;
-  font-size:3.75rem; font-stretch:condensed; font-weight:800; line-height:.72}
-.ability-overall span{display:block; margin-top:.5em; color:#3f454d; font-family:"Avenir Next Condensed","Arial Narrow","Roboto Condensed",sans-serif;
-  font-size:.86rem; font-stretch:condensed; font-weight:800}
-.ability-radar{display:block; width:100%; height:auto; overflow:visible}
+  font-size:3.5rem; font-stretch:condensed; font-weight:800; line-height:.72}
+.ability-overall span{display:block; margin-top:.42em; color:#3f454d; font-family:"Avenir Next Condensed","Arial Narrow","Roboto Condensed",sans-serif;
+  font-size:.8rem; font-stretch:condensed; font-weight:800}
+.ability-radar{display:block; width:100%; height:auto; margin-top:-.25em; overflow:visible}
+.radar-defs{position:absolute; width:0; height:0; overflow:hidden}
 .radar-grid polygon{fill:none; stroke:#cbc7ba; stroke-width:1.2}
 .radar-axis{stroke:#cbc7ba; stroke-width:1}
 .radar-score{fill:rgba(47,93,138,.14); stroke:var(--accent); stroke-width:2.5; stroke-linejoin:round}
-.radar-label{fill:#3f3a34; font-size:13px; font-weight:750; text-anchor:middle}
+.radar-label{fill:#3f3a34; font-size:16px; font-weight:750; text-anchor:middle}
+@media (max-width:760px){
+  .ability-card-grid{grid-template-columns:1fr; max-width:360px; margin-right:auto; margin-left:auto}
+  .ability-card-header h3{min-height:0}
+}
 @media (max-width:600px){
   body{padding:30px 20px 56px; font-size:15.5px}
   h1{font-size:1.72rem}
@@ -108,10 +116,9 @@ td:first-child,th:first-child{white-space:nowrap}
   .chart .row{gap:7px}
   .chart .lbl{flex-basis:96px; font-size:.72rem}
   .chart .val{flex-basis:92px; font-size:.68rem}
-  .ability-card{padding:1.1em 1em .8em}
-  .ability-card-body{grid-template-columns:68px minmax(0,1fr); gap:.25em}
-  .ability-overall strong{font-size:3.15rem}
-  .radar-label{font-size:12px}
+  .ability-card{padding:1em .9em .65em}
+  .ability-overall strong{font-size:3.35rem}
+  .radar-label{font-size:15px}
 }
 
 @page{size:A4; margin:16mm 15mm}
@@ -144,44 +151,74 @@ by a new </em><em>Model Ability Card</em><em> built to answer one question a ble
 cannot: </em><em>which model should you trust to run the desk unattended, day after day?</em>**</p>
 <p><strong>Date:</strong> 2026-07-13 · <strong>Run:</strong> #20 · <strong>Task:</strong> <code>risk-manager-control-day</code> (v2, 9-step / 39-point)
 · <strong>Trials:</strong> 2 per model · <strong>Gateway:</strong> ZenMux (+ direct DeepSeek) · <strong>Field:</strong> 16 models, cross-tier</p>
-<section class="ability-card-showcase" aria-labelledby="terra-run20-card-title">
-<h2 id="terra-run20-card-title">Model Ability Card</h2>
-<p>Run #20 winner, scored from the published two-trial risk-manager control-day results.</p>
-<article class="ability-card" aria-label="GPT-5.6 Terra: overall rating 86, grounding 99, adherence 68, synthesis 99, procedure 92, efficiency 76, consistency 92">
-  <header class="ability-card-header">
-    <h3>GPT-5.6 Terra</h3>
-    <p class="ability-card-task">risk-manager-control-day</p>
-    <span class="ability-card-state">Scored · Run #20 winner</span>
-  </header>
-  <div class="ability-card-body">
-    <div class="ability-overall"><strong>86</strong><span>OVR</span></div>
-    <svg class="ability-radar" viewBox="0 0 340 260" role="img" aria-label="Six-axis score hexagon">
+<section class="ability-card-showcase" aria-labelledby="top3-run20-card-title">
+<h2 id="top3-run20-card-title">Top 3 Model Ability Cards</h2>
+<p>Run #20 leaders, scored from the published two-trial risk-manager control-day results.</p>
+<svg class="radar-defs" aria-hidden="true">
+  <defs>
+    <g id="run20-radar-frame">
       <g class="radar-grid">
-        <polygon points="205,111 221.45,120.5 221.45,139.5 205,149 188.55,139.5 188.55,120.5" />
-        <polygon points="205,92 237.9,111 237.9,149 205,168 172.1,149 172.1,111" />
-        <polygon points="205,73 254.35,101.5 254.35,158.5 205,187 155.65,158.5 155.65,101.5" />
-        <polygon points="205,54 270.82,92 270.82,168 205,206 139.18,168 139.18,92" />
+        <polygon points="170,111 186.45,120.5 186.45,139.5 170,149 153.55,139.5 153.55,120.5" />
+        <polygon points="170,92 202.9,111 202.9,149 170,168 137.1,149 137.1,111" />
+        <polygon points="170,73 219.35,101.5 219.35,158.5 170,187 120.65,158.5 120.65,101.5" />
+        <polygon points="170,54 235.82,92 235.82,168 170,206 104.18,168 104.18,92" />
       </g>
-      <g>
-        <line class="radar-axis" x1="205" y1="130" x2="205" y2="54" />
-        <line class="radar-axis" x1="205" y1="130" x2="270.82" y2="92" />
-        <line class="radar-axis" x1="205" y1="130" x2="270.82" y2="168" />
-        <line class="radar-axis" x1="205" y1="130" x2="205" y2="206" />
-        <line class="radar-axis" x1="205" y1="130" x2="139.18" y2="168" />
-        <line class="radar-axis" x1="205" y1="130" x2="139.18" y2="92" />
-      </g>
-      <polygon class="radar-score" points="205,54.76 249.76,104.16 270.16,167.62 205,187.76 144.45,164.96 144.45,95.04" />
-      <g>
-        <text class="radar-label" x="205" y="35">GRD</text>
-        <text class="radar-label" x="294" y="85">ADH</text>
-        <text class="radar-label" x="294" y="183">SYN</text>
-        <text class="radar-label" x="205" y="232">EFF</text>
-        <text class="radar-label" x="115" y="183">PRC</text>
-        <text class="radar-label" x="115" y="85">CON</text>
-      </g>
-    </svg>
-  </div>
-</article>
+      <line class="radar-axis" x1="170" y1="130" x2="170" y2="54" />
+      <line class="radar-axis" x1="170" y1="130" x2="235.82" y2="92" />
+      <line class="radar-axis" x1="170" y1="130" x2="235.82" y2="168" />
+      <line class="radar-axis" x1="170" y1="130" x2="170" y2="206" />
+      <line class="radar-axis" x1="170" y1="130" x2="104.18" y2="168" />
+      <line class="radar-axis" x1="170" y1="130" x2="104.18" y2="92" />
+      <text class="radar-label" x="170" y="35">GRD</text>
+      <text class="radar-label" x="259" y="85">ADH</text>
+      <text class="radar-label" x="259" y="183">SYN</text>
+      <text class="radar-label" x="170" y="232">EFF</text>
+      <text class="radar-label" x="80" y="183">PRC</text>
+      <text class="radar-label" x="80" y="85">CON</text>
+    </g>
+  </defs>
+</svg>
+<div class="ability-card-grid">
+  <article class="ability-card rank-1" aria-label="Rank 1, GPT-5.6 Terra: overall rating 86, grounding 99, adherence 68, synthesis 99, procedure 92, efficiency 76, consistency 92">
+    <header class="ability-card-header">
+      <h3>GPT-5.6 Terra</h3>
+      <span class="ability-card-state">#1 · Scored</span>
+    </header>
+    <div class="ability-card-body">
+      <div class="ability-overall"><strong>86</strong><span>OVR</span></div>
+      <svg class="ability-radar" viewBox="0 0 340 250" role="img" aria-label="Terra six-axis score hexagon">
+        <use href="#run20-radar-frame"></use>
+        <polygon class="radar-score" points="170,54.76 214.76,104.16 235.16,167.62 170,187.76 109.45,164.96 109.45,95.04" />
+      </svg>
+    </div>
+  </article>
+  <article class="ability-card rank-2" aria-label="Rank 2, GLM 5.2: overall rating 85, grounding 99, adherence 74, synthesis 99, procedure 92, efficiency 60, consistency 96">
+    <header class="ability-card-header">
+      <h3>GLM 5.2</h3>
+      <span class="ability-card-state">#2 · Scored</span>
+    </header>
+    <div class="ability-card-body">
+      <div class="ability-overall"><strong>85</strong><span>OVR</span></div>
+      <svg class="ability-radar" viewBox="0 0 340 250" role="img" aria-label="GLM 5.2 six-axis score hexagon">
+        <use href="#run20-radar-frame"></use>
+        <polygon class="radar-score" points="170,54.76 218.71,101.88 235.16,167.62 170,175.6 109.45,164.96 106.81,93.52" />
+      </svg>
+    </div>
+  </article>
+  <article class="ability-card rank-3" aria-label="Tied rank 3, DeepSeek V4 Pro: overall rating 84, grounding 99, adherence 68, synthesis 86, procedure 86, efficiency 82, consistency 96">
+    <header class="ability-card-header">
+      <h3>DeepSeek V4 Pro</h3>
+      <span class="ability-card-state">T-3 · Scored</span>
+    </header>
+    <div class="ability-card-body">
+      <div class="ability-overall"><strong>84</strong><span>OVR</span></div>
+      <svg class="ability-radar" viewBox="0 0 340 250" role="img" aria-label="DeepSeek V4 Pro six-axis score hexagon">
+        <use href="#run20-radar-frame"></use>
+        <polygon class="radar-score" points="170,54.76 214.76,104.16 226.6,162.68 170,192.32 113.4,162.68 106.81,93.52" />
+      </svg>
+    </div>
+  </article>
+</div>
 </section>
 <hr />
 <h2>Abstract</h2>
